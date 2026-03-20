@@ -470,6 +470,7 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
                 img_name = getattr(layer, img_attr, "")
                 img = bpy.data.images.get(img_name) if img_name else None
                 if img:
+                    print(f"[TLM] FILL {channel_id}: using image '{img.name}' for layer '{layer.name}'")
                     tex = _new_img_tex(node_tree, img, uv_map, x, y, "Non-Color")
                     sep = node_tree.nodes.new("ShaderNodeSeparateColor")
                     sep.name = f"{TLM_PREFIX}sep_scalar_{id(sep)}"
@@ -478,6 +479,7 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
                     layer_out = sep.outputs["Red"]
                 else:
                     fill_val = layer.roughness_fill if channel_id == 'roughness' else layer.metallic_fill
+                    print(f"[TLM] FILL {channel_id}: no image, using fill value {fill_val} for layer '{layer.name}'")
                     vn = _new_value(node_tree, fill_val, x, y)
                     layer_out = vn.outputs["Value"]
             elif is_emission:
@@ -840,6 +842,17 @@ def _composite_layer_list(node_tree, layers, uv_map, start_x, y_base, x_step):
 
 # ── Main rebuild ──────────────────────────────────────────────────────────────
 
+def _link_to_bsdf(node_tree, output_socket, bsdf, input_names, channel_label):
+    """Try to link output_socket to one of the BSDF input_names. Logs on failure."""
+    for name in input_names:
+        if name in bsdf.inputs:
+            node_tree.links.new(output_socket, bsdf.inputs[name])
+            print(f"[TLM] Connected {channel_label} → BSDF.{name}")
+            return
+    print(f"[TLM] ERROR: could not connect {channel_label} — "
+          f"tried {input_names}, BSDF inputs: {[i.name for i in bsdf.inputs]}")
+
+
 def rebuild_node_tree(material):
     # Cancel any pending deferred rebuild — this explicit call supersedes it.
     from . import properties
@@ -852,7 +865,7 @@ def rebuild_node_tree(material):
         material.use_nodes = True
         node_tree = material.node_tree
 
-    # Protect all paint images BEFORE clearing nodes — prevents Blender GC
+    # Protect all referenced images BEFORE clearing nodes — prevents Blender GC
     # from collecting images that become temporarily unreferenced during rebuild
     import bpy as _bpy
     for layer in tlm.layers:
@@ -860,6 +873,14 @@ def rebuild_node_tree(material):
             img = _bpy.data.images.get(layer.image_name)
             if img:
                 img.use_fake_user = True
+        # Also protect PBR channel images (roughness, metallic, normal, emission)
+        for attr in ('roughness_image_name', 'metallic_image_name',
+                     'normal_image_name', 'emission_image_name'):
+            iname = getattr(layer, attr, "")
+            if iname:
+                pimg = _bpy.data.images.get(iname)
+                if pimg:
+                    pimg.use_fake_user = True
 
     _clear_tlm_nodes(node_tree)
 
@@ -910,12 +931,10 @@ def rebuild_node_tree(material):
             passthrough.use_clamp = True
             passthrough.location = (200, -50)
             node_tree.links.new(r_out, passthrough.inputs[0])
-            for name in ["Roughness", "Specular Roughness"]:
-                try:
-                    node_tree.links.new(passthrough.outputs["Value"], bsdf.inputs[name])
-                    break
-                except Exception:
-                    continue
+            _link_to_bsdf(node_tree, passthrough.outputs["Value"], bsdf,
+                          ["Roughness", "Specular Roughness"], "roughness")
+        else:
+            print("[TLM] WARNING: roughness channel enabled but _build_channel returned None")
 
     # ── Metallic ──────────────────────────────────────────────────────────────
     if _channel_used(expanded, 'use_metallic'):
@@ -928,34 +947,25 @@ def rebuild_node_tree(material):
             passthrough.use_clamp = True
             passthrough.location = (200, -150)
             node_tree.links.new(m_out, passthrough.inputs[0])
-            for name in ["Metallic", "Metalness"]:
-                try:
-                    node_tree.links.new(passthrough.outputs["Value"], bsdf.inputs[name])
-                    break
-                except Exception:
-                    continue
+            _link_to_bsdf(node_tree, passthrough.outputs["Value"], bsdf,
+                          ["Metallic", "Metalness"], "metallic")
+        else:
+            print("[TLM] WARNING: metallic channel enabled but _build_channel returned None")
 
     # ── Normal ────────────────────────────────────────────────────────────────
     if _channel_used(expanded, 'use_normal'):
         n_out = _build_channel(node_tree, expanded, 'normal', uv_map, start_x, -450, x_step)
         if n_out:
-            for name in ["Normal", "normal"]:
-                try:
-                    node_tree.links.new(n_out, bsdf.inputs[name])
-                    break
-                except Exception:
-                    continue
+            _link_to_bsdf(node_tree, n_out, bsdf, ["Normal", "normal"], "normal")
+        else:
+            print("[TLM] WARNING: normal channel enabled but _build_channel returned None")
 
     # ── Emission ──────────────────────────────────────────────────────────────
     if _channel_used(expanded, 'use_emission'):
         e_out = _build_channel(node_tree, expanded, 'emission', uv_map, start_x, -650, x_step)
         if e_out:
-            for name in ["Emission Color", "Emission", "emission"]:
-                try:
-                    node_tree.links.new(e_out, bsdf.inputs[name])
-                    break
-                except Exception:
-                    continue
+            _link_to_bsdf(node_tree, e_out, bsdf,
+                          ["Emission Color", "Emission", "emission"], "emission")
             # Emission Strength: use a Value node for reliable Blender 5.0 connection
             strengths = [l.emission_strength for l in expanded if l.use_emission]
             if strengths:
@@ -963,24 +973,16 @@ def rebuild_node_tree(material):
                 val.name = f"{TLM_PREFIX}emission_strength"
                 val.outputs[0].default_value = strengths[-1]
                 val.location = (200, -350)
-                for name in ["Emission Strength", "emission_strength"]:
-                    try:
-                        node_tree.links.new(val.outputs[0], bsdf.inputs[name])
-                        break
-                    except Exception:
-                        continue
+                _link_to_bsdf(node_tree, val.outputs[0], bsdf,
+                              ["Emission Strength", "emission_strength"], "emission_strength")
+        else:
+            print("[TLM] WARNING: emission channel enabled but _build_channel returned None")
 
     # ── Bump ──────────────────────────────────────────────────────────────────
     if _channel_used(expanded, 'use_bump'):
         bump_out = _build_bump_channel(node_tree, expanded, uv_map, start_x, -850, x_step)
         if bump_out:
-            # Bump overrides Normal — connect to Normal input
-            for name in ["Normal", "normal"]:
-                try:
-                    node_tree.links.new(bump_out, bsdf.inputs[name])
-                    break
-                except Exception:
-                    continue
+            _link_to_bsdf(node_tree, bump_out, bsdf, ["Normal", "normal"], "bump")
 
 
 def _build_base_color(node_tree, root_layers, group_children, uv_map, start_x, y_base, x_step):

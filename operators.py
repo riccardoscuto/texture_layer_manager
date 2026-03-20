@@ -1031,6 +1031,12 @@ class TLM_OT_AddChannelImage(Operator):
 
         if tlm.auto_composite:
             compositing.rebuild_node_tree(mat)
+            # Force shader editor redraw — operator context doesn't always
+            # propagate to NODE_EDITOR areas after a full node tree rebuild.
+            for window in context.window_manager.windows:
+                for area in window.screen.areas:
+                    if area.type == 'NODE_EDITOR':
+                        area.tag_redraw()
 
         self.report({'INFO'}, f"Added {label} channel to '{layer.name}'")
         return {'FINISHED'}
@@ -1059,6 +1065,10 @@ class TLM_OT_RemoveChannelImage(Operator):
         setattr(layer, flag_attr, False)
         if mat.tlm.auto_composite:
             compositing.rebuild_node_tree(mat)
+            for window in context.window_manager.windows:
+                for area in window.screen.areas:
+                    if area.type == 'NODE_EDITOR':
+                        area.tag_redraw()
         self.report({'INFO'}, f"Disabled {label} channel on '{layer.name}'")
         return {'FINISHED'}
 
