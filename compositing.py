@@ -377,8 +377,7 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
 
     current = None
     prev_alpha = None
-    y = y_base - {'base_color': 0, 'roughness': -350, 'metallic': -500,
-                  'normal': -650, 'emission': -800}.get(channel_id, 0)
+    y = y_base
 
     for i, layer in enumerate(layers):
         x = x0 + i * x_step
@@ -842,6 +841,10 @@ def _composite_layer_list(node_tree, layers, uv_map, start_x, y_base, x_step):
 # ── Main rebuild ──────────────────────────────────────────────────────────────
 
 def rebuild_node_tree(material):
+    # Cancel any pending deferred rebuild — this explicit call supersedes it.
+    from . import properties
+    properties.cancel_pending_rebuild()
+
     tlm = material.tlm
     node_tree = material.node_tree
 
