@@ -23,6 +23,9 @@ _rebuild_pending = False
 def _do_deferred_rebuild():
     """Timer callback — runs once after the debounce interval."""
     global _rebuild_pending
+    if not _rebuild_pending:
+        # An operator already performed the rebuild — skip redundant work.
+        return None
     _rebuild_pending = False
     try:
         ctx = bpy.context
@@ -31,9 +34,28 @@ def _do_deferred_rebuild():
             mat = obj.active_material
             if mat.tlm.auto_composite:
                 compositing.rebuild_node_tree(mat)
+                # Force shader editor redraw — timer callbacks don't
+                # automatically trigger UI updates like operators do.
+                for window in ctx.window_manager.windows:
+                    for area in window.screen.areas:
+                        if area.type == 'NODE_EDITOR':
+                            area.tag_redraw()
     except Exception:
-        pass
+        import traceback
+        traceback.print_exc()
     return None  # returning None unregisters the timer
+
+
+def cancel_pending_rebuild():
+    """Cancel any pending deferred rebuild.
+
+    Call this from operators that invoke compositing.rebuild_node_tree()
+    directly, so the deferred timer doesn't fire a redundant second rebuild
+    that clears and recreates all nodes (which can fail to trigger a UI
+    redraw in the shader editor).
+    """
+    global _rebuild_pending
+    _rebuild_pending = False
 
 
 def _on_layer_update(self, context):
