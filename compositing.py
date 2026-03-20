@@ -483,10 +483,30 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
                     vn = _new_value(node_tree, fill_val, x, y)
                     layer_out = vn.outputs["Value"]
             elif is_emission:
-                fn = _new_fill(node_tree, layer.emission_color, x, y)
-                layer_out = fn.outputs["Color"]
+                # Prefer an assigned image over the emission_color fill
+                img_name = getattr(layer, img_attr, "")
+                img = bpy.data.images.get(img_name) if img_name else None
+                if img:
+                    print(f"[TLM] FILL emission: using image '{img.name}' for layer '{layer.name}'")
+                    tex = _new_img_tex(node_tree, img, uv_map, x, y, "sRGB")
+                    layer_out = tex.outputs["Color"]
+                else:
+                    print(f"[TLM] FILL emission: no image, using emission_color for layer '{layer.name}'")
+                    fn = _new_fill(node_tree, layer.emission_color, x, y)
+                    layer_out = fn.outputs["Color"]
+            elif is_normal:
+                # Normal map image on a Fill layer
+                img_name = getattr(layer, img_attr, "")
+                img = bpy.data.images.get(img_name) if img_name else None
+                if img:
+                    print(f"[TLM] FILL normal: using image '{img.name}' for layer '{layer.name}'")
+                    tex = _new_img_tex(node_tree, img, uv_map, x, y, "Non-Color")
+                    layer_out = tex.outputs["Color"]
+                else:
+                    print(f"[TLM] FILL normal: no image assigned, skipping layer '{layer.name}'")
+                    continue
             else:
-                continue  # normal channel fill not supported
+                continue
 
         elif layer.layer_type == "PROCEDURAL":
             if channel_id == 'base_color':
