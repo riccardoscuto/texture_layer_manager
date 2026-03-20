@@ -1,0 +1,558 @@
+"""
+panels.py — UI for Texture Layer Manager.
+Properties panel: Properties > Material > Texture Layers
+N-panel:          3D Viewport > N-panel > TLM tab
+
+UI v2 changes:
+- Toolbar split into two rows (Add / Operations)
+- Auto Composite toggle always visible above the list
+- PBR channel badges shown inline in the layer list
+- Active layer box: type badge + editable name in header
+- Compact PBR channel grid with toggle buttons
+- Settings panel reorganised into clear sub-sections
+- Main panel open by default (removed DEFAULT_CLOSED)
+- N-panel viewport open by default too
+"""
+
+import bpy
+from bpy.types import Panel, UIList
+from . import previews
+
+_PBR_BADGE = {
+    'use_roughness': 'RNDCURVE',
+    'use_metallic':  'MATFLUID',
+    'use_normal':    'NORMALS_FACE',
+    'use_emission':  'LIGHT',
+    'use_bump':      'MOD_DISPLACE',
+}
+
+
+class TLM_UL_LayerList(UIList):
+    bl_idname = "TLM_UL_layer_list"
+
+    def draw_item(self, context, layout, data, item, icon,
+                  active_data, active_propname, index):
+        layer = item
+        if self.layout_type not in {'DEFAULT', 'COMPACT'}:
+            layout.label(text="", icon='IMAGE_DATA')
+            return
+
+        row = layout.row(align=True)
+
+        is_child = layer.group_name != ""
+        if is_child:
+            row.separator(factor=2.5)
+
+        if layer.layer_type == "GROUP":
+            col_icon = 'TRIA_DOWN' if not layer.collapsed else 'TRIA_RIGHT'
+            op = row.operator("tlm.toggle_group_collapse", text="", icon=col_icon, emboss=False)
+            op.layer_index = index
+            row.label(text="", icon='FILE_FOLDER')
+        else:
+            _USE_PREVIEWS = bpy.app.version < (5, 0, 0)
+            fallback = {
+                'PAINT': 'IMAGE_RGB_ALPHA', 'FILL': 'COLOR',
+                'ADJUSTMENT': 'MODIFIER', 'PROCEDURAL': 'TEXTURE',
+            }.get(layer.layer_type, 'IMAGE_DATA')
+            if _USE_PREVIEWS:
+                if layer.layer_type == "PAINT":
+                    iid = previews.get_layer_icon_id(layer)
+                elif layer.layer_type == "FILL":
+                    iid = previews.get_fill_icon_id(layer)
+                else:
+                    iid = 0
+                if iid and 0 < iid <= 0x7FFFFFFF:
+                    row.label(text="", icon_value=iid)
+                else:
+                    row.label(text="", icon=fallback)
+            else:
+                row.label(text="", icon=fallback)
+
+        vis_icon = 'HIDE_OFF' if layer.visible else 'HIDE_ON'
+        op = row.operator("tlm.toggle_layer_visibility", text="", icon=vis_icon, emboss=False)
+        op.layer_index = index
+
+        if layer.layer_type != "GROUP":
+            lock_icon = 'LOCKED' if layer.locked else 'UNLOCKED'
+            row.prop(layer, "locked", text="", icon=lock_icon, emboss=False)
+
+        row.prop(layer, "name", text="", emboss=False)
+
+        if layer.layer_type not in ("GROUP", "ADJUSTMENT"):
+            badge_row = row.row(align=True)
+            badge_row.scale_x = 0.7
+            for flag, badge_icon in _PBR_BADGE.items():
+                if getattr(layer, flag, False):
+                    badge_row.label(text="", icon=badge_icon)
+
+        if layer.layer_type not in ("GROUP", "ADJUSTMENT"):
+            op = row.operator("tlm.set_active_paint_layer", text="", icon='BRUSH_DATA', emboss=False)
+            op.layer_index = index
+            clip_icon = 'CLIPUV_HLT' if layer.use_clipping_mask else 'CLIPUV_DEHLT'
+            row.prop(layer, "use_clipping_mask", text="", icon=clip_icon, emboss=False)
+            row.prop(layer, "blend_mode", text="")
+            row.prop(layer, "opacity", text="", slider=True)
+        elif layer.layer_type == "GROUP":
+            row.prop(layer, "opacity", text="", slider=True)
+
+    def filter_items(self, context, data, propname):
+        layers = getattr(data, propname)
+        flags = [self.bitflag_filter_item] * len(layers)
+        order = list(range(len(layers)))
+        collapsed = {l.name for l in layers if l.layer_type == "GROUP" and l.collapsed}
+        for i, layer in enumerate(layers):
+            if layer.group_name in collapsed:
+                flags[i] = 0
+        return flags, order
+
+
+def draw_tlm_main(layout, context):
+    obj = context.active_object
+    if not obj or not obj.active_material:
+        layout.label(text="No active material", icon='ERROR')
+        return
+
+    mat = obj.active_material
+    tlm = mat.tlm
+    n = len(tlm.layers)
+
+    header = layout.row(align=True)
+    header.label(text=mat.name, icon='MATERIAL')
+    badge = header.row(align=True)
+    badge.alignment = 'RIGHT'
+    badge.label(text=f"{n} layer{'s' if n != 1 else ''}")
+    ac_icon = 'LINKED' if tlm.auto_composite else 'UNLINKED'
+    badge.prop(tlm, "auto_composite", text="", icon=ac_icon, toggle=True, emboss=True)
+
+    layout.separator(factor=0.5)
+
+    add_row = layout.row(align=True)
+    add_row.scale_y = 1.1
+    add_row.operator("tlm.add_paint_layer",       text="Paint", icon='IMAGE_RGB_ALPHA')
+    add_row.operator("tlm.add_fill_layer",         text="Fill",  icon='COLOR')
+    add_row.operator("tlm.add_adjustment_layer",   text="Adj",   icon='MODIFIER')
+    add_row.operator("tlm.add_procedural_layer",   text="Proc",  icon='TEXTURE')
+    add_row.operator("tlm.add_group",              text="",      icon='FILE_FOLDER')
+    add_row.separator()
+    add_row.operator("tlm.import_texture_as_layer", text="", icon='IMPORT')
+    add_row.operator("tlm.layer_from_clipboard",    text="", icon='COPYDOWN')
+
+    ops_row = layout.row(align=True)
+    ops_row.operator("tlm.remove_layer",    text="", icon='TRASH')
+    ops_row.separator()
+    ops_row.operator("tlm.move_layer",      text="", icon='TRIA_UP').direction   = "UP"
+    ops_row.operator("tlm.move_layer",      text="", icon='TRIA_DOWN').direction = "DOWN"
+    ops_row.separator()
+    ops_row.operator("tlm.duplicate_layer", text="", icon='DUPLICATE')
+    ops_row.separator()
+    sym = ops_row.row(align=True)
+    sym.scale_x = 0.85
+    sym.operator("tlm.toggle_symmetry_paint", text="X", icon='MOD_MIRROR').axis = 'X'
+    sym.operator("tlm.toggle_symmetry_paint", text="Y", icon='MOD_MIRROR').axis = 'Y'
+
+    layout.template_list(
+        "TLM_UL_layer_list", "",
+        mat.tlm, "layers",
+        mat.tlm, "active_layer_index",
+        rows=6,
+    )
+
+    active = tlm.active_layer
+    if not active:
+        return
+    _draw_active_layer(layout, active, tlm, mat)
+
+
+def _draw_active_layer(layout, active, tlm, mat):
+    ltype_icon = {
+        'PAINT': 'IMAGE_RGB_ALPHA', 'FILL': 'COLOR',
+        'ADJUSTMENT': 'MODIFIER', 'GROUP': 'FILE_FOLDER',
+        'PROCEDURAL': 'TEXTURE',
+    }.get(active.layer_type, 'IMAGE_DATA')
+
+    ltype_label = {
+        'PAINT': "Paint Layer", 'FILL': "Fill Layer",
+        'ADJUSTMENT': "Adjustment Layer", 'GROUP': "Group",
+        'PROCEDURAL': "Procedural Layer",
+    }.get(active.layer_type, "Layer")
+
+    box = layout.box()
+    hrow = box.row(align=True)
+    hrow.label(text=ltype_label, icon=ltype_icon)
+    hrow.prop(active, "name", text="", emboss=True)
+
+    col = box.column(align=True)
+
+    if active.layer_type == "PROCEDURAL":
+        _draw_procedural(col, active, tlm)
+    elif active.layer_type == "GROUP":
+        col.prop(active, "opacity", slider=True)
+        children = [l for l in tlm.layers if l.group_name == active.name]
+        n_vis = sum(1 for l in children if l.visible)
+        col.label(
+            text=f"{len(children)} layer{'s' if len(children) != 1 else ''}  ({n_vis} visible)",
+            icon='LAYER_ACTIVE'
+        )
+    elif active.layer_type == "ADJUSTMENT":
+        _draw_adjustment(col, active, tlm)
+    else:
+        _draw_paint_fill(col, active, tlm)
+
+
+def _draw_procedural(col, active, tlm):
+    col.prop(active, "proc_type")
+    col.separator(factor=0.5)
+    col.prop(active, "proc_scale", slider=False)
+    cr = col.row(align=True)
+    cr.prop(active, "proc_color1", text="")
+    cr.prop(active, "proc_color2", text="")
+    col.separator(factor=0.5)
+
+    pt = active.proc_type
+    if pt == 'NOISE':
+        col.prop(active, "proc_detail",         slider=True)
+        col.prop(active, "proc_roughness_proc", slider=True, text="Roughness")
+        col.prop(active, "proc_distortion",     slider=True)
+    elif pt == 'VORONOI':
+        col.prop(active, "proc_voronoi_feature")
+        col.prop(active, "proc_voronoi_distance")
+        col.prop(active, "proc_randomness", slider=True)
+    elif pt == 'WAVE':
+        wr = col.row(align=True)
+        wr.prop(active, "proc_wave_type",    text="")
+        wr.prop(active, "proc_wave_profile", text="")
+        col.prop(active, "proc_detail",            slider=True)
+        col.prop(active, "proc_wave_detail_scale", slider=True, text="Detail Scale")
+        col.prop(active, "proc_distortion",        slider=True)
+    elif pt == 'GRADIENT':
+        col.prop(active, "proc_gradient_type")
+    elif pt == 'MUSGRAVE':
+        col.prop(active, "proc_detail",         slider=True)
+        col.prop(active, "proc_roughness_proc", slider=True, text="Roughness")
+        col.prop(active, "proc_lacunarity",     slider=True)
+    elif pt == 'CHECKER':
+        col.prop(active, "proc_checker_scale")
+
+    col.separator(factor=0.5)
+    off_row = col.row(align=True)
+    off_row.label(text="Offset:", icon='OBJECT_ORIGIN')
+    off_row.prop(active, "proc_offset_x", text="X")
+    off_row.prop(active, "proc_offset_y", text="Y")
+    off_row.prop(active, "proc_offset_z", text="Z")
+
+    col.separator(factor=0.8)
+    br = col.row(align=True)
+    br.prop(active, "blend_mode", text="")
+    br.prop(active, "opacity",    text="Opacity", slider=True)
+    col.prop(active, "use_clipping_mask", text="Clipping Mask", icon='CLIPUV_DEHLT')
+
+    col.separator(factor=0.8)
+    col.label(text="PBR Channels:", icon='NODE_MATERIAL')
+    pbox = col.box()
+    pbox.scale_y = 0.9
+    rr = pbox.row(align=True)
+    rr.prop(active, "use_roughness", text="Roughness", icon='RNDCURVE')
+    if active.use_roughness:
+        rr.prop(active, "roughness_fill", text="", slider=True)
+    mr = pbox.row(align=True)
+    mr.prop(active, "use_metallic", text="Metallic", icon='MATFLUID')
+    if active.use_metallic:
+        mr.prop(active, "metallic_fill", text="", slider=True)
+    bumpr = pbox.row(align=True)
+    bumpr.prop(active, "use_bump", text="Bump", icon='MOD_DISPLACE')
+    if active.use_bump:
+        bs = pbox.column(align=True)
+        bs.scale_y = 0.85
+        bs.prop(active, "bump_strength", text="Strength", slider=True)
+        bs.prop(active, "bump_distance", text="Distance", slider=True)
+
+    col.separator(factor=0.5)
+    _draw_group_assignment(col, active, tlm)
+
+
+def _draw_adjustment(col, active, tlm):
+    col.prop(active, "adj_type")
+    col.separator(factor=0.5)
+    if active.adj_type == 'HUE_SAT':
+        col.prop(active, "adj_hue",        slider=True)
+        col.prop(active, "adj_saturation", slider=True)
+        col.prop(active, "adj_value",      slider=True)
+    elif active.adj_type == 'BRIGHT_CONTRAST':
+        col.prop(active, "adj_brightness", slider=True)
+        col.prop(active, "adj_contrast",   slider=True)
+    elif active.adj_type == 'LEVELS':
+        col.label(text="Input:", icon='ARROW_LEFTRIGHT')
+        ir = col.row(align=True)
+        ir.prop(active, "adj_in_min", text="Black", slider=True)
+        ir.prop(active, "adj_in_max", text="White", slider=True)
+        col.prop(active, "adj_levels_gamma", text="Gamma", slider=True)
+        col.separator(factor=0.4)
+        col.label(text="Output:", icon='ARROW_LEFTRIGHT')
+        or_ = col.row(align=True)
+        or_.prop(active, "adj_out_min", text="Black", slider=True)
+        or_.prop(active, "adj_out_max", text="White", slider=True)
+    elif active.adj_type == 'COLOR_BALANCE':
+        g = col.column(align=True)
+        g.scale_y = 0.85
+        g.label(text="Lift (Shadows):")
+        g.prop(active, "adj_lift",  text="")
+        g.label(text="Gamma (Midtones):")
+        g.prop(active, "adj_gamma", text="")
+        g.label(text="Gain (Highlights):")
+        g.prop(active, "adj_gain",  text="")
+    col.separator(factor=0.5)
+    _draw_group_assignment(col, active, tlm)
+
+
+def _draw_paint_fill(col, active, tlm):
+    br = col.row(align=True)
+    br.prop(active, "blend_mode", text="")
+    br.prop(active, "opacity",    text="", slider=True)
+
+    if active.layer_type == "FILL":
+        col.separator(factor=0.5)
+        col.prop(active, "fill_color", text="Color")
+
+    if active.layer_type == "PAINT" and active.image_name:
+        col.separator(factor=0.3)
+        ir = col.row(align=True)
+        ir.label(text=active.image_name, icon='IMAGE_RGB_ALPHA')
+        if active.image:
+            w, h = active.image.size
+            ir.label(text=f"{w}×{h}")
+
+    col.separator(factor=0.6)
+    mr = col.row(align=True)
+    mr.prop(active, "use_mask", text="Mask", icon='MOD_MASK', toggle=True)
+    if active.use_mask:
+        # Show image picker so user can assign any existing bpy.data.images image
+        mr.prop_search(active, "mask_image_name", bpy.data, "images",
+                       text="", icon='IMAGE_DATA')
+    else:
+        mr.operator("tlm.add_layer_mask", text="Add",   icon='ADD')
+    mr.operator("tlm.add_smart_mask",     text="Smart", icon='SHADERFX')
+    col.prop(active, "use_clipping_mask",
+             text="Clipping Mask", icon='CLIPUV_DEHLT', toggle=True)
+
+    col.separator(factor=0.6)
+    tr = col.row(align=True)
+    tr.prop(active, "use_triplanar", text="Triplanar", icon='ORIENTATION_GLOBAL', toggle=True)
+    if active.use_triplanar:
+        ts = col.column(align=True)
+        ts.scale_y = 0.9
+        tsr = ts.row(align=True)
+        tsr.prop(active, "triplanar_scale",     text="Scale")
+        tsr.prop(active, "triplanar_sharpness", text="Sharp", slider=True)
+
+    col.separator(factor=0.6)
+    _draw_pbr_channels(col, active, tlm)
+
+    col.separator(factor=0.5)
+    _draw_group_assignment(col, active, tlm)
+
+
+def _draw_pbr_channels(col, layer, tlm):
+    col.label(text="PBR Channels:", icon='NODE_MATERIAL')
+    pbox = col.box()
+    pc = pbox.column(align=True)
+    pc.scale_y = 0.9
+
+    bumpr = pc.row(align=True)
+    bumpr.prop(layer, "use_bump", text="Bump", icon='MOD_DISPLACE', toggle=True)
+    if layer.use_bump:
+        bumpr.prop(layer, "bump_strength", text="Str", slider=True)
+        bumpr.prop(layer, "bump_distance", text="Dist", slider=True)
+
+    channels = [
+        ('roughness', 'use_roughness', 'roughness_image_name', 'roughness_fill',
+         None,            "Roughness", 'RNDCURVE'),
+        ('metallic',  'use_metallic',  'metallic_image_name',  'metallic_fill',
+         None,            "Metallic",  'MATFLUID'),
+        ('normal',    'use_normal',    'normal_image_name',    None,
+         None,            "Normal",    'NORMALS_FACE'),
+        ('emission',  'use_emission',  'emission_image_name',  None,
+         'emission_color',"Emission",  'LIGHT'),
+    ]
+
+    for ch_id, flag, img_attr, fill_attr, color_attr, label, icon in channels:
+        pc.separator(factor=0.3)
+        ch_row = pc.row(align=True)
+        enabled = getattr(layer, flag)
+        ch_row.prop(layer, flag, text=label, icon=icon, toggle=True)
+        if enabled:
+            img_name = getattr(layer, img_attr)
+            has_img  = bool(img_name and bpy.data.images.get(img_name))
+            if has_img:
+                # prop_search lets the user swap the image without remove+re-add
+                ch_row.prop_search(layer, img_attr, bpy.data, "images", text="")
+                op = ch_row.operator("tlm.remove_channel_image", text="", icon='X', emboss=False)
+                op.channel = ch_id
+            else:
+                if fill_attr:
+                    ch_row.prop(layer, fill_attr, text="", slider=True)
+                elif color_attr:
+                    ch_row.prop(layer, color_attr, text="")
+                op = ch_row.operator("tlm.add_channel_image", text="New", icon='ADD')
+                op.channel = ch_id
+            imp = ch_row.operator("tlm.import_texture_as_layer", text="", icon='FILEBROWSER', emboss=False)
+            imp.channel   = ch_id
+            imp.add_to_active = True
+            if ch_id == 'emission' and enabled:
+                pc.prop(layer, "emission_strength", slider=True)
+                if layer.blend_mode == "ADD":
+                    pc.label(text="ADD + Emission: use only one", icon='ERROR')
+        else:
+            op = ch_row.operator("tlm.add_channel_image", text="", icon='ADD', emboss=False)
+            op.channel = ch_id
+
+
+def _draw_group_assignment(col, active, tlm):
+    groups = [l for l in tlm.layers if l.layer_type == "GROUP"]
+    if not groups:
+        return
+    col.separator(factor=0.3)
+    col.label(text="Group:", icon='FILE_FOLDER')
+    if active.group_name:
+        gr = col.row(align=True)
+        gr.label(text=active.group_name, icon='LAYER_ACTIVE')
+        gr.operator("tlm.remove_from_group", text="", icon='X', emboss=False)
+    else:
+        gc = col.column(align=True)
+        gc.scale_y = 0.85
+        for g in groups:
+            op = gc.operator("tlm.move_to_group", text=f"→ {g.name}", icon='FILE_FOLDER')
+            op.group_name = g.name
+
+
+def draw_tlm_settings(layout, context):
+    obj = context.active_object
+    if not obj or not obj.active_material:
+        return
+    mat = obj.active_material
+    tlm = mat.tlm
+
+    layout.label(text="Canvas", icon='IMAGE_DATA')
+    canvas = layout.column(align=True)
+    canvas.prop(tlm, "resolution")
+    canvas.prop(tlm, "uv_map")
+
+    layout.separator(factor=0.8)
+    layout.label(text="Composite", icon='NODE_MATERIAL')
+    comp = layout.column(align=True)
+    ac_icon = 'LINKED' if tlm.auto_composite else 'UNLINKED'
+    comp.prop(tlm, "auto_composite", text="Auto Composite", icon=ac_icon, toggle=True)
+    ops_row = comp.row(align=True)
+    ops_row.operator("tlm.rebuild_composite", text="Rebuild",   icon='FILE_REFRESH')
+    ops_row.operator("tlm.flatten_layers",    text="Flatten",   icon='IMAGE_ZDEPTH')
+    comp.operator("tlm.refresh_thumbnails",   text="Refresh Thumbnails", icon='IMAGE_RELOAD')
+
+    layout.separator(factor=0.8)
+    layout.label(text="Bake & Export", icon='RENDER_STILL')
+    layout.operator("tlm.bake_pbr", text="Bake PBR Maps…", icon='EXPORT')
+
+    layout.separator(factor=0.8)
+    layout.label(text="Presets", icon='PRESET')
+    from .operators import BUILTIN_PRESETS
+    grid = layout.column(align=True)
+    grid.scale_y = 0.95
+    prow = None
+    for i, pname in enumerate(BUILTIN_PRESETS):
+        if i % 2 == 0:
+            prow = grid.row(align=True)
+        op = prow.operator("tlm.apply_preset", text=pname, icon='MATERIAL')
+        op.preset_name = pname
+    layout.separator(factor=0.3)
+    layout.operator("tlm.save_preset", text="Save Current as Preset…", icon='FILE_TICK')
+
+    layout.separator(factor=0.8)
+    layout.label(text="Layer Stack I/O", icon='FILE_FOLDER')
+    io_row = layout.row(align=True)
+    io_row.operator("tlm.export_json", text="Export .tlm", icon='EXPORT')
+    io_row.operator("tlm.import_json", text="Import .tlm", icon='IMPORT')
+
+
+class TLM_PT_MainPanel(Panel):
+    bl_label       = "Texture Layers"
+    bl_idname      = "TLM_PT_main_panel"
+    bl_space_type  = 'PROPERTIES'
+    bl_region_type = 'WINDOW'
+    bl_context     = "material"
+
+    @classmethod
+    def poll(cls, context):
+        return (context.active_object is not None
+                and context.active_object.active_material is not None)
+
+    def draw(self, context):
+        draw_tlm_main(self.layout, context)
+
+
+class TLM_PT_SettingsPanel(Panel):
+    bl_label       = "TLM Settings"
+    bl_idname      = "TLM_PT_settings_panel"
+    bl_space_type  = 'PROPERTIES'
+    bl_region_type = 'WINDOW'
+    bl_context     = "material"
+    bl_parent_id   = "TLM_PT_main_panel"
+    bl_options     = {'DEFAULT_CLOSED'}
+
+    @classmethod
+    def poll(cls, context):
+        return (context.active_object is not None
+                and context.active_object.active_material is not None)
+
+    def draw(self, context):
+        draw_tlm_settings(self.layout, context)
+
+
+class TLM_PT_ViewportPanel(Panel):
+    bl_label       = "Texture Layers"
+    bl_idname      = "TLM_PT_viewport_panel"
+    bl_space_type  = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category    = 'TLM'
+
+    @classmethod
+    def poll(cls, context):
+        return (context.active_object is not None
+                and context.active_object.active_material is not None)
+
+    def draw(self, context):
+        draw_tlm_main(self.layout, context)
+
+
+class TLM_PT_ViewportSettingsPanel(Panel):
+    bl_label       = "TLM Settings"
+    bl_idname      = "TLM_PT_viewport_settings_panel"
+    bl_space_type  = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category    = 'TLM'
+    bl_parent_id   = 'TLM_PT_viewport_panel'
+    bl_options     = {'DEFAULT_CLOSED'}
+
+    @classmethod
+    def poll(cls, context):
+        return (context.active_object is not None
+                and context.active_object.active_material is not None)
+
+    def draw(self, context):
+        draw_tlm_settings(self.layout, context)
+
+
+classes = [
+    TLM_UL_LayerList,
+    TLM_PT_MainPanel,
+    TLM_PT_SettingsPanel,
+    TLM_PT_ViewportPanel,
+    TLM_PT_ViewportSettingsPanel,
+]
+
+
+def register():
+    for cls in classes:
+        bpy.utils.register_class(cls)
+
+
+def unregister():
+    for cls in reversed(classes):
+        bpy.utils.unregister_class(cls)
