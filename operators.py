@@ -68,10 +68,13 @@ def _add_layer_common(context, layer_type):
     elif layer_type == "ADJUSTMENT":
         layer.name = "Hue/Sat"
 
-    # Layer appended at END of list (highest index = bottom of UIList = base).
-    # Convention: script top→bottom = UIList top→bottom.
-    # Compositing uses reversed(), so highest index = first processed = base.
+    # Move new layer above the active layer (Photoshop convention).
+    # layers.add() appends at end; move it up to just above active.
     new_idx = len(tlm.layers) - 1
+    target = tlm.active_layer_index if len(tlm.layers) > 1 else 0
+    while new_idx > target:
+        tlm.layers.move(new_idx, new_idx - 1)
+        new_idx -= 1
     tlm.active_layer_index = new_idx
 
     if tlm.auto_composite:
@@ -169,8 +172,12 @@ class TLM_OT_AddProceduralLayer(Operator):
         layer.group_name  = parent_group
         layer.proc_type   = 'NOISE'
 
-        # Append at end (base convention)
+        # Move new layer above the active layer (Photoshop convention)
         new_idx = len(tlm.layers) - 1
+        target = tlm.active_layer_index if len(tlm.layers) > 1 else 0
+        while new_idx > target:
+            tlm.layers.move(new_idx, new_idx - 1)
+            new_idx -= 1
         tlm.active_layer_index = new_idx
 
         if tlm.auto_composite:
@@ -204,8 +211,12 @@ class TLM_OT_AddGroup(Operator):
         layer.collapsed = False
         layer.group_name = ""  # groups are always root-level
 
-        # Append at end (base convention)
+        # Move new layer above the active layer (Photoshop convention)
         new_idx = len(tlm.layers) - 1
+        target = tlm.active_layer_index if len(tlm.layers) > 1 else 0
+        while new_idx > target:
+            tlm.layers.move(new_idx, new_idx - 1)
+            new_idx -= 1
         tlm.active_layer_index = new_idx
 
         if tlm.auto_composite:
