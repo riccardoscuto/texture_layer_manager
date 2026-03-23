@@ -244,7 +244,18 @@ def _draw_procedural(col, active, tlm):
     br = col.row(align=True)
     br.prop(active, "blend_mode", text="")
     br.prop(active, "opacity",    text="Opacity", slider=True)
-    col.prop(active, "use_clipping_mask", text="Clipping Mask", icon='CLIPUV_DEHLT')
+
+    col.separator(factor=0.6)
+    mr = col.row(align=True)
+    mr.prop(active, "use_mask", text="Mask", icon='MOD_MASK', toggle=True)
+    if active.use_mask:
+        mr.prop_search(active, "mask_image_name", bpy.data, "images",
+                       text="", icon='IMAGE_DATA')
+    else:
+        mr.operator("tlm.add_layer_mask", text="Add",   icon='ADD')
+    mr.operator("tlm.add_smart_mask",     text="Smart", icon='SHADERFX')
+    col.prop(active, "use_clipping_mask",
+             text="Clipping Mask", icon='CLIPUV_DEHLT', toggle=True)
 
     col.separator(factor=0.8)
     col.label(text="PBR Channels:", icon='NODE_MATERIAL')
