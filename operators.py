@@ -35,14 +35,14 @@ def _add_layer_common(context, layer_type):
     tlm = mat.tlm
 
     # Determine parent group from the currently active layer:
-    # - if active is a GROUP header → new layer goes inside it
+    # - if active is a GROUP header → new layer goes ABOVE the group (root level)
     # - if active is already inside a group → new layer goes in the same group
     # - otherwise → root level
     active = tlm.active_layer
     parent_group = ""
     if active:
         if active.layer_type == "GROUP":
-            parent_group = active.name
+            parent_group = ""  # above the group, at root level
         elif active.group_name:
             parent_group = active.group_name
 
@@ -159,7 +159,7 @@ class TLM_OT_AddProceduralLayer(Operator):
         parent_group = ""
         if active:
             if active.layer_type == "GROUP":
-                parent_group = active.name
+                parent_group = ""  # above the group, at root level
             elif active.group_name:
                 parent_group = active.group_name
 
