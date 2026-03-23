@@ -421,9 +421,8 @@ I Levels funzionano come in Photoshop: rimappano l'intervallo tonale dell'immagi
 5. Cambia `triplanar_scale` e `triplanar_sharpness`
 6. **Verifica**: scala e blending cambiano
 
-### Test 13.2 — Procedural con Triplanar
-1. Crea Procedural Noise con Triplanar attivo
-2. **Verifica**: la proiezione triplanare modifica come il noise viene mappato
+### ~~Test 13.2~~ — RIMOSSO
+> Triplanar non si applica ai Procedural layer: usano già coordinate 3D (Generated/Object).
 
 ---
 
