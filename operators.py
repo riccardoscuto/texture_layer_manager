@@ -2061,16 +2061,23 @@ class TLM_OT_ToggleSymmetryPaint(Operator):
             self.report({'WARNING'}, "Seleziona una mesh")
             return {'CANCELLED'}
 
-        # Toggle symmetry on the mesh data
-        mesh = obj.data
         axis = self.axis.lower()
+        paint = context.scene.tool_settings.image_paint
 
-        # Blender stores symmetry as use_mirror_x/y/z on the mesh
-        attr = f"use_mirror_{axis}"
-        current = getattr(mesh, attr, False)
-        setattr(mesh, attr, not current)
+        # Texture Paint symmetry: use_symmetry_x/y/z
+        attr = f"use_symmetry_{axis}"
+        if hasattr(paint, attr):
+            current = getattr(paint, attr)
+            setattr(paint, attr, not current)
+            state = "ON" if not current else "OFF"
+        else:
+            # Fallback for older Blender: mesh mirror
+            mesh = obj.data
+            attr = f"use_mirror_{axis}"
+            current = getattr(mesh, attr, False)
+            setattr(mesh, attr, not current)
+            state = "ON" if not current else "OFF"
 
-        state = "ON" if not current else "OFF"
         self.report({'INFO'}, f"Symmetry {self.axis}: {state}")
         return {'FINISHED'}
 
