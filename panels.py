@@ -458,14 +458,14 @@ def draw_tlm_settings(layout, context):
     ops_row = comp.row(align=True)
     ops_row.operator("tlm.rebuild_composite", text="Rebuild",   icon='FILE_REFRESH')
     ops_row.operator("tlm.flatten_layers",    text="Flatten",   icon='IMAGE_ZDEPTH')
-    comp.operator("tlm.refresh_thumbnails",   text="Refresh Thumbnails", icon='IMAGE_RELOAD')
+    comp.operator("tlm.refresh_thumbnails",   text="Refresh Thumbnails", icon='FILE_REFRESH')
 
     layout.separator(factor=0.8)
     layout.label(text="Bake & Export", icon='RENDER_STILL')
     layout.operator("tlm.bake_pbr", text="Bake PBR Maps…", icon='EXPORT')
 
     layout.separator(factor=0.8)
-    layout.label(text="Presets", icon='PRESET')
+    layout.label(text="Presets", icon='PRESET_NEW')
     from .operators import BUILTIN_PRESETS
     grid = layout.column(align=True)
     grid.scale_y = 0.95
