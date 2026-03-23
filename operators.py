@@ -1327,23 +1327,156 @@ class TLM_OT_BakePBR(Operator):
 
             return img
 
+        def _pack_orm(roughness_img, metallic_img):
+            """Pack into ORM: R=AO(white), G=Roughness, B=Metallic."""
+            import numpy as np
+            img_name = f"{base}_ORM"
+            if img_name in bpy.data.images:
+                bpy.data.images.remove(bpy.data.images[img_name])
+            orm = bpy.data.images.new(img_name, width=res, height=res, alpha=False)
+            try:
+                orm.colorspace_settings.name = "Non-Color"
+            except Exception:
+                pass
+
+            px = np.ones(res * res * 4, dtype=np.float32)  # all white (AO=1)
+
+            if roughness_img:
+                r_px = np.zeros(res * res * 4, dtype=np.float32)
+                roughness_img.pixels.foreach_get(r_px)
+                px[1::4] = r_px[0::4]  # G = Roughness red channel
+            else:
+                px[1::4] = 0.5  # default roughness
+
+            if metallic_img:
+                m_px = np.zeros(res * res * 4, dtype=np.float32)
+                metallic_img.pixels.foreach_get(m_px)
+                px[2::4] = m_px[0::4]  # B = Metallic red channel
+            else:
+                px[2::4] = 0.0  # default metallic
+
+            px[3::4] = 1.0  # Alpha = 1
+            orm.pixels.foreach_set(px)
+            orm.update()
+
+            filepath = os.path.join(out_dir, f"{img_name}.{ext}")
+            orm.filepath_raw = filepath
+            orm.file_format = self.file_format
+            orm.save()
+            baked.append(f"ORM → {img_name}.{ext}")
+
+            # Clean up temp separate images
+            if roughness_img and roughness_img.name != img_name:
+                bpy.data.images.remove(roughness_img)
+            if metallic_img and metallic_img.name != img_name:
+                bpy.data.images.remove(metallic_img)
+            return orm
+
+        def _pack_unity_mask(metallic_img, roughness_img):
+            """Pack Unity Mask: R=Metallic, G=0, B=0, A=Smoothness (1-Roughness)."""
+            import numpy as np
+            img_name = f"{base}_Mask"
+            if img_name in bpy.data.images:
+                bpy.data.images.remove(bpy.data.images[img_name])
+            mask = bpy.data.images.new(img_name, width=res, height=res, alpha=True)
+            try:
+                mask.colorspace_settings.name = "Non-Color"
+            except Exception:
+                pass
+
+            px = np.zeros(res * res * 4, dtype=np.float32)
+
+            if metallic_img:
+                m_px = np.zeros(res * res * 4, dtype=np.float32)
+                metallic_img.pixels.foreach_get(m_px)
+                px[0::4] = m_px[0::4]  # R = Metallic
+            # G, B = 0
+
+            if roughness_img:
+                r_px = np.zeros(res * res * 4, dtype=np.float32)
+                roughness_img.pixels.foreach_get(r_px)
+                px[3::4] = 1.0 - r_px[0::4]  # A = Smoothness (1 - Roughness)
+            else:
+                px[3::4] = 0.5  # default smoothness
+
+            mask.pixels.foreach_set(px)
+            mask.update()
+
+            filepath = os.path.join(out_dir, f"{img_name}.{ext}")
+            mask.filepath_raw = filepath
+            mask.file_format = self.file_format
+            mask.save()
+            baked.append(f"Mask → {img_name}.{ext}")
+
+            if roughness_img:
+                bpy.data.images.remove(roughness_img)
+            if metallic_img:
+                bpy.data.images.remove(metallic_img)
+            return mask
+
+        def _pack_gltf_mr(metallic_img, roughness_img):
+            """Pack glTF MetallicRoughness: R=0, G=Roughness, B=Metallic, A=1."""
+            import numpy as np
+            img_name = f"{base}_MetallicRoughness"
+            if img_name in bpy.data.images:
+                bpy.data.images.remove(bpy.data.images[img_name])
+            mr = bpy.data.images.new(img_name, width=res, height=res, alpha=False)
+            try:
+                mr.colorspace_settings.name = "Non-Color"
+            except Exception:
+                pass
+
+            px = np.zeros(res * res * 4, dtype=np.float32)
+
+            if roughness_img:
+                r_px = np.zeros(res * res * 4, dtype=np.float32)
+                roughness_img.pixels.foreach_get(r_px)
+                px[1::4] = r_px[0::4]  # G = Roughness
+            else:
+                px[1::4] = 0.5
+
+            if metallic_img:
+                m_px = np.zeros(res * res * 4, dtype=np.float32)
+                metallic_img.pixels.foreach_get(m_px)
+                px[2::4] = m_px[0::4]  # B = Metallic
+            # R = 0 (unused in glTF spec)
+
+            px[3::4] = 1.0
+            mr.pixels.foreach_set(px)
+            mr.update()
+
+            filepath = os.path.join(out_dir, f"{img_name}.{ext}")
+            mr.filepath_raw = filepath
+            mr.file_format = self.file_format
+            mr.save()
+            baked.append(f"MetallicRoughness → {img_name}.{ext}")
+
+            if roughness_img:
+                bpy.data.images.remove(roughness_img)
+            if metallic_img:
+                bpy.data.images.remove(metallic_img)
+            return mr
+
         if self.preset == 'UNREAL':
             _bake_channel("Albedo",     "Base Color",  "sRGB")
             _bake_channel("Normal",     "Normal",      "Non-Color")
-            # ORM: need to composite Roughness+Metallic — bake each separately for now
-            _bake_channel("Roughness",  "Roughness",   "Non-Color")
-            _bake_channel("Metallic",   "Metallic",    "Non-Color")
+            rough_img = _bake_channel("_tmp_Roughness", "Roughness", "Non-Color")
+            metal_img = _bake_channel("_tmp_Metallic",  "Metallic",  "Non-Color")
+            _pack_orm(rough_img, metal_img)
 
         elif self.preset == 'UNITY':
             _bake_channel("Albedo",     "Base Color",  "sRGB")
             _bake_channel("Normal",     "Normal",      "Non-Color")
-            _bake_channel("Metallic",   "Metallic",    "Non-Color")
-            _bake_channel("Roughness",  "Roughness",   "Non-Color")
+            metal_img = _bake_channel("_tmp_Metallic",  "Metallic",  "Non-Color")
+            rough_img = _bake_channel("_tmp_Roughness", "Roughness", "Non-Color")
+            _pack_unity_mask(metal_img, rough_img)
 
         elif self.preset == 'GLTF':
-            _bake_channel("BaseColor",         "Base Color",  "sRGB")
-            _bake_channel("Normal",            "Normal",      "Non-Color")
-            _bake_channel("MetallicRoughness", "Roughness",   "Non-Color")
+            _bake_channel("BaseColor",  "Base Color",  "sRGB")
+            _bake_channel("Normal",     "Normal",      "Non-Color")
+            metal_img = _bake_channel("_tmp_Metallic",  "Metallic",  "Non-Color")
+            rough_img = _bake_channel("_tmp_Roughness", "Roughness", "Non-Color")
+            _pack_gltf_mr(metal_img, rough_img)
 
         elif self.preset == 'CUSTOM':
             _bake_channel("BaseColor", "Base Color",  "sRGB")
