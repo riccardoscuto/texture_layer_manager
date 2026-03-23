@@ -49,22 +49,20 @@ class TLM_UL_LayerList(UIList):
             op.layer_index = index
             row.label(text="", icon='FILE_FOLDER')
         else:
-            _USE_PREVIEWS = bpy.app.version < (5, 0, 0)
             fallback = {
                 'PAINT': 'IMAGE_RGB_ALPHA', 'FILL': 'COLOR',
                 'ADJUSTMENT': 'MODIFIER', 'PROCEDURAL': 'TEXTURE',
             }.get(layer.layer_type, 'IMAGE_DATA')
-            if _USE_PREVIEWS:
+            iid = 0
+            try:
                 if layer.layer_type == "PAINT":
                     iid = previews.get_layer_icon_id(layer)
                 elif layer.layer_type == "FILL":
                     iid = previews.get_fill_icon_id(layer)
-                else:
-                    iid = 0
-                if iid and 0 < iid <= 0x7FFFFFFF:
-                    row.label(text="", icon_value=iid)
-                else:
-                    row.label(text="", icon=fallback)
+            except Exception:
+                iid = 0
+            if iid and 0 < iid <= 0x7FFFFFFF:
+                row.label(text="", icon_value=iid)
             else:
                 row.label(text="", icon=fallback)
 

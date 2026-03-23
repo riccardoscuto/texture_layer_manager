@@ -40,6 +40,24 @@ def _use_new_mix():
 
 # ── Node helpers ──────────────────────────────────────────────────────────────
 
+def _save_node_positions(node_tree):
+    """Save positions of all TLM nodes before rebuild."""
+    positions = {}
+    for n in node_tree.nodes:
+        if n.name.startswith(TLM_PREFIX):
+            positions[n.name] = (n.location.x, n.location.y)
+    return positions
+
+
+def _restore_node_positions(node_tree, positions):
+    """Restore saved positions to TLM nodes after rebuild."""
+    if not positions:
+        return
+    for n in node_tree.nodes:
+        if n.name in positions:
+            n.location.x, n.location.y = positions[n.name]
+
+
 def _clear_tlm_nodes(node_tree):
     to_remove = [n for n in node_tree.nodes if n.name.startswith(TLM_PREFIX)]
     for n in to_remove:
@@ -902,6 +920,7 @@ def rebuild_node_tree(material):
                 if pimg:
                     pimg.use_fake_user = True
 
+    _saved_positions = _save_node_positions(node_tree)
     _clear_tlm_nodes(node_tree)
 
     all_layers = list(reversed(tlm.layers))
@@ -1003,6 +1022,9 @@ def rebuild_node_tree(material):
         bump_out = _build_bump_channel(node_tree, expanded, uv_map, start_x, -850, x_step)
         if bump_out:
             _link_to_bsdf(node_tree, bump_out, bsdf, ["Normal", "normal"], "bump")
+
+    # Restore user-customized node positions if they existed before rebuild
+    _restore_node_positions(node_tree, _saved_positions)
 
 
 def _build_base_color(node_tree, root_layers, group_children, uv_map, start_x, y_base, x_step):
