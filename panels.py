@@ -144,11 +144,6 @@ def draw_tlm_main(layout, context):
     ops_row.operator("tlm.move_layer",      text="", icon='TRIA_DOWN').direction = "DOWN"
     ops_row.separator()
     ops_row.operator("tlm.duplicate_layer", text="", icon='DUPLICATE')
-    ops_row.separator()
-    sym = ops_row.row(align=True)
-    sym.scale_x = 0.85
-    sym.operator("tlm.toggle_symmetry_paint", text="X", icon='MOD_MIRROR').axis = 'X'
-    sym.operator("tlm.toggle_symmetry_paint", text="Y", icon='MOD_MIRROR').axis = 'Y'
 
     layout.template_list(
         "TLM_UL_layer_list", "",

@@ -2038,48 +2038,8 @@ class TLM_OT_LayerFromClipboard(Operator):
 
 
 # ─── Symmetry Paint Helper ────────────────────────────────────────────────────
-
-class TLM_OT_ToggleSymmetryPaint(Operator):
-    """Toggle X-axis symmetry painting on the active object."""
-    bl_idname = "tlm.toggle_symmetry_paint"
-    bl_label = "Toggle Symmetry"
-    bl_options = {'REGISTER', 'UNDO'}
-
-    axis: bpy.props.EnumProperty(
-        name="Axis",
-        items=[('X', "X", ""), ('Y', "Y", ""), ('Z', "Z", "")],
-        default='X',
-    )
-
-    @classmethod
-    def poll(cls, context):
-        return context.active_object is not None
-
-    def execute(self, context):
-        obj = context.active_object
-        if not obj or obj.type != 'MESH':
-            self.report({'WARNING'}, "Seleziona una mesh")
-            return {'CANCELLED'}
-
-        axis = self.axis.lower()
-        paint = context.scene.tool_settings.image_paint
-
-        # Texture Paint symmetry: use_symmetry_x/y/z
-        attr = f"use_symmetry_{axis}"
-        if hasattr(paint, attr):
-            current = getattr(paint, attr)
-            setattr(paint, attr, not current)
-            state = "ON" if not current else "OFF"
-        else:
-            # Fallback for older Blender: mesh mirror
-            mesh = obj.data
-            attr = f"use_mirror_{axis}"
-            current = getattr(mesh, attr, False)
-            setattr(mesh, attr, not current)
-            state = "ON" if not current else "OFF"
-
-        self.report({'INFO'}, f"Symmetry {self.axis}: {state}")
-        return {'FINISHED'}
+# NOTE: Removed — Blender 5.0 texture paint symmetry not reliably controllable
+# via Python API. Users should use Blender's built-in N → Tool → Symmetry panel.
 
 
 # ─── Registration ─────────────────────────────────────────────────────────────
@@ -2112,7 +2072,6 @@ classes = [
     TLM_OT_ApplyPreset,
     TLM_OT_SavePreset,
     TLM_OT_LayerFromClipboard,
-    TLM_OT_ToggleSymmetryPaint,
 ]
 
 
