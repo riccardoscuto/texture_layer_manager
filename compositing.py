@@ -392,7 +392,7 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
         if flag_attr and not getattr(layer, flag_attr, False):
             # Still update prev_alpha from base color image
             if channel_id == 'base_color' and layer.layer_type == "PAINT" and layer.image:
-                tex = _new_img_tex(node_tree, layer.image, uv_map, x, y)
+                tex = _new_img_tex(node_tree, layer.image, uv_map, x, y, layer=layer)
                 if current is None:
                     current = tex.outputs["Color"]
                     prev_alpha = tex.outputs["Alpha"]
@@ -419,7 +419,7 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
                 # whatever you paint becomes the emission. Falls back to emission_color fill
                 # if no image exists.
                 if layer.image:
-                    tex = _new_img_tex(node_tree, layer.image, uv_map, x, y, "sRGB")
+                    tex = _new_img_tex(node_tree, layer.image, uv_map, x, y, "sRGB", layer=layer)
                     layer_out = tex.outputs["Color"]
                     layer_alpha = tex.outputs["Alpha"]
                 else:
@@ -445,7 +445,7 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
                 cs = "Non-Color"
 
             target_img = layer.image if channel_id == 'base_color' else img
-            tex = _new_img_tex(node_tree, target_img, uv_map, x, y, cs)
+            tex = _new_img_tex(node_tree, target_img, uv_map, x, y, cs, layer=layer)
             layer_out = tex.outputs["Color"]
             layer_alpha = tex.outputs["Alpha"]
 
@@ -471,7 +471,7 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
                 img = bpy.data.images.get(img_name) if img_name else None
                 if img:
                     print(f"[TLM] FILL {channel_id}: using image '{img.name}' for layer '{layer.name}'")
-                    tex = _new_img_tex(node_tree, img, uv_map, x, y, "Non-Color")
+                    tex = _new_img_tex(node_tree, img, uv_map, x, y, "Non-Color", layer=layer)
                     sep = node_tree.nodes.new("ShaderNodeSeparateColor")
                     sep.name = f"{TLM_PREFIX}sep_scalar_{id(sep)}"
                     sep.location = (x + 220, y)
@@ -488,7 +488,7 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
                 img = bpy.data.images.get(img_name) if img_name else None
                 if img:
                     print(f"[TLM] FILL emission: using image '{img.name}' for layer '{layer.name}'")
-                    tex = _new_img_tex(node_tree, img, uv_map, x, y, "sRGB")
+                    tex = _new_img_tex(node_tree, img, uv_map, x, y, "sRGB", layer=layer)
                     layer_out = tex.outputs["Color"]
                 else:
                     print(f"[TLM] FILL emission: no image, using emission_color for layer '{layer.name}'")
@@ -500,7 +500,7 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
                 img = bpy.data.images.get(img_name) if img_name else None
                 if img:
                     print(f"[TLM] FILL normal: using image '{img.name}' for layer '{layer.name}'")
-                    tex = _new_img_tex(node_tree, img, uv_map, x, y, "Non-Color")
+                    tex = _new_img_tex(node_tree, img, uv_map, x, y, "Non-Color", layer=layer)
                     layer_out = tex.outputs["Color"]
                 else:
                     print(f"[TLM] FILL normal: no image assigned, skipping layer '{layer.name}'")
@@ -1042,7 +1042,7 @@ def _build_base_color(node_tree, root_layers, group_children, uv_map, start_x, y
             layer_alpha_out = alpha_node.outputs[0]
 
         elif layer.layer_type == "PAINT" and layer.image:
-            tex = _new_img_tex(node_tree, layer.image, uv_map, x, y_base)
+            tex = _new_img_tex(node_tree, layer.image, uv_map, x, y_base, layer=layer)
             layer_color_out = tex.outputs["Color"]
             layer_alpha_out = tex.outputs["Alpha"]
 
