@@ -248,9 +248,11 @@ def _draw_procedural(col, active, tlm):
     col.separator(factor=0.6)
     mr = col.row(align=True)
     mr.prop(active, "use_mask", text="Mask", icon='MOD_MASK', toggle=True)
-    if active.use_mask:
+    if active.use_mask and active.mask_image_name:
         mr.prop_search(active, "mask_image_name", bpy.data, "images",
                        text="", icon='IMAGE_DATA')
+    elif active.use_mask:
+        mr.operator("tlm.add_layer_mask", text="New",   icon='ADD')
     else:
         mr.operator("tlm.add_layer_mask", text="Add",   icon='ADD')
     mr.operator("tlm.add_smart_mask",     text="Smart", icon='SHADERFX')
@@ -335,10 +337,11 @@ def _draw_paint_fill(col, active, tlm):
     col.separator(factor=0.6)
     mr = col.row(align=True)
     mr.prop(active, "use_mask", text="Mask", icon='MOD_MASK', toggle=True)
-    if active.use_mask:
-        # Show image picker so user can assign any existing bpy.data.images image
+    if active.use_mask and active.mask_image_name:
         mr.prop_search(active, "mask_image_name", bpy.data, "images",
                        text="", icon='IMAGE_DATA')
+    elif active.use_mask:
+        mr.operator("tlm.add_layer_mask", text="New",   icon='ADD')
     else:
         mr.operator("tlm.add_layer_mask", text="Add",   icon='ADD')
     mr.operator("tlm.add_smart_mask",     text="Smart", icon='SHADERFX')
