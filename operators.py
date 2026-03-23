@@ -73,10 +73,18 @@ def _add_layer_common(context, layer_type):
     elif layer_type == "ADJUSTMENT":
         layer.name = "Hue/Sat"
 
-    # Move new layer above the active layer (Photoshop convention).
-    # layers.add() appends at end; move it up to just above active.
+    # Move new layer to the correct position (Photoshop convention).
+    # layers.add() appends at end; move it to the right spot.
     new_idx = len(tlm.layers) - 1
-    target = tlm.active_layer_index if len(tlm.layers) > 1 else 0
+    if len(tlm.layers) > 1:
+        if parent_group and active and active.layer_type == "GROUP":
+            # Adding inside a group: place BELOW the group header (index + 1)
+            target = tlm.active_layer_index + 1
+        else:
+            # Adding above the active layer
+            target = tlm.active_layer_index
+    else:
+        target = 0
     while new_idx > target:
         tlm.layers.move(new_idx, new_idx - 1)
         new_idx -= 1
@@ -181,9 +189,15 @@ class TLM_OT_AddProceduralLayer(Operator):
         layer.group_name  = parent_group
         layer.proc_type   = 'NOISE'
 
-        # Move new layer above the active layer (Photoshop convention)
+        # Move new layer to the correct position (Photoshop convention)
         new_idx = len(tlm.layers) - 1
-        target = tlm.active_layer_index if len(tlm.layers) > 1 else 0
+        if len(tlm.layers) > 1:
+            if parent_group and active and active.layer_type == "GROUP":
+                target = tlm.active_layer_index + 1
+            else:
+                target = tlm.active_layer_index
+        else:
+            target = 0
         while new_idx > target:
             tlm.layers.move(new_idx, new_idx - 1)
             new_idx -= 1
