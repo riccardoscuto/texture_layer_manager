@@ -1283,7 +1283,7 @@ class TLM_OT_BakePBR(Operator):
         baked = []
 
         def _bake_channel(suffix, bsdf_input, colorspace="sRGB"):
-            """Connect bsdf_input → temporary bake node → bake → save."""
+            """Bake a single PBR channel via temporary Emission shader (no lighting)."""
             bsdf = next((n for n in node_tree.nodes
                          if n.type == 'BSDF_PRINCIPLED'
                          and not n.name.startswith('TLM_')), None)
@@ -1294,6 +1294,54 @@ class TLM_OT_BakePBR(Operator):
             if not socket or not socket.links:
                 return None
 
+            # Get the node/socket feeding the BSDF input
+            source_link = socket.links[0]
+            source_socket = source_link.from_socket
+
+            # Find Material Output
+            mat_output = next((n for n in node_tree.nodes
+                               if n.type == 'OUTPUT_MATERIAL'), None)
+            if not mat_output:
+                return None
+
+            # Save original connection to Material Output Surface
+            orig_surface_links = []
+            surface_input = mat_output.inputs.get("Surface")
+            if surface_input and surface_input.links:
+                for lnk in surface_input.links:
+                    orig_surface_links.append(lnk.from_socket)
+
+            # Create temp Emission shader
+            emit_node = node_tree.nodes.new("ShaderNodeEmission")
+            emit_node.name = "TLM_bake_emit"
+            emit_node.location = (400, 200)
+
+            # For scalar channels (Roughness, Metallic), we need to convert
+            # the value to color. Check if source is a color or value.
+            # If the BSDF input is a scalar type, route through a converter.
+            is_normal = (bsdf_input == "Normal")
+
+            if is_normal:
+                # Normal maps: bake the color data from the Normal Map node's input
+                # Find the Normal Map node
+                normal_node = source_socket.node
+                if normal_node.type == 'NORMAL_MAP':
+                    color_input = normal_node.inputs.get("Color")
+                    if color_input and color_input.links:
+                        source_socket = color_input.links[0].from_socket
+                    else:
+                        # No color input to normal map, skip
+                        node_tree.nodes.remove(emit_node)
+                        return None
+
+                node_tree.links.new(source_socket, emit_node.inputs["Color"])
+            else:
+                node_tree.links.new(source_socket, emit_node.inputs["Color"])
+
+            # Connect Emission → Material Output
+            node_tree.links.new(emit_node.outputs["Emission"], surface_input)
+
+            # Create bake target image
             img_name = f"{base}_{suffix}"
             if img_name in bpy.data.images:
                 bpy.data.images.remove(bpy.data.images[img_name])
@@ -1314,7 +1362,7 @@ class TLM_OT_BakePBR(Operator):
             node_tree.nodes.active = bake_node
 
             try:
-                bpy.ops.object.bake(type='DIFFUSE', pass_filter={'COLOR'}, save_mode='INTERNAL')
+                bpy.ops.object.bake(type='EMIT', save_mode='INTERNAL')
                 filepath = os.path.join(out_dir, f"{img_name}.{ext}")
                 img.filepath_raw = filepath
                 img.file_format = self.file_format
@@ -1323,7 +1371,12 @@ class TLM_OT_BakePBR(Operator):
             except Exception as e:
                 self.report({'WARNING'}, f"Bake failed for {suffix}: {e}")
             finally:
+                # Restore original connections
                 node_tree.nodes.remove(bake_node)
+                node_tree.nodes.remove(emit_node)
+                # Re-link original shader to Material Output
+                for orig_sock in orig_surface_links:
+                    node_tree.links.new(orig_sock, surface_input)
 
             return img
 
