@@ -155,13 +155,18 @@
 
 ### Test 4.6 — Checker
 1. Cambia tipo a **Checker**
-2. **Verifica viewport**: scacchiera bianco/nero (o con i colori proc_color1/color2)
-3. Cambia checker_scale
-4. **Verifica**: la scacchiera cambia scala
+2. **Verifica viewport**: scacchiera con i colori proc_color1 e proc_color2
+   - Il Checker usa direttamente Color1/Color2 del nodo (non il ColorRamp come gli altri procedurali)
+3. Cambia `proc_color1` a rosso e `proc_color2` a blu
+4. Se i colori non cambiano nel viewport, fai `F3 → Rebuild Composite` (il debounce potrebbe non triggerare)
+5. **Verifica viewport**: scacchiera rossa/blu
+6. Cambia `checker_scale`
+7. **Verifica**: la scacchiera cambia scala
 
-### Test 4.7 — Colori procedurali
-1. Su qualsiasi tipo procedurale, cambia `proc_color1` (rosso) e `proc_color2` (blu)
-2. **Verifica viewport**: il pattern usa i due colori scelti
+### Test 4.7 — Colori procedurali (Noise/Voronoi/Wave/Gradient/Musgrave)
+1. Su un layer procedurale **non-Checker**, cambia `proc_color1` (rosso) e `proc_color2` (blu)
+2. **Verifica viewport**: il pattern usa i due colori scelti (tramite ColorRamp)
+3. **Nota**: il Checker ha i colori integrati (vedi test 4.6), gli altri usano il ColorRamp
 
 ---
 
@@ -189,13 +194,19 @@
 7. **Verifica**: contrasto aumentato
 
 ### Test 5.3 — Levels
-1. Cambia tipo a **Levels**
-2. Imposta `adj_in_min` = 0.3
-3. **Verifica viewport**: le ombre vengono clippate (più scuro complessivamente)
-4. Imposta `adj_in_max` = 0.7
-5. **Verifica**: le luci vengono clippate
-6. Imposta `adj_levels_gamma` = 0.5
-7. **Verifica**: i mezzitoni cambiano
+I Levels funzionano come in Photoshop: rimappano l'intervallo tonale dell'immagine.
+- **Input Black** (`adj_in_min`): tutti i valori sotto questo diventano nero → alza per scurire le ombre
+- **Input White** (`adj_in_max`): tutti i valori sopra questo diventano bianco → abbassa per schiarire le luci
+- **Gamma** (`adj_levels_gamma`): corregge i mezzitoni (>1 schiarisce, <1 scurisce)
+- **Output Black/White** (`adj_out_min`/`adj_out_max`): comprime l'intervallo di uscita
+
+**Test**:
+1. Crea stack: Fill rosso (base) + Adj tipo **Levels**
+2. Imposta `adj_in_min` = 0.3 → **Verifica**: il rosso diventa più scuro (i valori sotto 0.3 vengono schiacciati a nero)
+3. Rimetti `adj_in_min` = 0.0, imposta `adj_in_max` = 0.7 → **Verifica**: il rosso diventa più brillante/clippato
+4. Rimetti `adj_in_max` = 1.0, imposta `adj_levels_gamma` = 0.5 → **Verifica**: i mezzitoni si scuriscono
+5. Imposta `adj_levels_gamma` = 2.0 → **Verifica**: i mezzitoni si schiariscono
+6. Prova `adj_out_min` = 0.3, `adj_out_max` = 0.7 → **Verifica**: il contrasto si riduce (l'output è compresso)
 
 ### Test 5.4 — Color Balance
 1. Cambia tipo a **Color Balance**
@@ -347,16 +358,22 @@
 ### Test 10.1 — Mask base
 1. Crea stack: Fill rosso (base) + Fill blu (sopra)
 2. Seleziona Fill blu, clicca **Mask**
-3. Clicca **New** per creare un'immagine maschera (o assegna un'immagine esistente)
+3. Clicca **New** per creare un'immagine maschera
 4. **Verifica pannello**: il toggle Mask è attivo, compare il nome dell'immagine
-5. **Verifica Shader Editor**: compare un nodo Image Texture (mask) collegato al Factor del Mix node
-6. **Verifica viewport**: il blu è visibile solo dove la maschera è bianca
+5. **Importante**: la nuova immagine mask è tutta **nera** → il layer blu è completamente **nascosto**
+6. **Verifica viewport**: vedi solo rosso (il blu è mascherato dal nero = 0% visibilità)
+7. **Verifica Shader Editor**: compare un nodo Image Texture (mask) collegato al Factor del Mix node
 
 ### Test 10.2 — Dipingere la Mask
-1. Vai in Texture Paint
-2. Seleziona l'immagine maschera nello slot di pittura
-3. Dipingi bianco sulle zone dove vuoi il blu, nero dove vuoi il rosso
-4. **Verifica viewport**: il blending segue la maschera dipinta
+1. Vai in **Texture Paint** mode
+2. Seleziona l'immagine maschera nello slot di pittura (dropdown immagini nell'header)
+3. Seleziona colore **bianco** come pennello
+4. Dipingi **bianco** dove vuoi che il blu sia visibile
+   - Bianco = layer visibile (100%)
+   - Nero = layer nascosto (0%)
+   - Grigio = layer semi-trasparente (0–100%)
+5. **Verifica viewport**: il blu appare nelle zone dipinte di bianco, il rosso resta visibile altrove
+6. Dipingi **nero** per "cancellare" e riportare il rosso
 
 ### Test 10.3 — Mask su Procedural
 1. Crea stack: Fill bianco (base) + Procedural Noise (sopra) con Mask
