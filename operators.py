@@ -35,14 +35,19 @@ def _add_layer_common(context, layer_type):
     tlm = mat.tlm
 
     # Determine parent group from the currently active layer:
-    # - if active is a GROUP header → new layer goes inside it
+    # - if active is an EMPTY GROUP → new layer goes INSIDE it (first child)
+    # - if active is a GROUP with children → new layer goes ABOVE the group (root level)
     # - if active is already inside a group → new layer goes in the same group
     # - otherwise → root level
     active = tlm.active_layer
     parent_group = ""
     if active:
         if active.layer_type == "GROUP":
-            parent_group = active.name
+            has_children = any(l.group_name == active.name for l in tlm.layers)
+            if has_children:
+                parent_group = ""  # above the group, at root level
+            else:
+                parent_group = active.name  # inside the empty group
         elif active.group_name:
             parent_group = active.group_name
 
@@ -68,10 +73,18 @@ def _add_layer_common(context, layer_type):
     elif layer_type == "ADJUSTMENT":
         layer.name = "Hue/Sat"
 
-    # Move new layer above the active layer (Photoshop convention).
-    # layers.add() appends at end; move it up to just above active.
+    # Move new layer to the correct position (Photoshop convention).
+    # layers.add() appends at end; move it to the right spot.
     new_idx = len(tlm.layers) - 1
-    target = tlm.active_layer_index if len(tlm.layers) > 1 else 0
+    if len(tlm.layers) > 1:
+        if parent_group and active and active.layer_type == "GROUP":
+            # Adding inside a group: place BELOW the group header (index + 1)
+            target = tlm.active_layer_index + 1
+        else:
+            # Adding above the active layer
+            target = tlm.active_layer_index
+    else:
+        target = 0
     while new_idx > target:
         tlm.layers.move(new_idx, new_idx - 1)
         new_idx -= 1
@@ -84,7 +97,7 @@ def _add_layer_common(context, layer_type):
 
 
 class TLM_OT_AddPaintLayer(Operator):
-    """Add a new paint layer."""
+    """Add a new paint layer with a blank transparent image above the active layer."""
     bl_idname = "tlm.add_paint_layer"
     bl_label = "Add Paint Layer"
     bl_options = {'REGISTER', 'UNDO'}
@@ -103,7 +116,7 @@ class TLM_OT_AddPaintLayer(Operator):
 
 
 class TLM_OT_AddFillLayer(Operator):
-    """Add a new fill layer."""
+    """Add a solid color fill layer above the active layer."""
     bl_idname = "tlm.add_fill_layer"
     bl_label = "Add Fill Layer"
     bl_options = {'REGISTER', 'UNDO'}
@@ -159,7 +172,11 @@ class TLM_OT_AddProceduralLayer(Operator):
         parent_group = ""
         if active:
             if active.layer_type == "GROUP":
-                parent_group = active.name
+                has_children = any(l.group_name == active.name for l in tlm.layers)
+                if has_children:
+                    parent_group = ""  # above the group, at root level
+                else:
+                    parent_group = active.name  # inside the empty group
             elif active.group_name:
                 parent_group = active.group_name
 
@@ -172,9 +189,15 @@ class TLM_OT_AddProceduralLayer(Operator):
         layer.group_name  = parent_group
         layer.proc_type   = 'NOISE'
 
-        # Move new layer above the active layer (Photoshop convention)
+        # Move new layer to the correct position (Photoshop convention)
         new_idx = len(tlm.layers) - 1
-        target = tlm.active_layer_index if len(tlm.layers) > 1 else 0
+        if len(tlm.layers) > 1:
+            if parent_group and active and active.layer_type == "GROUP":
+                target = tlm.active_layer_index + 1
+            else:
+                target = tlm.active_layer_index
+        else:
+            target = 0
         while new_idx > target:
             tlm.layers.move(new_idx, new_idx - 1)
             new_idx -= 1
@@ -508,7 +531,7 @@ class TLM_OT_SetActivePaintLayer(Operator):
 # ─── Toggle Visibility ────────────────────────────────────────────────────────
 
 class TLM_OT_ToggleLayerVisibility(Operator):
-    """Toggle the visibility of a layer."""
+    """Show or hide this layer in the composite."""
     bl_idname = "tlm.toggle_layer_visibility"
     bl_label = "Toggle Visibility"
     bl_options = {'REGISTER', 'UNDO'}
@@ -1054,7 +1077,7 @@ class TLM_OT_AddChannelImage(Operator):
 
 
 class TLM_OT_RemoveChannelImage(Operator):
-    """Disable a PBR channel on the active layer."""
+    """Remove the image from a PBR channel, reverting to the fill value."""
     bl_idname = "tlm.remove_channel_image"
     bl_label = "Remove Channel"
     bl_options = {'REGISTER', 'UNDO'}
@@ -1260,7 +1283,7 @@ class TLM_OT_BakePBR(Operator):
         baked = []
 
         def _bake_channel(suffix, bsdf_input, colorspace="sRGB"):
-            """Connect bsdf_input → temporary bake node → bake → save."""
+            """Bake a single PBR channel via temporary Emission shader (no lighting)."""
             bsdf = next((n for n in node_tree.nodes
                          if n.type == 'BSDF_PRINCIPLED'
                          and not n.name.startswith('TLM_')), None)
@@ -1271,6 +1294,54 @@ class TLM_OT_BakePBR(Operator):
             if not socket or not socket.links:
                 return None
 
+            # Get the node/socket feeding the BSDF input
+            source_link = socket.links[0]
+            source_socket = source_link.from_socket
+
+            # Find Material Output
+            mat_output = next((n for n in node_tree.nodes
+                               if n.type == 'OUTPUT_MATERIAL'), None)
+            if not mat_output:
+                return None
+
+            # Save original connection to Material Output Surface
+            orig_surface_links = []
+            surface_input = mat_output.inputs.get("Surface")
+            if surface_input and surface_input.links:
+                for lnk in surface_input.links:
+                    orig_surface_links.append(lnk.from_socket)
+
+            # Create temp Emission shader
+            emit_node = node_tree.nodes.new("ShaderNodeEmission")
+            emit_node.name = "TLM_bake_emit"
+            emit_node.location = (400, 200)
+
+            # For scalar channels (Roughness, Metallic), we need to convert
+            # the value to color. Check if source is a color or value.
+            # If the BSDF input is a scalar type, route through a converter.
+            is_normal = (bsdf_input == "Normal")
+
+            if is_normal:
+                # Normal maps: bake the color data from the Normal Map node's input
+                # Find the Normal Map node
+                normal_node = source_socket.node
+                if normal_node.type == 'NORMAL_MAP':
+                    color_input = normal_node.inputs.get("Color")
+                    if color_input and color_input.links:
+                        source_socket = color_input.links[0].from_socket
+                    else:
+                        # No color input to normal map, skip
+                        node_tree.nodes.remove(emit_node)
+                        return None
+
+                node_tree.links.new(source_socket, emit_node.inputs["Color"])
+            else:
+                node_tree.links.new(source_socket, emit_node.inputs["Color"])
+
+            # Connect Emission → Material Output
+            node_tree.links.new(emit_node.outputs["Emission"], surface_input)
+
+            # Create bake target image
             img_name = f"{base}_{suffix}"
             if img_name in bpy.data.images:
                 bpy.data.images.remove(bpy.data.images[img_name])
@@ -1291,7 +1362,7 @@ class TLM_OT_BakePBR(Operator):
             node_tree.nodes.active = bake_node
 
             try:
-                bpy.ops.object.bake(type='DIFFUSE', pass_filter={'COLOR'}, save_mode='INTERNAL')
+                bpy.ops.object.bake(type='EMIT', save_mode='INTERNAL')
                 filepath = os.path.join(out_dir, f"{img_name}.{ext}")
                 img.filepath_raw = filepath
                 img.file_format = self.file_format
@@ -1300,27 +1371,165 @@ class TLM_OT_BakePBR(Operator):
             except Exception as e:
                 self.report({'WARNING'}, f"Bake failed for {suffix}: {e}")
             finally:
+                # Restore original connections
                 node_tree.nodes.remove(bake_node)
+                node_tree.nodes.remove(emit_node)
+                # Re-link original shader to Material Output
+                for orig_sock in orig_surface_links:
+                    node_tree.links.new(orig_sock, surface_input)
 
             return img
+
+        def _pack_orm(roughness_img, metallic_img):
+            """Pack into ORM: R=AO(white), G=Roughness, B=Metallic."""
+            import numpy as np
+            img_name = f"{base}_ORM"
+            if img_name in bpy.data.images:
+                bpy.data.images.remove(bpy.data.images[img_name])
+            orm = bpy.data.images.new(img_name, width=res, height=res, alpha=False)
+            try:
+                orm.colorspace_settings.name = "Non-Color"
+            except Exception:
+                pass
+
+            px = np.ones(res * res * 4, dtype=np.float32)  # all white (AO=1)
+
+            if roughness_img:
+                r_px = np.zeros(res * res * 4, dtype=np.float32)
+                roughness_img.pixels.foreach_get(r_px)
+                px[1::4] = r_px[0::4]  # G = Roughness red channel
+            else:
+                px[1::4] = 0.5  # default roughness
+
+            if metallic_img:
+                m_px = np.zeros(res * res * 4, dtype=np.float32)
+                metallic_img.pixels.foreach_get(m_px)
+                px[2::4] = m_px[0::4]  # B = Metallic red channel
+            else:
+                px[2::4] = 0.0  # default metallic
+
+            px[3::4] = 1.0  # Alpha = 1
+            orm.pixels.foreach_set(px)
+            orm.update()
+
+            filepath = os.path.join(out_dir, f"{img_name}.{ext}")
+            orm.filepath_raw = filepath
+            orm.file_format = self.file_format
+            orm.save()
+            baked.append(f"ORM → {img_name}.{ext}")
+
+            # Clean up temp separate images
+            if roughness_img and roughness_img.name != img_name:
+                bpy.data.images.remove(roughness_img)
+            if metallic_img and metallic_img.name != img_name:
+                bpy.data.images.remove(metallic_img)
+            return orm
+
+        def _pack_unity_mask(metallic_img, roughness_img):
+            """Pack Unity Mask: R=Metallic, G=0, B=0, A=Smoothness (1-Roughness)."""
+            import numpy as np
+            img_name = f"{base}_Mask"
+            if img_name in bpy.data.images:
+                bpy.data.images.remove(bpy.data.images[img_name])
+            mask = bpy.data.images.new(img_name, width=res, height=res, alpha=True)
+            try:
+                mask.colorspace_settings.name = "Non-Color"
+            except Exception:
+                pass
+
+            px = np.zeros(res * res * 4, dtype=np.float32)
+
+            if metallic_img:
+                m_px = np.zeros(res * res * 4, dtype=np.float32)
+                metallic_img.pixels.foreach_get(m_px)
+                px[0::4] = m_px[0::4]  # R = Metallic
+            # G, B = 0
+
+            if roughness_img:
+                r_px = np.zeros(res * res * 4, dtype=np.float32)
+                roughness_img.pixels.foreach_get(r_px)
+                px[3::4] = 1.0 - r_px[0::4]  # A = Smoothness (1 - Roughness)
+            else:
+                px[3::4] = 0.5  # default smoothness
+
+            mask.pixels.foreach_set(px)
+            mask.update()
+
+            filepath = os.path.join(out_dir, f"{img_name}.{ext}")
+            mask.filepath_raw = filepath
+            mask.file_format = self.file_format
+            mask.save()
+            baked.append(f"Mask → {img_name}.{ext}")
+
+            if roughness_img:
+                bpy.data.images.remove(roughness_img)
+            if metallic_img:
+                bpy.data.images.remove(metallic_img)
+            return mask
+
+        def _pack_gltf_mr(metallic_img, roughness_img):
+            """Pack glTF MetallicRoughness: R=0, G=Roughness, B=Metallic, A=1."""
+            import numpy as np
+            img_name = f"{base}_MetallicRoughness"
+            if img_name in bpy.data.images:
+                bpy.data.images.remove(bpy.data.images[img_name])
+            mr = bpy.data.images.new(img_name, width=res, height=res, alpha=False)
+            try:
+                mr.colorspace_settings.name = "Non-Color"
+            except Exception:
+                pass
+
+            px = np.zeros(res * res * 4, dtype=np.float32)
+
+            if roughness_img:
+                r_px = np.zeros(res * res * 4, dtype=np.float32)
+                roughness_img.pixels.foreach_get(r_px)
+                px[1::4] = r_px[0::4]  # G = Roughness
+            else:
+                px[1::4] = 0.5
+
+            if metallic_img:
+                m_px = np.zeros(res * res * 4, dtype=np.float32)
+                metallic_img.pixels.foreach_get(m_px)
+                px[2::4] = m_px[0::4]  # B = Metallic
+            # R = 0 (unused in glTF spec)
+
+            px[3::4] = 1.0
+            mr.pixels.foreach_set(px)
+            mr.update()
+
+            filepath = os.path.join(out_dir, f"{img_name}.{ext}")
+            mr.filepath_raw = filepath
+            mr.file_format = self.file_format
+            mr.save()
+            baked.append(f"MetallicRoughness → {img_name}.{ext}")
+
+            if roughness_img:
+                bpy.data.images.remove(roughness_img)
+            if metallic_img:
+                bpy.data.images.remove(metallic_img)
+            return mr
 
         if self.preset == 'UNREAL':
             _bake_channel("Albedo",     "Base Color",  "sRGB")
             _bake_channel("Normal",     "Normal",      "Non-Color")
-            # ORM: need to composite Roughness+Metallic — bake each separately for now
-            _bake_channel("Roughness",  "Roughness",   "Non-Color")
-            _bake_channel("Metallic",   "Metallic",    "Non-Color")
+            rough_img = _bake_channel("_tmp_Roughness", "Roughness", "Non-Color")
+            metal_img = _bake_channel("_tmp_Metallic",  "Metallic",  "Non-Color")
+            _pack_orm(rough_img, metal_img)
 
         elif self.preset == 'UNITY':
             _bake_channel("Albedo",     "Base Color",  "sRGB")
             _bake_channel("Normal",     "Normal",      "Non-Color")
-            _bake_channel("Metallic",   "Metallic",    "Non-Color")
-            _bake_channel("Roughness",  "Roughness",   "Non-Color")
+            metal_img = _bake_channel("_tmp_Metallic",  "Metallic",  "Non-Color")
+            rough_img = _bake_channel("_tmp_Roughness", "Roughness", "Non-Color")
+            _pack_unity_mask(metal_img, rough_img)
 
         elif self.preset == 'GLTF':
-            _bake_channel("BaseColor",         "Base Color",  "sRGB")
-            _bake_channel("Normal",            "Normal",      "Non-Color")
-            _bake_channel("MetallicRoughness", "Roughness",   "Non-Color")
+            _bake_channel("BaseColor",  "Base Color",  "sRGB")
+            _bake_channel("Normal",     "Normal",      "Non-Color")
+            metal_img = _bake_channel("_tmp_Metallic",  "Metallic",  "Non-Color")
+            rough_img = _bake_channel("_tmp_Roughness", "Roughness", "Non-Color")
+            _pack_gltf_mr(metal_img, rough_img)
 
         elif self.preset == 'CUSTOM':
             _bake_channel("BaseColor", "Base Color",  "sRGB")
@@ -1882,41 +2091,8 @@ class TLM_OT_LayerFromClipboard(Operator):
 
 
 # ─── Symmetry Paint Helper ────────────────────────────────────────────────────
-
-class TLM_OT_ToggleSymmetryPaint(Operator):
-    """Toggle X-axis symmetry painting on the active object."""
-    bl_idname = "tlm.toggle_symmetry_paint"
-    bl_label = "Toggle Symmetry"
-    bl_options = {'REGISTER', 'UNDO'}
-
-    axis: bpy.props.EnumProperty(
-        name="Axis",
-        items=[('X', "X", ""), ('Y', "Y", ""), ('Z', "Z", "")],
-        default='X',
-    )
-
-    @classmethod
-    def poll(cls, context):
-        return context.active_object is not None
-
-    def execute(self, context):
-        obj = context.active_object
-        if not obj or obj.type != 'MESH':
-            self.report({'WARNING'}, "Seleziona una mesh")
-            return {'CANCELLED'}
-
-        # Toggle symmetry on the mesh data
-        mesh = obj.data
-        axis = self.axis.lower()
-
-        # Blender stores symmetry as use_mirror_x/y/z on the mesh
-        attr = f"use_mirror_{axis}"
-        current = getattr(mesh, attr, False)
-        setattr(mesh, attr, not current)
-
-        state = "ON" if not current else "OFF"
-        self.report({'INFO'}, f"Symmetry {self.axis}: {state}")
-        return {'FINISHED'}
+# NOTE: Removed — Blender 5.0 texture paint symmetry not reliably controllable
+# via Python API. Users should use Blender's built-in N → Tool → Symmetry panel.
 
 
 # ─── Registration ─────────────────────────────────────────────────────────────
@@ -1949,7 +2125,6 @@ classes = [
     TLM_OT_ApplyPreset,
     TLM_OT_SavePreset,
     TLM_OT_LayerFromClipboard,
-    TLM_OT_ToggleSymmetryPaint,
 ]
 
 

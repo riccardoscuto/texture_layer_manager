@@ -90,6 +90,11 @@ BLEND_MODES = [
     ("SOFT_LIGHT", "Soft Light", "Subtle contrast blend",             12),
     ("HARD_LIGHT", "Hard Light", "Strong contrast blend",             13),
     ("LINEAR_LIGHT","Linear Light","High-contrast dodge+burn",        14),
+    ("EXCLUSION",  "Exclusion",  "Inversion-like difference blend",   15),
+    ("HUE",        "Hue",        "Apply hue from this layer",         16),
+    ("SATURATION", "Saturation", "Apply saturation from this layer",  17),
+    ("COLOR",      "Color",      "Apply hue and saturation, keep luminosity", 18),
+    ("LUMINOSITY", "Luminosity", "Apply luminosity, keep hue and saturation", 19),
 ]
 
 LAYER_TYPES = [
@@ -115,6 +120,7 @@ class TLM_LayerItem(PropertyGroup):
 
     visible: BoolProperty(
         name="Visible",
+        description="Toggle layer visibility in the composite",
         default=True,
         update=_on_layer_update,
     )
@@ -127,6 +133,7 @@ class TLM_LayerItem(PropertyGroup):
 
     opacity: FloatProperty(
         name="Opacity",
+        description="Layer opacity — 0 is fully transparent, 1 is fully opaque",
         min=0.0, max=1.0,
         default=1.0,
         subtype='FACTOR',
@@ -135,6 +142,7 @@ class TLM_LayerItem(PropertyGroup):
 
     blend_mode: EnumProperty(
         name="Blend Mode",
+        description="How this layer blends with layers below",
         items=BLEND_MODES,
         default="MIX",
         update=_on_layer_update,
@@ -150,6 +158,7 @@ class TLM_LayerItem(PropertyGroup):
     # Fill layer: solid color
     fill_color: bpy.props.FloatVectorProperty(
         name="Fill Color",
+        description="Solid fill color for this layer",
         subtype='COLOR',
         min=0.0, max=1.0,
         size=4,
@@ -160,12 +169,14 @@ class TLM_LayerItem(PropertyGroup):
     # Optional mask
     use_mask: BoolProperty(
         name="Use Mask",
+        description="Enable a paint mask to restrict where this layer is visible",
         default=False,
         update=_on_layer_update,
     )
 
     mask_image_name: StringProperty(
         name="Mask Image",
+        description="Image controlling where this layer is visible (white = visible)",
         default="",
         update=_on_layer_update,
     )
@@ -186,7 +197,8 @@ class TLM_LayerItem(PropertyGroup):
         update=_on_layer_update,
     )
     triplanar_scale: FloatProperty(
-        name="Scale", default=1.0, min=0.001, max=100.0,
+        name="Scale", description="Scale of the triplanar projection",
+        default=1.0, min=0.001, max=100.0,
         update=_on_layer_update,
     )
     triplanar_sharpness: FloatProperty(
@@ -206,43 +218,56 @@ class TLM_LayerItem(PropertyGroup):
     # All channels are opt-in: disabling them leaves the channel untouched.
 
     # Roughness
-    use_roughness: BoolProperty(name="Roughness", default=False, update=_on_layer_update)
-    roughness_image_name: StringProperty(name="Roughness Image", default="",
+    use_roughness: BoolProperty(name="Roughness", description="Enable roughness channel for this layer",
+        default=False, update=_on_layer_update)
+    roughness_image_name: StringProperty(name="Roughness Image",
+        description="Image texture for the roughness channel", default="",
         update=_on_layer_update)
     roughness_fill: FloatProperty(
-        name="Roughness", default=0.5, min=0.0, max=1.0, subtype='FACTOR',
+        name="Roughness", description="Constant roughness value (0 = smooth, 1 = rough)",
+        default=0.5, min=0.0, max=1.0, subtype='FACTOR',
         update=_on_layer_update,
     )
 
     # Metallic
-    use_metallic: BoolProperty(name="Metallic", default=False, update=_on_layer_update)
-    metallic_image_name: StringProperty(name="Metallic Image", default="",
+    use_metallic: BoolProperty(name="Metallic", description="Enable metallic channel for this layer",
+        default=False, update=_on_layer_update)
+    metallic_image_name: StringProperty(name="Metallic Image",
+        description="Image texture for the metallic channel", default="",
         update=_on_layer_update)
     metallic_fill: FloatProperty(
-        name="Metallic", default=0.0, min=0.0, max=1.0, subtype='FACTOR',
+        name="Metallic", description="Constant metallic value (0 = dielectric, 1 = metal)",
+        default=0.0, min=0.0, max=1.0, subtype='FACTOR',
         update=_on_layer_update,
     )
 
     # Normal Map
-    use_normal: BoolProperty(name="Normal", default=False, update=_on_layer_update)
-    normal_image_name: StringProperty(name="Normal Image", default="",
+    use_normal: BoolProperty(name="Normal", description="Enable normal map channel for this layer",
+        default=False, update=_on_layer_update)
+    normal_image_name: StringProperty(name="Normal Image",
+        description="Normal map image for this layer", default="",
         update=_on_layer_update)
     normal_strength: FloatProperty(
-        name="Normal Strength", default=1.0, min=0.0, max=5.0,
+        name="Normal Strength", description="Strength of the normal map effect",
+        default=1.0, min=0.0, max=5.0,
         update=_on_layer_update,
     )
 
     # Emission
-    use_emission: BoolProperty(name="Emission", default=False, update=_on_layer_update)
-    emission_image_name: StringProperty(name="Emission Image", default="",
+    use_emission: BoolProperty(name="Emission", description="Enable emission (glow) channel for this layer",
+        default=False, update=_on_layer_update)
+    emission_image_name: StringProperty(name="Emission Image",
+        description="Image texture for the emission channel", default="",
         update=_on_layer_update)
     emission_color: bpy.props.FloatVectorProperty(
-        name="Emission Color", subtype='COLOR',
+        name="Emission Color", description="Emission color when no image is assigned",
+        subtype='COLOR',
         min=0.0, max=1.0, size=4, default=(1.0, 1.0, 1.0, 1.0),
         update=_on_layer_update,
     )
     emission_strength: FloatProperty(
-        name="Emission Strength", default=1.0, min=0.0, max=100.0,
+        name="Emission Strength", description="Intensity multiplier for the emission effect",
+        default=1.0, min=0.0, max=100.0,
         update=_on_layer_update,
     )
 
@@ -254,11 +279,13 @@ class TLM_LayerItem(PropertyGroup):
         update=_on_layer_update,
     )
     bump_strength: FloatProperty(
-        name="Bump Strength", default=0.5, min=0.0, max=5.0,
+        name="Bump Strength", description="How strongly the bump displaces the surface",
+        default=0.5, min=0.0, max=5.0,
         update=_on_layer_update,
     )
     bump_distance: FloatProperty(
-        name="Bump Distance", default=0.05, min=0.001, max=1.0,
+        name="Bump Distance", description="Scale of the bump displacement",
+        default=0.05, min=0.001, max=1.0,
         update=_on_layer_update,
     )
 
@@ -303,6 +330,7 @@ class TLM_LayerItem(PropertyGroup):
             ('BRIGHT_CONTRAST', "Brightness/Contrast","Adjust brightness and contrast"),
             ('LEVELS',         "Levels",             "Remap input/output tonal range"),
             ('COLOR_BALANCE',  "Color Balance",      "Lift / Gamma / Gain (cinematic grading)"),
+            ('CURVES',         "Curves",             "Parametric RGB curve (contrast, brightness, tone clipping)"),
         ],
         default='HUE_SAT',
         update=_on_layer_update,
@@ -310,64 +338,101 @@ class TLM_LayerItem(PropertyGroup):
 
     # Hue/Saturation/Value
     adj_hue: FloatProperty(
-        name="Hue", default=0.5, min=0.0, max=1.0, subtype='FACTOR',
+        name="Hue", description="Rotate hue — 0.5 is no change",
+        default=0.5, min=0.0, max=1.0, subtype='FACTOR',
         update=_on_layer_update,
     )
     adj_saturation: FloatProperty(
-        name="Saturation", default=1.0, min=0.0, max=2.0,
+        name="Saturation", description="Saturation multiplier — 1.0 is no change, 0 is greyscale",
+        default=1.0, min=0.0, max=2.0,
         update=_on_layer_update,
     )
     adj_value: FloatProperty(
-        name="Value", default=1.0, min=0.0, max=2.0,
+        name="Value", description="Value/brightness multiplier — 1.0 is no change",
+        default=1.0, min=0.0, max=2.0,
         update=_on_layer_update,
     )
 
     # Brightness/Contrast
     adj_brightness: FloatProperty(
-        name="Brightness", default=0.0, min=-1.0, max=1.0,
+        name="Brightness", description="Shift brightness up or down",
+        default=0.0, min=-1.0, max=1.0,
         update=_on_layer_update,
     )
     adj_contrast: FloatProperty(
-        name="Contrast", default=0.0, min=-1.0, max=1.0,
+        name="Contrast", description="Increase or decrease contrast",
+        default=0.0, min=-1.0, max=1.0,
         update=_on_layer_update,
     )
 
     # Levels
     adj_in_min: FloatProperty(
-        name="Input Black", default=0.0, min=0.0, max=1.0, subtype='FACTOR',
+        name="Input Black", description="Black point of the input tonal range",
+        default=0.0, min=0.0, max=1.0, subtype='FACTOR',
         update=_on_layer_update,
     )
     adj_in_max: FloatProperty(
-        name="Input White", default=1.0, min=0.0, max=1.0, subtype='FACTOR',
+        name="Input White", description="White point of the input tonal range",
+        default=1.0, min=0.0, max=1.0, subtype='FACTOR',
         update=_on_layer_update,
     )
-    # FIX: renamed from adj_gamma (which was silently overwritten by the
-    # Color Balance FloatVectorProperty below). Now uses a distinct name.
     adj_levels_gamma: FloatProperty(
-        name="Gamma (Midtones)", default=1.0, min=0.1, max=10.0,
+        name="Gamma (Midtones)", description="Midtone gamma correction",
+        default=1.0, min=0.1, max=10.0,
         update=_on_layer_update,
     )
     adj_out_min: FloatProperty(
-        name="Output Black", default=0.0, min=0.0, max=1.0, subtype='FACTOR',
+        name="Output Black", description="Black point of the output tonal range",
+        default=0.0, min=0.0, max=1.0, subtype='FACTOR',
         update=_on_layer_update,
     )
     adj_out_max: FloatProperty(
-        name="Output White", default=1.0, min=0.0, max=1.0, subtype='FACTOR',
+        name="Output White", description="White point of the output tonal range",
+        default=1.0, min=0.0, max=1.0, subtype='FACTOR',
         update=_on_layer_update,
     )
 
     # Color Balance (Lift / Gamma / Gain)
     adj_lift: bpy.props.FloatVectorProperty(
-        name="Lift", subtype='COLOR', min=0.0, max=2.0, size=3,
+        name="Lift", description="Shadows color correction",
+        subtype='COLOR', min=0.0, max=2.0, size=3,
         default=(1.0, 1.0, 1.0), update=_on_layer_update,
     )
     adj_gamma: bpy.props.FloatVectorProperty(
-        name="Gamma", subtype='COLOR', min=0.0, max=2.0, size=3,
+        name="Gamma", description="Midtones color correction",
+        subtype='COLOR', min=0.0, max=2.0, size=3,
         default=(1.0, 1.0, 1.0), update=_on_layer_update,
     )
     adj_gain: bpy.props.FloatVectorProperty(
-        name="Gain", subtype='COLOR', min=0.0, max=2.0, size=3,
+        name="Gain", description="Highlights color correction",
+        subtype='COLOR', min=0.0, max=2.0, size=3,
         default=(1.0, 1.0, 1.0), update=_on_layer_update,
+    )
+
+    # Curves (parametric)
+    adj_curve_contrast: FloatProperty(
+        name="Contrast",
+        description="S-curve contrast: positive increases contrast, negative decreases",
+        default=0.0, min=-1.0, max=1.0,
+        update=_on_layer_update,
+    )
+    adj_curve_brightness: FloatProperty(
+        name="Brightness",
+        description="Shift midpoint of curve up or down",
+        default=0.0, min=-1.0, max=1.0,
+        update=_on_layer_update,
+    )
+    adj_curve_black_point: FloatProperty(
+        name="Black Point",
+        description="Raise shadows — crush blacks by lifting the low end",
+        default=0.0, min=0.0, max=1.0, subtype='FACTOR',
+        update=_on_layer_update,
+    )
+    adj_curve_white_point: FloatProperty(
+        name="White Point",
+        description="Lower highlights — clip whites by pulling down the high end",
+        default=1.0, min=0.0, max=1.0, subtype='FACTOR',
+        update=_on_layer_update,
     )
 
     # ── Procedural layer properties ───────────────────────────────────────────
@@ -381,6 +446,8 @@ class TLM_LayerItem(PropertyGroup):
             ('GRADIENT', "Gradient", "Linear, radial, quadratic or spherical gradient"),
             ('MUSGRAVE', "Musgrave", "Fractal noise (Multifractal, Ridged, etc.)"),
             ('CHECKER',  "Checker",  "Alternating checkerboard pattern"),
+            ('MARBLE',   "Marble",   "Wave bands distorted by noise — marble/veined stone"),
+            ('CLOUDS',   "Clouds",   "Soft billowy noise — clouds, smoke, organic shapes"),
         ],
         default='NOISE',
         update=_on_layer_update,
@@ -388,38 +455,48 @@ class TLM_LayerItem(PropertyGroup):
 
     # Shared: scale, mapping offset/rotation
     proc_scale: FloatProperty(
-        name="Scale", default=5.0, min=0.001, max=1000.0,
+        name="Scale", description="Overall scale of the procedural texture",
+        default=5.0, min=0.001, max=1000.0,
         update=_on_layer_update,
     )
-    proc_offset_x: FloatProperty(name="Offset X", default=0.0, update=_on_layer_update)
-    proc_offset_y: FloatProperty(name="Offset Y", default=0.0, update=_on_layer_update)
-    proc_offset_z: FloatProperty(name="Offset Z", default=0.0, update=_on_layer_update)
+    proc_offset_x: FloatProperty(name="Offset X", description="Offset texture origin along X",
+        default=0.0, update=_on_layer_update)
+    proc_offset_y: FloatProperty(name="Offset Y", description="Offset texture origin along Y",
+        default=0.0, update=_on_layer_update)
+    proc_offset_z: FloatProperty(name="Offset Z", description="Offset texture origin along Z",
+        default=0.0, update=_on_layer_update)
 
     # Colors (Color1 = dark/base, Color2 = bright/accent)
     proc_color1: bpy.props.FloatVectorProperty(
-        name="Color 1", subtype='COLOR', min=0.0, max=1.0, size=4,
+        name="Color 1", description="Dark/base color of the procedural gradient",
+        subtype='COLOR', min=0.0, max=1.0, size=4,
         default=(0.0, 0.0, 0.0, 1.0), update=_on_layer_update,
     )
     proc_color2: bpy.props.FloatVectorProperty(
-        name="Color 2", subtype='COLOR', min=0.0, max=1.0, size=4,
+        name="Color 2", description="Bright/accent color of the procedural gradient",
+        subtype='COLOR', min=0.0, max=1.0, size=4,
         default=(1.0, 1.0, 1.0, 1.0), update=_on_layer_update,
     )
 
     # Noise / Musgrave
     proc_detail: FloatProperty(
-        name="Detail", default=2.0, min=0.0, max=15.0,
+        name="Detail", description="Number of noise octaves — more detail means finer grain",
+        default=2.0, min=0.0, max=15.0,
         update=_on_layer_update,
     )
     proc_roughness_proc: FloatProperty(
-        name="Roughness", default=0.5, min=0.0, max=1.0,
+        name="Roughness", description="Blending roughness between noise octaves",
+        default=0.5, min=0.0, max=1.0,
         update=_on_layer_update,
     )
     proc_distortion: FloatProperty(
-        name="Distortion", default=0.0, min=-10.0, max=10.0,
+        name="Distortion", description="Amount of distortion applied to the texture",
+        default=0.0, min=-10.0, max=10.0,
         update=_on_layer_update,
     )
     proc_lacunarity: FloatProperty(
-        name="Lacunarity", default=2.0, min=0.0, max=10.0,
+        name="Lacunarity", description="Gap between successive noise octaves",
+        default=2.0, min=0.0, max=10.0,
         update=_on_layer_update,
     )
 
@@ -439,16 +516,17 @@ class TLM_LayerItem(PropertyGroup):
     proc_voronoi_distance: EnumProperty(
         name="Distance",
         items=[
-            ('EUCLIDEAN', "Euclidean", ""),
-            ('MANHATTAN', "Manhattan", ""),
-            ('CHEBYCHEV', "Chebychev", ""),
-            ('MINKOWSKI', "Minkowski", ""),
+            ('EUCLIDEAN', "Euclidean", "Standard straight-line distance"),
+            ('MANHATTAN', "Manhattan", "Grid-based taxi-cab distance"),
+            ('CHEBYCHEV', "Chebychev", "Maximum of axis distances"),
+            ('MINKOWSKI', "Minkowski", "Generalized distance metric"),
         ],
         default='EUCLIDEAN',
         update=_on_layer_update,
     )
     proc_randomness: FloatProperty(
-        name="Randomness", default=1.0, min=0.0, max=1.0,
+        name="Randomness", description="Randomness of Voronoi cell positions",
+        default=1.0, min=0.0, max=1.0,
         update=_on_layer_update,
     )
 
@@ -465,15 +543,16 @@ class TLM_LayerItem(PropertyGroup):
     proc_wave_profile: EnumProperty(
         name="Profile",
         items=[
-            ('SIN',      "Sine",     ""),
-            ('SAW',      "Sawtooth", ""),
-            ('TRI',      "Triangle", ""),
+            ('SIN',      "Sine",     "Smooth sine wave"),
+            ('SAW',      "Sawtooth", "Sharp sawtooth ramp"),
+            ('TRI',      "Triangle", "Triangular zigzag wave"),
         ],
         default='SIN',
         update=_on_layer_update,
     )
     proc_wave_detail_scale: FloatProperty(
-        name="Detail Scale", default=1.0, min=0.0, max=10.0,
+        name="Detail Scale", description="Scale of the detail noise overlaid on the wave",
+        default=1.0, min=0.0, max=10.0,
         update=_on_layer_update,
     )
 
@@ -481,13 +560,13 @@ class TLM_LayerItem(PropertyGroup):
     proc_gradient_type: EnumProperty(
         name="Gradient Type",
         items=[
-            ('LINEAR',     "Linear",     ""),
-            ('QUADRATIC',  "Quadratic",  ""),
-            ('EASING',     "Easing",     ""),
-            ('DIAGONAL',   "Diagonal",   ""),
-            ('SPHERICAL',  "Spherical",  ""),
-            ('QUADRATIC_SPHERE', "Quad Sphere", ""),
-            ('RADIAL',     "Radial",     ""),
+            ('LINEAR',     "Linear",     "Straight linear gradient"),
+            ('QUADRATIC',  "Quadratic",  "Quadratic falloff gradient"),
+            ('EASING',     "Easing",     "Smooth ease-in/ease-out"),
+            ('DIAGONAL',   "Diagonal",   "Diagonal corner-to-corner"),
+            ('SPHERICAL',  "Spherical",  "Spherical radial falloff"),
+            ('QUADRATIC_SPHERE', "Quad Sphere", "Quadratic spherical falloff"),
+            ('RADIAL',     "Radial",     "Angular radial sweep"),
         ],
         default='LINEAR',
         update=_on_layer_update,
@@ -495,7 +574,26 @@ class TLM_LayerItem(PropertyGroup):
 
     # Checker
     proc_checker_scale: FloatProperty(
-        name="Checker Scale", default=5.0, min=0.001, max=1000.0,
+        name="Checker Scale", description="Size of the checker squares",
+        default=5.0, min=0.001, max=1000.0,
+        update=_on_layer_update,
+    )
+
+    # Marble
+    proc_marble_distortion: FloatProperty(
+        name="Turbulence",
+        description="Amount of noise distortion applied to the wave bands",
+        default=2.0, min=0.0, max=20.0,
+        update=_on_layer_update,
+    )
+    proc_marble_wave_type: EnumProperty(
+        name="Pattern",
+        description="Marble band pattern",
+        items=[
+            ('BANDS', "Bands", "Parallel marble veins"),
+            ('RINGS', "Rings", "Concentric marble rings"),
+        ],
+        default='BANDS',
         update=_on_layer_update,
     )
 
@@ -534,10 +632,10 @@ class TLM_MaterialProperties(PropertyGroup):
     resolution: EnumProperty(
         name="New Layer Resolution",
         items=[
-            ("512",  "512 × 512",   ""),
-            ("1024", "1024 × 1024", ""),
-            ("2048", "2048 × 2048", ""),
-            ("4096", "4096 × 4096", ""),
+            ("512",  "512 × 512",   "Low resolution, fast performance"),
+            ("1024", "1024 × 1024", "Standard resolution for most use cases"),
+            ("2048", "2048 × 2048", "High resolution for detailed textures"),
+            ("4096", "4096 × 4096", "Ultra-high resolution, may be slow"),
         ],
         default="1024",
     )

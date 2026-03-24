@@ -49,22 +49,20 @@ class TLM_UL_LayerList(UIList):
             op.layer_index = index
             row.label(text="", icon='FILE_FOLDER')
         else:
-            _USE_PREVIEWS = bpy.app.version < (5, 0, 0)
             fallback = {
                 'PAINT': 'IMAGE_RGB_ALPHA', 'FILL': 'COLOR',
                 'ADJUSTMENT': 'MODIFIER', 'PROCEDURAL': 'TEXTURE',
             }.get(layer.layer_type, 'IMAGE_DATA')
-            if _USE_PREVIEWS:
+            iid = 0
+            try:
                 if layer.layer_type == "PAINT":
                     iid = previews.get_layer_icon_id(layer)
                 elif layer.layer_type == "FILL":
                     iid = previews.get_fill_icon_id(layer)
-                else:
-                    iid = 0
-                if iid and 0 < iid <= 0x7FFFFFFF:
-                    row.label(text="", icon_value=iid)
-                else:
-                    row.label(text="", icon=fallback)
+            except Exception:
+                iid = 0
+            if iid and iid > 0:
+                row.label(text="", icon_value=iid)
             else:
                 row.label(text="", icon=fallback)
 
@@ -144,11 +142,6 @@ def draw_tlm_main(layout, context):
     ops_row.operator("tlm.move_layer",      text="", icon='TRIA_DOWN').direction = "DOWN"
     ops_row.separator()
     ops_row.operator("tlm.duplicate_layer", text="", icon='DUPLICATE')
-    ops_row.separator()
-    sym = ops_row.row(align=True)
-    sym.scale_x = 0.85
-    sym.operator("tlm.toggle_symmetry_paint", text="X", icon='MOD_MIRROR').axis = 'X'
-    sym.operator("tlm.toggle_symmetry_paint", text="Y", icon='MOD_MIRROR').axis = 'Y'
 
     layout.template_list(
         "TLM_UL_layer_list", "",
@@ -232,6 +225,14 @@ def _draw_procedural(col, active, tlm):
         col.prop(active, "proc_lacunarity",     slider=True)
     elif pt == 'CHECKER':
         col.prop(active, "proc_checker_scale")
+    elif pt == 'MARBLE':
+        col.prop(active, "proc_marble_wave_type", text="Pattern")
+        col.prop(active, "proc_detail",              slider=True)
+        col.prop(active, "proc_roughness_proc",      slider=True, text="Roughness")
+        col.prop(active, "proc_marble_distortion",   slider=True)
+    elif pt == 'CLOUDS':
+        col.prop(active, "proc_detail",         slider=True)
+        col.prop(active, "proc_roughness_proc", slider=True, text="Softness")
 
     col.separator(factor=0.5)
     off_row = col.row(align=True)
@@ -248,9 +249,11 @@ def _draw_procedural(col, active, tlm):
     col.separator(factor=0.6)
     mr = col.row(align=True)
     mr.prop(active, "use_mask", text="Mask", icon='MOD_MASK', toggle=True)
-    if active.use_mask:
+    if active.use_mask and active.mask_image_name:
         mr.prop_search(active, "mask_image_name", bpy.data, "images",
                        text="", icon='IMAGE_DATA')
+    elif active.use_mask:
+        mr.operator("tlm.add_layer_mask", text="New",   icon='ADD')
     else:
         mr.operator("tlm.add_layer_mask", text="Add",   icon='ADD')
     mr.operator("tlm.add_smart_mask",     text="Smart", icon='SHADERFX')
@@ -311,6 +314,14 @@ def _draw_adjustment(col, active, tlm):
         g.prop(active, "adj_gamma", text="")
         g.label(text="Gain (Highlights):")
         g.prop(active, "adj_gain",  text="")
+    elif active.adj_type == 'CURVES':
+        col.prop(active, "adj_curve_contrast",   slider=True)
+        col.prop(active, "adj_curve_brightness", slider=True)
+        col.separator(factor=0.3)
+        col.label(text="Tone Clipping:", icon='IPO_LINEAR')
+        cr = col.row(align=True)
+        cr.prop(active, "adj_curve_black_point", text="Black", slider=True)
+        cr.prop(active, "adj_curve_white_point", text="White", slider=True)
     col.separator(factor=0.5)
     _draw_group_assignment(col, active, tlm)
 
@@ -335,10 +346,11 @@ def _draw_paint_fill(col, active, tlm):
     col.separator(factor=0.6)
     mr = col.row(align=True)
     mr.prop(active, "use_mask", text="Mask", icon='MOD_MASK', toggle=True)
-    if active.use_mask:
-        # Show image picker so user can assign any existing bpy.data.images image
+    if active.use_mask and active.mask_image_name:
         mr.prop_search(active, "mask_image_name", bpy.data, "images",
                        text="", icon='IMAGE_DATA')
+    elif active.use_mask:
+        mr.operator("tlm.add_layer_mask", text="New",   icon='ADD')
     else:
         mr.operator("tlm.add_layer_mask", text="Add",   icon='ADD')
     mr.operator("tlm.add_smart_mask",     text="Smart", icon='SHADERFX')
@@ -455,14 +467,14 @@ def draw_tlm_settings(layout, context):
     ops_row = comp.row(align=True)
     ops_row.operator("tlm.rebuild_composite", text="Rebuild",   icon='FILE_REFRESH')
     ops_row.operator("tlm.flatten_layers",    text="Flatten",   icon='IMAGE_ZDEPTH')
-    comp.operator("tlm.refresh_thumbnails",   text="Refresh Thumbnails", icon='IMAGE_RELOAD')
+    comp.operator("tlm.refresh_thumbnails",   text="Refresh Thumbnails", icon='FILE_REFRESH')
 
     layout.separator(factor=0.8)
     layout.label(text="Bake & Export", icon='RENDER_STILL')
     layout.operator("tlm.bake_pbr", text="Bake PBR Maps…", icon='EXPORT')
 
     layout.separator(factor=0.8)
-    layout.label(text="Presets", icon='PRESET')
+    layout.label(text="Presets", icon='PRESET_NEW')
     from .operators import BUILTIN_PRESETS
     grid = layout.column(align=True)
     grid.scale_y = 0.95

@@ -2,160 +2,101 @@
 previews.py
 Thumbnail preview system for Texture Layer Manager.
 
-Blender 5.0 enforces 64x64 preview size (16384 flat RGBA bytes).
-Older versions used 128x128 (65536 flat RGBA bytes).
-Both use flat [R,G,B,A, R,G,B,A, ...] uint8 format.
+Uses Blender's native image preview system (image.preview_ensure())
+for paint layers, and small helper images for fill layer swatches.
 """
 
 import bpy
-import bpy.utils.previews
-import numpy as np
 
-_preview_collection = None
-_cache = {}  # image_name -> (pixel_hash, icon_id)
-
-# Blender 5.0 enforces 64x64; older versions support 128x128
-THUMB_SIZE = 64 if bpy.app.version >= (5, 0, 0) else 128
-
-
-def _get_collection():
-    global _preview_collection
-    if _preview_collection is None:
-        _preview_collection = bpy.utils.previews.new()
-    return _preview_collection
-
-
-def _cheap_hash(image):
-    """Sample ~16 pixels for fast change detection.
-
-    FIX: the original accessed image.pixels as a Python sequence (slow — Blender
-    loads all pixels before allowing indexed access).  foreach_get into a small
-    pre-allocated buffer samples only what we need in one C-level call.
-    """
-    if image is None or image.size[0] == 0 or image.size[1] == 0:
-        return 0
-    w, h = image.size
-    total = w * h
-    if total == 0:
-        return 0
-
-    # Sample up to 16 evenly-spaced pixels; each pixel is 4 floats
-    n_samples = min(16, total)
-    step = max(1, total // n_samples)
-    indices = range(0, total, step)
-
-    # Read only the required pixels via foreach_get on a full buffer
-    # (Blender doesn't expose random-access foreach_get, so we read all
-    #  and index — still faster because it avoids Python-level iteration)
-    buf = np.empty(total * 4, dtype=np.float32)
-    image.pixels.foreach_get(buf)
-
-    sample = []
-    for i in indices:
-        base = i * 4
-        sample.append(round(float(buf[base]),     2))
-        sample.append(round(float(buf[base + 1]), 2))
-        sample.append(round(float(buf[base + 2]), 2))
-    return hash(tuple(sample))
-
-
-def _generate_thumbnail(image):
-    """Downsample image to THUMB_SIZE and write into the preview collection."""
-    pcoll = _get_collection()
-    key = image.name
-
-    w, h = image.size
-    if w == 0 or h == 0:
-        return 0
-
-    buf = np.empty(w * h * 4, dtype=np.float32)
-    image.pixels.foreach_get(buf)
-    buf = buf.reshape((h, w, 4))
-    buf = buf[::-1, :, :]  # flip vertically (Blender is bottom-up)
-
-    th = THUMB_SIZE
-    y_idx = np.linspace(0, h - 1, th).astype(int)
-    x_idx = np.linspace(0, w - 1, th).astype(int)
-    thumb = buf[np.ix_(y_idx, x_idx)]
-
-    # flat uint8 list length = th*th*4  (16384 for Blender 5.0)
-    flat = (np.clip(thumb, 0.0, 1.0) * 255).astype(np.uint8).flatten().tolist()
-
-    if key in pcoll:
-        del pcoll[key]
-
-    preview = pcoll.new(key)
-    preview.image_size = (th, th)
-    preview.image_pixels = flat
-
-    return int(preview.icon_id) & 0x7FFFFFFF
+# Cache fill-swatch image names so we don't recreate them every draw
+_fill_cache = {}  # "(r,g,b,a)" -> image_name
 
 
 def get_layer_icon_id(layer):
-    """Return icon_id for a paint layer, regenerating if dirty."""
+    """Return icon_id for a paint layer using Blender's native preview."""
     image = layer.image
     if image is None:
         return 0
-
-    key = image.name
-    current_hash = _cheap_hash(image)
-    cached = _cache.get(key)
-    if cached and cached[0] == current_hash:
-        return cached[1]
-
     try:
-        icon_id = _generate_thumbnail(image)
-        _cache[key] = (current_hash, icon_id)
-        return icon_id
+        image.preview_ensure()
+        iid = image.preview.icon_id
+        if iid and iid > 0:
+            return iid
     except Exception:
-        return 0
+        pass
+    return 0
 
 
 def get_fill_icon_id(layer):
-    """Return icon_id for a fill layer (solid color swatch)."""
-    pcoll = _get_collection()
+    """Return icon_id for a fill layer (solid color swatch).
+
+    Creates a tiny 4x4 image filled with the layer color and uses
+    Blender's native preview system to display it.
+    """
     r, g, b, a = layer.fill_color
-    key = f"__fill_{r:.3f}_{g:.3f}_{b:.3f}_{a:.3f}"
+    key = f"{r:.2f},{g:.2f},{b:.2f},{a:.2f}"
 
-    if key in pcoll:
-        return int(pcoll[key].icon_id) & 0x7FFFFFFF
+    cached_name = _fill_cache.get(key)
+    if cached_name:
+        img = bpy.data.images.get(cached_name)
+        if img is not None:
+            try:
+                img.preview_ensure()
+                iid = img.preview.icon_id
+                if iid and iid > 0:
+                    return iid
+            except Exception:
+                pass
 
-    th = THUMB_SIZE
-    ri, gi, bi, ai = int(r * 255), int(g * 255), int(b * 255), int(a * 255)
-    # length = th*th*4 = 16384 for Blender 5.0
-    flat = [ri, gi, bi, ai] * (th * th)
+    # Create a small swatch image
+    name = f".tlm_swatch_{key}"
+    img = bpy.data.images.get(name)
+    if img is None:
+        img = bpy.data.images.new(name, 4, 4, alpha=True)
 
-    preview = pcoll.new(key)
-    preview.image_size = (th, th)
-    preview.image_pixels = flat
+    # Fill with the color (4x4 = 16 pixels, 64 floats)
+    pixels = [r, g, b, a] * (4 * 4)
+    img.pixels.foreach_set(pixels)
+    img.update()
 
-    return int(preview.icon_id) & 0x7FFFFFFF
+    _fill_cache[key] = name
+
+    try:
+        img.preview_ensure()
+        iid = img.preview.icon_id
+        if iid and iid > 0:
+            return iid
+    except Exception:
+        pass
+    return 0
 
 
 def invalidate(image_name):
-    """Mark a layer thumbnail as dirty."""
-    _cache.pop(image_name, None)
-    pcoll = _get_collection()
-    if image_name in pcoll:
-        del pcoll[image_name]
+    """Mark a layer thumbnail as dirty (force preview regeneration)."""
+    img = bpy.data.images.get(image_name)
+    if img is not None and img.preview:
+        img.preview.reload()
 
 
 def invalidate_all():
     """Clear the entire thumbnail cache."""
-    global _cache
-    _cache = {}
-    _get_collection().clear()
+    global _fill_cache
+    _fill_cache = {}
+    # Clean up swatch images
+    for img in list(bpy.data.images):
+        if img.name.startswith(".tlm_swatch_"):
+            bpy.data.images.remove(img)
 
 
 def register():
-    global _preview_collection, _cache
-    _preview_collection = bpy.utils.previews.new()
-    _cache = {}
+    global _fill_cache
+    _fill_cache = {}
 
 
 def unregister():
-    global _preview_collection, _cache
-    if _preview_collection is not None:
-        bpy.utils.previews.remove(_preview_collection)
-        _preview_collection = None
-    _cache = {}
+    global _fill_cache
+    # Clean up swatch images
+    for img in list(bpy.data.images):
+        if img.name.startswith(".tlm_swatch_"):
+            bpy.data.images.remove(img)
+    _fill_cache = {}

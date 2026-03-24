@@ -12,6 +12,15 @@ import bpy
 
 TLM_PREFIX = "TLM_"
 
+# Deterministic node counter — resets each rebuild so names are stable
+_node_counter = 0
+
+def _next_id():
+    """Return a sequential int that's stable across rebuilds."""
+    global _node_counter
+    _node_counter += 1
+    return _node_counter
+
 # ── Blend mode mapping ────────────────────────────────────────────────────────
 
 BLEND_TO_MIX_MODE = {
@@ -20,7 +29,9 @@ BLEND_TO_MIX_MODE = {
     "DIFFERENCE": "DIFFERENCE", "DIVIDE": "DIVIDE", "DARKEN": "DARKEN",
     "LIGHTEN": "LIGHTEN", "COLOR_DODGE": "DODGE", "COLOR_BURN": "BURN",
     "SOFT_LIGHT": "SOFT_LIGHT", "HARD_LIGHT": "HARD_LIGHT",
-    "LINEAR_LIGHT": "LINEAR_LIGHT",
+    "LINEAR_LIGHT": "LINEAR_LIGHT", "EXCLUSION": "EXCLUSION",
+    "HUE": "HUE", "SATURATION": "SATURATION", "COLOR": "COLOR",
+    "LUMINOSITY": "VALUE",
 }
 
 # PBR channel descriptors: (property_flag, image_prop, bsdf_input, is_normal, is_scalar)
@@ -40,6 +51,24 @@ def _use_new_mix():
 
 # ── Node helpers ──────────────────────────────────────────────────────────────
 
+def _save_node_positions(node_tree):
+    """Save positions of all TLM nodes before rebuild."""
+    positions = {}
+    for n in node_tree.nodes:
+        if n.name.startswith(TLM_PREFIX):
+            positions[n.name] = (n.location.x, n.location.y)
+    return positions
+
+
+def _restore_node_positions(node_tree, positions):
+    """Restore saved positions to TLM nodes after rebuild."""
+    if not positions:
+        return
+    for n in node_tree.nodes:
+        if n.name in positions:
+            n.location.x, n.location.y = positions[n.name]
+
+
 def _clear_tlm_nodes(node_tree):
     to_remove = [n for n in node_tree.nodes if n.name.startswith(TLM_PREFIX)]
     for n in to_remove:
@@ -53,7 +82,7 @@ def _new_img_tex(node_tree, image, uv_map, x, y, colorspace="sRGB", layer=None):
                                   layer.triplanar_scale, layer.triplanar_sharpness)
 
     node = node_tree.nodes.new("ShaderNodeTexImage")
-    node.name = f"{TLM_PREFIX}img_{image.name}_{id(node)}"
+    node.name = f"{TLM_PREFIX}img_{image.name}_{_next_id()}"
     node.image = image
     node.location = (x, y)
     if colorspace == "Non-Color":
@@ -62,7 +91,7 @@ def _new_img_tex(node_tree, image, uv_map, x, y, colorspace="sRGB", layer=None):
         except Exception:
             pass
     uv = node_tree.nodes.new("ShaderNodeUVMap")
-    uv.name = f"{TLM_PREFIX}uv_{id(uv)}"
+    uv.name = f"{TLM_PREFIX}uv_{_next_id()}"
     uv.uv_map = uv_map
     uv.location = (x - 220, y)
     node_tree.links.new(uv.outputs["UV"], node.inputs["Vector"])
@@ -79,7 +108,7 @@ def _new_triplanar_tex(node_tree, image, x, y, colorspace="sRGB", scale=1.0, sha
     """
     # Geometry node for normal and position
     geo = node_tree.nodes.new("ShaderNodeNewGeometry")
-    geo.name = f"{TLM_PREFIX}tri_geo_{id(geo)}"
+    geo.name = f"{TLM_PREFIX}tri_geo_{_next_id()}"
     geo.location = (x - 700, y)
     # Separate XYZ from normal for blending weights
     sep_n = node_tree.nodes.new("ShaderNodeSeparateXYZ")
@@ -250,7 +279,7 @@ def _new_mix(node_tree, blend_mode, opacity, x, y):
         node = node_tree.nodes.new("ShaderNodeMixRGB")
         node.blend_type = BLEND_TO_MIX_MODE.get(blend_mode, "MIX")
         node.inputs["Fac"].default_value = opacity
-    node.name = f"{TLM_PREFIX}mix_{id(node)}"
+    node.name = f"{TLM_PREFIX}mix_{_next_id()}"
     node.location = (x, y)
     return node
 
@@ -266,7 +295,7 @@ def _new_mix_scalar(node_tree, opacity, x, y):
         node = node_tree.nodes.new("ShaderNodeMixRGB")
         node.blend_type = 'MIX'
         node.inputs["Fac"].default_value = opacity
-    node.name = f"{TLM_PREFIX}mix_scalar_{id(node)}"
+    node.name = f"{TLM_PREFIX}mix_scalar_{_next_id()}"
     node.location = (x, y)
     return node
 
@@ -315,7 +344,7 @@ def _result_socket_scalar(node):
 
 def _new_fill(node_tree, color, x, y):
     node = node_tree.nodes.new("ShaderNodeRGB")
-    node.name = f"{TLM_PREFIX}fill_{id(node)}"
+    node.name = f"{TLM_PREFIX}fill_{_next_id()}"
     node.outputs[0].default_value = color
     node.location = (x, y)
     return node
@@ -324,7 +353,7 @@ def _new_fill(node_tree, color, x, y):
 def _new_value(node_tree, value, x, y):
     """Single float Value node for scalar fill."""
     node = node_tree.nodes.new("ShaderNodeValue")
-    node.name = f"{TLM_PREFIX}val_{id(node)}"
+    node.name = f"{TLM_PREFIX}val_{_next_id()}"
     node.outputs[0].default_value = value
     node.location = (x, y)
     return node
@@ -392,7 +421,7 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
         if flag_attr and not getattr(layer, flag_attr, False):
             # Still update prev_alpha from base color image
             if channel_id == 'base_color' and layer.layer_type == "PAINT" and layer.image:
-                tex = _new_img_tex(node_tree, layer.image, uv_map, x, y)
+                tex = _new_img_tex(node_tree, layer.image, uv_map, x, y, layer=layer)
                 if current is None:
                     current = tex.outputs["Color"]
                     prev_alpha = tex.outputs["Alpha"]
@@ -419,7 +448,7 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
                 # whatever you paint becomes the emission. Falls back to emission_color fill
                 # if no image exists.
                 if layer.image:
-                    tex = _new_img_tex(node_tree, layer.image, uv_map, x, y, "sRGB")
+                    tex = _new_img_tex(node_tree, layer.image, uv_map, x, y, "sRGB", layer=layer)
                     layer_out = tex.outputs["Color"]
                     layer_alpha = tex.outputs["Alpha"]
                 else:
@@ -445,7 +474,7 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
                 cs = "Non-Color"
 
             target_img = layer.image if channel_id == 'base_color' else img
-            tex = _new_img_tex(node_tree, target_img, uv_map, x, y, cs)
+            tex = _new_img_tex(node_tree, target_img, uv_map, x, y, cs, layer=layer)
             layer_out = tex.outputs["Color"]
             layer_alpha = tex.outputs["Alpha"]
 
@@ -471,7 +500,7 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
                 img = bpy.data.images.get(img_name) if img_name else None
                 if img:
                     print(f"[TLM] FILL {channel_id}: using image '{img.name}' for layer '{layer.name}'")
-                    tex = _new_img_tex(node_tree, img, uv_map, x, y, "Non-Color")
+                    tex = _new_img_tex(node_tree, img, uv_map, x, y, "Non-Color", layer=layer)
                     sep = node_tree.nodes.new("ShaderNodeSeparateColor")
                     sep.name = f"{TLM_PREFIX}sep_scalar_{id(sep)}"
                     sep.location = (x + 220, y)
@@ -488,7 +517,7 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
                 img = bpy.data.images.get(img_name) if img_name else None
                 if img:
                     print(f"[TLM] FILL emission: using image '{img.name}' for layer '{layer.name}'")
-                    tex = _new_img_tex(node_tree, img, uv_map, x, y, "sRGB")
+                    tex = _new_img_tex(node_tree, img, uv_map, x, y, "sRGB", layer=layer)
                     layer_out = tex.outputs["Color"]
                 else:
                     print(f"[TLM] FILL emission: no image, using emission_color for layer '{layer.name}'")
@@ -500,7 +529,7 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
                 img = bpy.data.images.get(img_name) if img_name else None
                 if img:
                     print(f"[TLM] FILL normal: using image '{img.name}' for layer '{layer.name}'")
-                    tex = _new_img_tex(node_tree, img, uv_map, x, y, "Non-Color")
+                    tex = _new_img_tex(node_tree, img, uv_map, x, y, "Non-Color", layer=layer)
                     layer_out = tex.outputs["Color"]
                 else:
                     print(f"[TLM] FILL normal: no image assigned, skipping layer '{layer.name}'")
@@ -702,6 +731,59 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
         # Checker already outputs Color directly
         return tex_node.outputs["Color"], tex_node.outputs.get("Fac")
 
+    elif pt == 'MARBLE':
+        # Wave + Noise distortion → marble veins
+        wave = node_tree.nodes.new("ShaderNodeTexWave")
+        wave.wave_type = layer.proc_marble_wave_type
+        wave.bands_direction = 'X'
+        wave.name = f"{TLM_PREFIX}proc_marble_wave_{_next_id()}"
+        wave.location = (x - 100, y)
+        wave.inputs["Scale"].default_value = layer.proc_scale
+        wave.inputs["Detail"].default_value = layer.proc_detail
+        wave.inputs["Distortion"].default_value = 0.0
+        node_tree.links.new(mapping.outputs["Vector"], wave.inputs["Vector"])
+
+        noise = node_tree.nodes.new("ShaderNodeTexNoise")
+        noise.name = f"{TLM_PREFIX}proc_marble_noise_{_next_id()}"
+        noise.location = (x - 350, y - 150)
+        noise.inputs["Scale"].default_value = layer.proc_scale * 2.0
+        noise.inputs["Detail"].default_value = layer.proc_detail
+        noise.inputs["Roughness"].default_value = layer.proc_roughness_proc
+        node_tree.links.new(mapping.outputs["Vector"], noise.inputs["Vector"])
+
+        mult = node_tree.nodes.new("ShaderNodeMath")
+        mult.operation = 'MULTIPLY'
+        mult.name = f"{TLM_PREFIX}proc_marble_mult_{_next_id()}"
+        mult.location = (x - 200, y - 150)
+        node_tree.links.new(noise.outputs["Fac"], mult.inputs[0])
+        mult.inputs[1].default_value = layer.proc_marble_distortion
+
+        # Feed noise into wave Phase Offset for organic distortion
+        phase_input = wave.inputs.get("Phase Offset")
+        if phase_input:
+            node_tree.links.new(mult.outputs["Value"], phase_input)
+        else:
+            # Fallback: feed into Distortion input
+            node_tree.links.new(mult.outputs["Value"], wave.inputs["Distortion"])
+
+        fac_out = wave.outputs["Fac"]
+        cr = node_tree.nodes.new("ShaderNodeValToRGB")
+        cr.name = f"{TLM_PREFIX}proc_cr_{_next_id()}"
+        cr.label = "Proc Color"
+        cr.location = (x + 180, y)
+        cr.color_ramp.elements[0].color = layer.proc_color1
+        cr.color_ramp.elements[1].color = layer.proc_color2
+        node_tree.links.new(fac_out, cr.inputs["Fac"])
+        return cr.outputs["Color"], cr.outputs["Alpha"]
+
+    elif pt == 'CLOUDS':
+        tex_node = node_tree.nodes.new("ShaderNodeTexNoise")
+        tex_node.inputs["Scale"].default_value      = layer.proc_scale
+        tex_node.inputs["Detail"].default_value     = layer.proc_detail
+        tex_node.inputs["Roughness"].default_value  = layer.proc_roughness_proc
+        tex_node.inputs["Distortion"].default_value = 0.0
+        fac_out = tex_node.outputs["Fac"]
+
     if tex_node is None:
         return None, None
 
@@ -726,7 +808,7 @@ def _apply_adjustment(node_tree, layer, current_output, x, y):
 
     if adj == 'HUE_SAT':
         node = node_tree.nodes.new("ShaderNodeHueSaturation")
-        node.name = f"{TLM_PREFIX}adj_huesat_{id(node)}"
+        node.name = f"{TLM_PREFIX}adj_huesat_{_next_id()}"
         node.label = "Hue/Saturation"
         node.location = (x, y)
         node.inputs["Hue"].default_value        = layer.adj_hue
@@ -738,7 +820,7 @@ def _apply_adjustment(node_tree, layer, current_output, x, y):
 
     elif adj == 'BRIGHT_CONTRAST':
         node = node_tree.nodes.new("ShaderNodeBrightContrast")
-        node.name = f"{TLM_PREFIX}adj_bc_{id(node)}"
+        node.name = f"{TLM_PREFIX}adj_bc_{_next_id()}"
         node.label = "Brightness/Contrast"
         node.location = (x, y)
         node.inputs["Bright"].default_value   = layer.adj_brightness
@@ -850,6 +932,33 @@ def _apply_adjustment(node_tree, layer, current_output, x, y):
             node_tree.links.new(gamma_node.outputs["Color"], gain_node.inputs["Color1"])
             return gain_node.outputs["Color"]
 
+    elif adj == 'CURVES':
+        node = node_tree.nodes.new("ShaderNodeRGBCurve")
+        node.name = f"{TLM_PREFIX}adj_curves_{_next_id()}"
+        node.label = "Curves"
+        node.location = (x, y)
+        node.inputs["Fac"].default_value = 1.0
+        node_tree.links.new(current_output, node.inputs["Color"])
+
+        # Manipulate the combined (C) curve — index 3
+        curve = node.mapping.curves[3]
+        # Default has 2 points: (0,0) and (1,1)
+        p0 = curve.points[0]
+        p1 = curve.points[1]
+        p0.location = (0.0, layer.adj_curve_black_point)
+        p1.location = (1.0, layer.adj_curve_white_point)
+
+        contrast = layer.adj_curve_contrast
+        brightness = layer.adj_curve_brightness
+        if abs(contrast) > 0.001 or abs(brightness) > 0.001:
+            shadow_y = max(0.0, min(1.0, 0.25 - contrast * 0.25 + brightness * 0.25))
+            highlight_y = max(0.0, min(1.0, 0.75 + contrast * 0.25 + brightness * 0.25))
+            curve.points.new(0.25, shadow_y)
+            curve.points.new(0.75, highlight_y)
+
+        node.mapping.update()
+        return node.outputs["Color"]
+
     return current_output
 
 
@@ -878,6 +987,10 @@ def rebuild_node_tree(material):
     from . import properties
     properties.cancel_pending_rebuild()
 
+    # Reset deterministic counter so node names match between rebuilds
+    global _node_counter
+    _node_counter = 0
+
     tlm = material.tlm
     node_tree = material.node_tree
 
@@ -902,6 +1015,7 @@ def rebuild_node_tree(material):
                 if pimg:
                     pimg.use_fake_user = True
 
+    _saved_positions = _save_node_positions(node_tree)
     _clear_tlm_nodes(node_tree)
 
     all_layers = list(reversed(tlm.layers))
@@ -919,7 +1033,12 @@ def rebuild_node_tree(material):
 
     uv_map  = tlm.uv_map or "UVMap"
     start_x = -1200
-    x_step  = 280
+
+    # x_step sized to the widest layer type in the stack:
+    # Procedural nodes span ~500 (TexCoord→Mapping→Tex→ColorRamp),
+    # Paint/Fill/Adjustment need ~300.
+    has_proc = any(l.layer_type == "PROCEDURAL" for l in all_layers if l.visible)
+    x_step  = 500 if has_proc else 300
 
     # For PBR channels we still need a fully expanded list
     expanded = []
@@ -934,75 +1053,94 @@ def rebuild_node_tree(material):
     if not bsdf:
         return
 
+    # Calculate where the chain ends so BSDF + passthrough nodes go to the right
+    n_layers = max(len(root_layers), len(expanded))
+    end_x = start_x + n_layers * x_step + 300
+
+    # Helper to snapshot node names before building a channel
+    def _snap():
+        return {n.name for n in node_tree.nodes}
+
     # ── Base Color — built from root_layers to preserve GROUP alpha for clipping mask ─
+    before = _snap()
     bc_out = _build_base_color(node_tree, root_layers, group_children, uv_map, start_x, 300, x_step)
     if bc_out:
         node_tree.links.new(bc_out, bsdf.inputs["Base Color"])
+    _add_channel_frame(node_tree, "Base Color", before, color=(0.2, 0.13, 0.1))
 
     # ── Roughness ─────────────────────────────────────────────────────────────
     if _channel_used(expanded, 'use_roughness'):
-        r_out = _build_channel(node_tree, expanded, 'roughness', uv_map, start_x, -50, x_step)
+        before = _snap()
+        r_out = _build_channel(node_tree, expanded, 'roughness', uv_map, start_x, 0, x_step)
         if r_out:
-            # Pass through a Math node to ensure correct socket type in Blender 5.0
             passthrough = node_tree.nodes.new("ShaderNodeMath")
             passthrough.operation = 'ADD'
             passthrough.name = f"{TLM_PREFIX}rough_pass"
             passthrough.inputs[1].default_value = 0.0
             passthrough.use_clamp = True
-            passthrough.location = (200, -50)
+            passthrough.location = (end_x, 0)
             node_tree.links.new(r_out, passthrough.inputs[0])
             _link_to_bsdf(node_tree, passthrough.outputs["Value"], bsdf,
                           ["Roughness", "Specular Roughness"], "roughness")
-        else:
-            print("[TLM] WARNING: roughness channel enabled but _build_channel returned None")
+        _add_channel_frame(node_tree, "Roughness", before, color=(0.12, 0.18, 0.12))
 
     # ── Metallic ──────────────────────────────────────────────────────────────
     if _channel_used(expanded, 'use_metallic'):
-        m_out = _build_channel(node_tree, expanded, 'metallic', uv_map, start_x, -250, x_step)
+        before = _snap()
+        m_out = _build_channel(node_tree, expanded, 'metallic', uv_map, start_x, -300, x_step)
         if m_out:
             passthrough = node_tree.nodes.new("ShaderNodeMath")
             passthrough.operation = 'ADD'
             passthrough.name = f"{TLM_PREFIX}metal_pass"
             passthrough.inputs[1].default_value = 0.0
             passthrough.use_clamp = True
-            passthrough.location = (200, -150)
+            passthrough.location = (end_x, -300)
             node_tree.links.new(m_out, passthrough.inputs[0])
             _link_to_bsdf(node_tree, passthrough.outputs["Value"], bsdf,
                           ["Metallic", "Metalness"], "metallic")
-        else:
-            print("[TLM] WARNING: metallic channel enabled but _build_channel returned None")
+        _add_channel_frame(node_tree, "Metallic", before, color=(0.15, 0.15, 0.2))
 
     # ── Normal ────────────────────────────────────────────────────────────────
     if _channel_used(expanded, 'use_normal'):
-        n_out = _build_channel(node_tree, expanded, 'normal', uv_map, start_x, -450, x_step)
+        before = _snap()
+        n_out = _build_channel(node_tree, expanded, 'normal', uv_map, start_x, -600, x_step)
         if n_out:
             _link_to_bsdf(node_tree, n_out, bsdf, ["Normal", "normal"], "normal")
-        else:
-            print("[TLM] WARNING: normal channel enabled but _build_channel returned None")
+        _add_channel_frame(node_tree, "Normal", before, color=(0.15, 0.12, 0.2))
 
     # ── Emission ──────────────────────────────────────────────────────────────
     if _channel_used(expanded, 'use_emission'):
-        e_out = _build_channel(node_tree, expanded, 'emission', uv_map, start_x, -650, x_step)
+        before = _snap()
+        e_out = _build_channel(node_tree, expanded, 'emission', uv_map, start_x, -900, x_step)
         if e_out:
             _link_to_bsdf(node_tree, e_out, bsdf,
                           ["Emission Color", "Emission", "emission"], "emission")
-            # Emission Strength: use a Value node for reliable Blender 5.0 connection
             strengths = [l.emission_strength for l in expanded if l.use_emission]
             if strengths:
                 val = node_tree.nodes.new("ShaderNodeValue")
                 val.name = f"{TLM_PREFIX}emission_strength"
                 val.outputs[0].default_value = strengths[-1]
-                val.location = (200, -350)
+                val.location = (end_x, -900)
                 _link_to_bsdf(node_tree, val.outputs[0], bsdf,
                               ["Emission Strength", "emission_strength"], "emission_strength")
-        else:
-            print("[TLM] WARNING: emission channel enabled but _build_channel returned None")
+        _add_channel_frame(node_tree, "Emission", before, color=(0.2, 0.18, 0.1))
 
     # ── Bump ──────────────────────────────────────────────────────────────────
     if _channel_used(expanded, 'use_bump'):
-        bump_out = _build_bump_channel(node_tree, expanded, uv_map, start_x, -850, x_step)
+        before = _snap()
+        bump_out = _build_bump_channel(node_tree, expanded, uv_map, start_x, -1200, x_step)
         if bump_out:
             _link_to_bsdf(node_tree, bump_out, bsdf, ["Normal", "normal"], "bump")
+        _add_channel_frame(node_tree, "Bump", before, color=(0.18, 0.12, 0.12))
+
+    # Position BSDF and Material Output to the right of all channels
+    bsdf.location = (end_x + 300, 0)
+    mat_out = next((n for n in node_tree.nodes if n.type == 'OUTPUT_MATERIAL'), None)
+    if mat_out:
+        mat_out.location = (end_x + 600, 0)
+
+    # Restore user-customized node positions if they existed before rebuild
+    _restore_node_positions(node_tree, _saved_positions)
 
 
 def _build_base_color(node_tree, root_layers, group_children, uv_map, start_x, y_base, x_step):
@@ -1042,7 +1180,7 @@ def _build_base_color(node_tree, root_layers, group_children, uv_map, start_x, y
             layer_alpha_out = alpha_node.outputs[0]
 
         elif layer.layer_type == "PAINT" and layer.image:
-            tex = _new_img_tex(node_tree, layer.image, uv_map, x, y_base)
+            tex = _new_img_tex(node_tree, layer.image, uv_map, x, y_base, layer=layer)
             layer_color_out = tex.outputs["Color"]
             layer_alpha_out = tex.outputs["Alpha"]
 
@@ -1165,6 +1303,50 @@ def _build_proc_fac_node(node_tree, layer, name_suffix, x, y):
         node_tree.links.new(mapping.outputs["Vector"], tex.inputs["Vector"])
         fac_out = tex.outputs["Fac"]
 
+    elif pt == 'MARBLE':
+        # Wave + Noise for marble fac channel
+        wave = node_tree.nodes.new("ShaderNodeTexWave")
+        wave.wave_type = layer.proc_marble_wave_type
+        wave.bands_direction = 'X'
+        wave.name = f"{TLM_PREFIX}pfac_marble_wave_{name_suffix}"
+        wave.location = (x - 100, y)
+        wave.inputs["Scale"].default_value = layer.proc_scale
+        wave.inputs["Detail"].default_value = layer.proc_detail
+        wave.inputs["Distortion"].default_value = 0.0
+        node_tree.links.new(mapping.outputs["Vector"], wave.inputs["Vector"])
+
+        noise = node_tree.nodes.new("ShaderNodeTexNoise")
+        noise.name = f"{TLM_PREFIX}pfac_marble_noise_{name_suffix}"
+        noise.location = (x - 350, y - 150)
+        noise.inputs["Scale"].default_value = layer.proc_scale * 2.0
+        noise.inputs["Detail"].default_value = layer.proc_detail
+        noise.inputs["Roughness"].default_value = layer.proc_roughness_proc
+        node_tree.links.new(mapping.outputs["Vector"], noise.inputs["Vector"])
+
+        mult = node_tree.nodes.new("ShaderNodeMath")
+        mult.operation = 'MULTIPLY'
+        mult.name = f"{TLM_PREFIX}pfac_marble_mult_{name_suffix}"
+        mult.location = (x - 200, y - 150)
+        node_tree.links.new(noise.outputs["Fac"], mult.inputs[0])
+        mult.inputs[1].default_value = layer.proc_marble_distortion
+
+        phase_input = wave.inputs.get("Phase Offset")
+        if phase_input:
+            node_tree.links.new(mult.outputs["Value"], phase_input)
+        else:
+            node_tree.links.new(mult.outputs["Value"], wave.inputs["Distortion"])
+
+        return wave.outputs["Fac"]
+
+    elif pt == 'CLOUDS':
+        tex = node_tree.nodes.new("ShaderNodeTexNoise")
+        tex.inputs["Scale"].default_value      = layer.proc_scale
+        tex.inputs["Detail"].default_value     = layer.proc_detail
+        tex.inputs["Roughness"].default_value  = layer.proc_roughness_proc
+        tex.inputs["Distortion"].default_value = 0.0
+        node_tree.links.new(mapping.outputs["Vector"], tex.inputs["Vector"])
+        fac_out = tex.outputs["Fac"]
+
     if tex is None or fac_out is None:
         return None
 
@@ -1253,6 +1435,29 @@ def _build_bump_channel(node_tree, layers, uv_map, start_x, y_base, x_step):
     return bump_node.outputs["Normal"]
 
 
+def _add_channel_frame(node_tree, label, nodes_before, color=None):
+    """Add a labeled frame node for a PBR channel group.
+
+    nodes_before: set of node names that existed before building this channel.
+    Only newly created TLM_ nodes get assigned to the frame.
+    """
+    frame = node_tree.nodes.new("NodeFrame")
+    frame.name = f"{TLM_PREFIX}frame_{label.lower().replace(' ', '_')}"
+    frame.label = label
+    frame.use_custom_color = True
+    frame.color = color or (0.15, 0.15, 0.15)
+    frame.label_size = 20
+
+    for node in node_tree.nodes:
+        if (node.name.startswith(TLM_PREFIX)
+                and node.name not in nodes_before
+                and node.parent is None
+                and node != frame
+                and not node.name.startswith(f"{TLM_PREFIX}frame_")):
+            node.parent = frame
+    return frame
+
+
 def _channel_used(layers, flag_attr):
     """Check if any layer in the list has a channel enabled."""
     return any(getattr(l, flag_attr, False) for l in layers)
@@ -1264,7 +1469,7 @@ def _find_bsdf(node_tree):
             return node
     # Create one if missing
     bsdf = node_tree.nodes.new("ShaderNodeBsdfPrincipled")
-    bsdf.location = (400, 300)
+    bsdf.location = (400, 0)
     out = next((n for n in node_tree.nodes if n.type == 'OUTPUT_MATERIAL'
                 and not n.name.startswith(TLM_PREFIX)), None)
     if out:
