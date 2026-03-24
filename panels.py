@@ -62,6 +62,8 @@ class TLM_UL_LayerList(UIList):
             except Exception as e:
                 print(f"[TLM] Preview error for {layer.name}: {e}")
                 iid = 0
+            if iid:
+                print(f"[TLM] Preview {layer.name}: iid={iid}, valid={0 < iid <= 0x7FFFFFFF}")
             if iid and 0 < iid <= 0x7FFFFFFF:
                 row.label(text="", icon_value=iid)
             else:
