@@ -62,7 +62,7 @@ class TLM_UL_LayerList(UIList):
             except Exception:
                 iid = 0
             if iid and iid > 0:
-                row.label(text="", icon_value=iid)
+                row.template_icon(icon_value=iid, scale=1.5)
             else:
                 row.label(text="", icon=fallback)
 
