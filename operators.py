@@ -97,7 +97,7 @@ def _add_layer_common(context, layer_type):
 
 
 class TLM_OT_AddPaintLayer(Operator):
-    """Add a new paint layer."""
+    """Add a new paint layer with a blank transparent image above the active layer."""
     bl_idname = "tlm.add_paint_layer"
     bl_label = "Add Paint Layer"
     bl_options = {'REGISTER', 'UNDO'}
@@ -116,7 +116,7 @@ class TLM_OT_AddPaintLayer(Operator):
 
 
 class TLM_OT_AddFillLayer(Operator):
-    """Add a new fill layer."""
+    """Add a solid color fill layer above the active layer."""
     bl_idname = "tlm.add_fill_layer"
     bl_label = "Add Fill Layer"
     bl_options = {'REGISTER', 'UNDO'}
@@ -531,7 +531,7 @@ class TLM_OT_SetActivePaintLayer(Operator):
 # ─── Toggle Visibility ────────────────────────────────────────────────────────
 
 class TLM_OT_ToggleLayerVisibility(Operator):
-    """Toggle the visibility of a layer."""
+    """Show or hide this layer in the composite."""
     bl_idname = "tlm.toggle_layer_visibility"
     bl_label = "Toggle Visibility"
     bl_options = {'REGISTER', 'UNDO'}
@@ -1077,7 +1077,7 @@ class TLM_OT_AddChannelImage(Operator):
 
 
 class TLM_OT_RemoveChannelImage(Operator):
-    """Disable a PBR channel on the active layer."""
+    """Remove the image from a PBR channel, reverting to the fill value."""
     bl_idname = "tlm.remove_channel_image"
     bl_label = "Remove Channel"
     bl_options = {'REGISTER', 'UNDO'}

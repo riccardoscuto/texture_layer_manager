@@ -225,6 +225,14 @@ def _draw_procedural(col, active, tlm):
         col.prop(active, "proc_lacunarity",     slider=True)
     elif pt == 'CHECKER':
         col.prop(active, "proc_checker_scale")
+    elif pt == 'MARBLE':
+        col.prop(active, "proc_marble_wave_type", text="Pattern")
+        col.prop(active, "proc_detail",              slider=True)
+        col.prop(active, "proc_roughness_proc",      slider=True, text="Roughness")
+        col.prop(active, "proc_marble_distortion",   slider=True)
+    elif pt == 'CLOUDS':
+        col.prop(active, "proc_detail",         slider=True)
+        col.prop(active, "proc_roughness_proc", slider=True, text="Softness")
 
     col.separator(factor=0.5)
     off_row = col.row(align=True)
@@ -306,6 +314,14 @@ def _draw_adjustment(col, active, tlm):
         g.prop(active, "adj_gamma", text="")
         g.label(text="Gain (Highlights):")
         g.prop(active, "adj_gain",  text="")
+    elif active.adj_type == 'CURVES':
+        col.prop(active, "adj_curve_contrast",   slider=True)
+        col.prop(active, "adj_curve_brightness", slider=True)
+        col.separator(factor=0.3)
+        col.label(text="Tone Clipping:", icon='IPO_LINEAR')
+        cr = col.row(align=True)
+        cr.prop(active, "adj_curve_black_point", text="Black", slider=True)
+        cr.prop(active, "adj_curve_white_point", text="White", slider=True)
     col.separator(factor=0.5)
     _draw_group_assignment(col, active, tlm)
 
