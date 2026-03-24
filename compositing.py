@@ -1034,11 +1034,11 @@ def rebuild_node_tree(material):
     uv_map  = tlm.uv_map or "UVMap"
     start_x = -1200
 
-    # Calculate x_step based on widest layer type in the stack:
-    # Procedural/Marble need ~800 (TexCoord→Mapping→Tex→ColorRamp),
-    # Paint/Fill need ~350, Adjustment needs ~500 (Levels chain).
+    # x_step sized to the widest layer type in the stack:
+    # Procedural nodes span ~500 (TexCoord→Mapping→Tex→ColorRamp),
+    # Paint/Fill/Adjustment need ~300.
     has_proc = any(l.layer_type == "PROCEDURAL" for l in all_layers if l.visible)
-    x_step  = 750 if has_proc else 350
+    x_step  = 500 if has_proc else 300
 
     # For PBR channels we still need a fully expanded list
     expanded = []
@@ -1063,7 +1063,7 @@ def rebuild_node_tree(material):
 
     # ── Base Color — built from root_layers to preserve GROUP alpha for clipping mask ─
     before = _snap()
-    bc_out = _build_base_color(node_tree, root_layers, group_children, uv_map, start_x, 400, x_step)
+    bc_out = _build_base_color(node_tree, root_layers, group_children, uv_map, start_x, 300, x_step)
     if bc_out:
         node_tree.links.new(bc_out, bsdf.inputs["Base Color"])
     _add_channel_frame(node_tree, "Base Color", before, color=(0.2, 0.13, 0.1))
@@ -1071,14 +1071,14 @@ def rebuild_node_tree(material):
     # ── Roughness ─────────────────────────────────────────────────────────────
     if _channel_used(expanded, 'use_roughness'):
         before = _snap()
-        r_out = _build_channel(node_tree, expanded, 'roughness', uv_map, start_x, -100, x_step)
+        r_out = _build_channel(node_tree, expanded, 'roughness', uv_map, start_x, 0, x_step)
         if r_out:
             passthrough = node_tree.nodes.new("ShaderNodeMath")
             passthrough.operation = 'ADD'
             passthrough.name = f"{TLM_PREFIX}rough_pass"
             passthrough.inputs[1].default_value = 0.0
             passthrough.use_clamp = True
-            passthrough.location = (end_x, -100)
+            passthrough.location = (end_x, 0)
             node_tree.links.new(r_out, passthrough.inputs[0])
             _link_to_bsdf(node_tree, passthrough.outputs["Value"], bsdf,
                           ["Roughness", "Specular Roughness"], "roughness")
@@ -1087,14 +1087,14 @@ def rebuild_node_tree(material):
     # ── Metallic ──────────────────────────────────────────────────────────────
     if _channel_used(expanded, 'use_metallic'):
         before = _snap()
-        m_out = _build_channel(node_tree, expanded, 'metallic', uv_map, start_x, -500, x_step)
+        m_out = _build_channel(node_tree, expanded, 'metallic', uv_map, start_x, -300, x_step)
         if m_out:
             passthrough = node_tree.nodes.new("ShaderNodeMath")
             passthrough.operation = 'ADD'
             passthrough.name = f"{TLM_PREFIX}metal_pass"
             passthrough.inputs[1].default_value = 0.0
             passthrough.use_clamp = True
-            passthrough.location = (end_x, -500)
+            passthrough.location = (end_x, -300)
             node_tree.links.new(m_out, passthrough.inputs[0])
             _link_to_bsdf(node_tree, passthrough.outputs["Value"], bsdf,
                           ["Metallic", "Metalness"], "metallic")
@@ -1103,7 +1103,7 @@ def rebuild_node_tree(material):
     # ── Normal ────────────────────────────────────────────────────────────────
     if _channel_used(expanded, 'use_normal'):
         before = _snap()
-        n_out = _build_channel(node_tree, expanded, 'normal', uv_map, start_x, -900, x_step)
+        n_out = _build_channel(node_tree, expanded, 'normal', uv_map, start_x, -600, x_step)
         if n_out:
             _link_to_bsdf(node_tree, n_out, bsdf, ["Normal", "normal"], "normal")
         _add_channel_frame(node_tree, "Normal", before, color=(0.15, 0.12, 0.2))
@@ -1111,7 +1111,7 @@ def rebuild_node_tree(material):
     # ── Emission ──────────────────────────────────────────────────────────────
     if _channel_used(expanded, 'use_emission'):
         before = _snap()
-        e_out = _build_channel(node_tree, expanded, 'emission', uv_map, start_x, -1300, x_step)
+        e_out = _build_channel(node_tree, expanded, 'emission', uv_map, start_x, -900, x_step)
         if e_out:
             _link_to_bsdf(node_tree, e_out, bsdf,
                           ["Emission Color", "Emission", "emission"], "emission")
@@ -1120,7 +1120,7 @@ def rebuild_node_tree(material):
                 val = node_tree.nodes.new("ShaderNodeValue")
                 val.name = f"{TLM_PREFIX}emission_strength"
                 val.outputs[0].default_value = strengths[-1]
-                val.location = (end_x, -1300)
+                val.location = (end_x, -900)
                 _link_to_bsdf(node_tree, val.outputs[0], bsdf,
                               ["Emission Strength", "emission_strength"], "emission_strength")
         _add_channel_frame(node_tree, "Emission", before, color=(0.2, 0.18, 0.1))
@@ -1128,7 +1128,7 @@ def rebuild_node_tree(material):
     # ── Bump ──────────────────────────────────────────────────────────────────
     if _channel_used(expanded, 'use_bump'):
         before = _snap()
-        bump_out = _build_bump_channel(node_tree, expanded, uv_map, start_x, -1700, x_step)
+        bump_out = _build_bump_channel(node_tree, expanded, uv_map, start_x, -1200, x_step)
         if bump_out:
             _link_to_bsdf(node_tree, bump_out, bsdf, ["Normal", "normal"], "bump")
         _add_channel_frame(node_tree, "Bump", before, color=(0.18, 0.12, 0.12))
