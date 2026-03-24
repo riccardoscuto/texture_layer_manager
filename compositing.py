@@ -377,14 +377,13 @@ def _apply_mask(node_tree, mix_node, mask_image, uv_map, x, y):
 # ── Layer width helper ────────────────────────────────────────────────────────
 
 _LAYER_WIDTH = {
-    # Width = full horizontal span of sub-nodes + padding so adjacent layers
-    # never overlap.  Sub-nodes extend LEFT of x (UV at x-220, TC at x-500)
-    # and RIGHT of x (Mix at x+340, CR at x+380), so the step must cover both.
-    'PAINT':       600,   # UV(-220)…Mix(+340) = 560 + pad
-    'FILL':        500,   # Fill(0)…Mix(+340)  = 340 + next-layer left margin
-    'ADJUSTMENT':  600,   # Adj node chains up to ~440 wide + pad
-    'PROCEDURAL': 1100,   # TC(-500)…CR(+380)  = 880 + pad
-    'GROUP':       600,
+    # Width = full span of sub-nodes + padding.  Mix nodes now at x+280,
+    # sub-nodes extend LEFT of x (UV at x-220, TC at x-500).
+    'PAINT':       750,   # UV(-220)…Mix(+480) ≈ 700 + pad
+    'FILL':        600,   # Fill(0)…Mix(+480)  ≈ 480 + next-layer left margin
+    'ADJUSTMENT':  650,   # Adj node chains up to ~440 wide + pad
+    'PROCEDURAL': 1200,   # TC(-500)…CR(+380)  ≈ 880 + pad
+    'GROUP':       700,
 }
 
 
@@ -451,10 +450,10 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
                     current = tex.outputs["Color"]
                     prev_alpha = tex.outputs["Alpha"]
                 else:
-                    mix = _new_mix(node_tree, layer.blend_mode, layer.opacity, x + 140, y - 40)
+                    mix = _new_mix(node_tree, layer.blend_mode, layer.opacity, x + 280, y - 40)
                     node_tree.links.new(current, _a_socket(mix))
                     node_tree.links.new(tex.outputs["Color"], _b_socket(mix))
-                    _set_factor(node_tree, mix, layer, tex.outputs["Alpha"], prev_alpha, x + 140, y, i, uv_map)
+                    _set_factor(node_tree, mix, layer, tex.outputs["Alpha"], prev_alpha, x + 280, y, i, uv_map)
                     current = _result_socket(mix)
                     prev_alpha = tex.outputs["Alpha"]
             continue
@@ -485,7 +484,7 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
                     current = layer_out
                     prev_alpha = layer_alpha
                     continue
-                mix_x = x + 140
+                mix_x = x + 280
                 mix = _new_mix(node_tree, layer.blend_mode, layer.opacity, mix_x, y - 40)
                 node_tree.links.new(current, _a_socket(mix))
                 node_tree.links.new(layer_out, _b_socket(mix))
@@ -597,7 +596,7 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
             prev_alpha = layer_alpha if not is_scalar else None
             continue
 
-        mix_x = x + 140
+        mix_x = x + 280
         if is_scalar:
             mix = _new_mix_scalar(node_tree, layer.opacity, mix_x, y - 40)
             node_tree.links.new(current, _a_socket_scalar(mix))
@@ -1082,14 +1081,14 @@ def rebuild_node_tree(material):
     end_x_exp = (expanded_positions[-1] + _LAYER_WIDTH.get(expanded[-1].layer_type, 300)) if expanded_positions else start_x
     end_x = max(end_x_root, end_x_exp) + 100
 
-    # ── Channel y positions — spaced 500px apart to avoid vertical overlap ──
+    # ── Channel y positions — spaced 400px apart ──
     ch_y = {
-        'base_color': 500,
+        'base_color': 400,
         'roughness':    0,
-        'metallic':  -500,
-        'normal':   -1000,
-        'emission': -1500,
-        'bump':     -2000,
+        'metallic':  -400,
+        'normal':    -800,
+        'emission': -1200,
+        'bump':     -1600,
     }
 
     # ── Base Color — built from root_layers to preserve GROUP alpha for clipping mask ─
@@ -1224,7 +1223,7 @@ def _build_base_color(node_tree, root_layers, group_children, uv_map, start_x, y
             prev_alpha = layer_alpha_out
             continue
 
-        mix_x = x + 140
+        mix_x = x + 280
         mix = _new_mix(node_tree, layer.blend_mode, layer.opacity, mix_x, y_base - 40)
         node_tree.links.new(current, _a_socket(mix))
         node_tree.links.new(layer_color_out, _b_socket(mix))
