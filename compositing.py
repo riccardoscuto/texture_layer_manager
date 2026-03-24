@@ -377,11 +377,14 @@ def _apply_mask(node_tree, mix_node, mask_image, uv_map, x, y):
 # ── Layer width helper ────────────────────────────────────────────────────────
 
 _LAYER_WIDTH = {
-    'PAINT': 300,
-    'FILL': 300,
-    'ADJUSTMENT': 500,
-    'PROCEDURAL': 700,
-    'GROUP': 400,
+    # Width = full horizontal span of sub-nodes + padding so adjacent layers
+    # never overlap.  Sub-nodes extend LEFT of x (UV at x-220, TC at x-500)
+    # and RIGHT of x (Mix at x+340, CR at x+380), so the step must cover both.
+    'PAINT':       600,   # UV(-220)…Mix(+340) = 560 + pad
+    'FILL':        500,   # Fill(0)…Mix(+340)  = 340 + next-layer left margin
+    'ADJUSTMENT':  600,   # Adj node chains up to ~440 wide + pad
+    'PROCEDURAL': 1100,   # TC(-500)…CR(+380)  = 880 + pad
+    'GROUP':       600,
 }
 
 
@@ -612,7 +615,9 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
     if is_normal and current is not None:
         nm = node_tree.nodes.new("ShaderNodeNormalMap")
         nm.name = f"{TLM_PREFIX}normalmap_{id(nm)}"
-        nm.location = (x0 + len(layers) * x_step, y)
+        # Place after the last layer column
+        end_pos = (x_positions[-1] + _LAYER_WIDTH.get(layers[-1].layer_type, 300)) if x_positions else x0
+        nm.location = (end_pos, y)
         nm.inputs["Strength"].default_value = 1.0
         node_tree.links.new(current, nm.inputs["Color"])
         current = nm.outputs["Normal"]
@@ -1077,52 +1082,58 @@ def rebuild_node_tree(material):
     end_x_exp = (expanded_positions[-1] + _LAYER_WIDTH.get(expanded[-1].layer_type, 300)) if expanded_positions else start_x
     end_x = max(end_x_root, end_x_exp) + 100
 
+    # ── Channel y positions — spaced 500px apart to avoid vertical overlap ──
+    ch_y = {
+        'base_color': 500,
+        'roughness':    0,
+        'metallic':  -500,
+        'normal':   -1000,
+        'emission': -1500,
+        'bump':     -2000,
+    }
+
     # ── Base Color — built from root_layers to preserve GROUP alpha for clipping mask ─
-    bc_out = _build_base_color(node_tree, root_layers, group_children, uv_map, start_x, 300, x_step)
+    bc_out = _build_base_color(node_tree, root_layers, group_children, uv_map, start_x, ch_y['base_color'], x_step)
     if bc_out:
         node_tree.links.new(bc_out, bsdf.inputs["Base Color"])
 
     # ── Roughness ─────────────────────────────────────────────────────────────
     if _channel_used(expanded, 'use_roughness'):
-
-        r_out = _build_channel(node_tree, expanded, 'roughness', uv_map, start_x, 0, x_step)
+        r_out = _build_channel(node_tree, expanded, 'roughness', uv_map, start_x, ch_y['roughness'], x_step)
         if r_out:
             passthrough = node_tree.nodes.new("ShaderNodeMath")
             passthrough.operation = 'ADD'
             passthrough.name = f"{TLM_PREFIX}rough_pass"
             passthrough.inputs[1].default_value = 0.0
             passthrough.use_clamp = True
-            passthrough.location = (end_x, 0)
+            passthrough.location = (end_x, ch_y['roughness'])
             node_tree.links.new(r_out, passthrough.inputs[0])
             _link_to_bsdf(node_tree, passthrough.outputs["Value"], bsdf,
                           ["Roughness", "Specular Roughness"], "roughness")
 
     # ── Metallic ──────────────────────────────────────────────────────────────
     if _channel_used(expanded, 'use_metallic'):
-
-        m_out = _build_channel(node_tree, expanded, 'metallic', uv_map, start_x, -300, x_step)
+        m_out = _build_channel(node_tree, expanded, 'metallic', uv_map, start_x, ch_y['metallic'], x_step)
         if m_out:
             passthrough = node_tree.nodes.new("ShaderNodeMath")
             passthrough.operation = 'ADD'
             passthrough.name = f"{TLM_PREFIX}metal_pass"
             passthrough.inputs[1].default_value = 0.0
             passthrough.use_clamp = True
-            passthrough.location = (end_x, -300)
+            passthrough.location = (end_x, ch_y['metallic'])
             node_tree.links.new(m_out, passthrough.inputs[0])
             _link_to_bsdf(node_tree, passthrough.outputs["Value"], bsdf,
                           ["Metallic", "Metalness"], "metallic")
 
     # ── Normal ────────────────────────────────────────────────────────────────
     if _channel_used(expanded, 'use_normal'):
-
-        n_out = _build_channel(node_tree, expanded, 'normal', uv_map, start_x, -600, x_step)
+        n_out = _build_channel(node_tree, expanded, 'normal', uv_map, start_x, ch_y['normal'], x_step)
         if n_out:
             _link_to_bsdf(node_tree, n_out, bsdf, ["Normal", "normal"], "normal")
 
     # ── Emission ──────────────────────────────────────────────────────────────
     if _channel_used(expanded, 'use_emission'):
-
-        e_out = _build_channel(node_tree, expanded, 'emission', uv_map, start_x, -900, x_step)
+        e_out = _build_channel(node_tree, expanded, 'emission', uv_map, start_x, ch_y['emission'], x_step)
         if e_out:
             _link_to_bsdf(node_tree, e_out, bsdf,
                           ["Emission Color", "Emission", "emission"], "emission")
@@ -1131,14 +1142,13 @@ def rebuild_node_tree(material):
                 val = node_tree.nodes.new("ShaderNodeValue")
                 val.name = f"{TLM_PREFIX}emission_strength"
                 val.outputs[0].default_value = strengths[-1]
-                val.location = (end_x, -900)
+                val.location = (end_x, ch_y['emission'])
                 _link_to_bsdf(node_tree, val.outputs[0], bsdf,
                               ["Emission Strength", "emission_strength"], "emission_strength")
 
     # ── Bump ──────────────────────────────────────────────────────────────────
     if _channel_used(expanded, 'use_bump'):
-
-        bump_out = _build_bump_channel(node_tree, expanded, uv_map, start_x, -1200, x_step)
+        bump_out = _build_bump_channel(node_tree, expanded, uv_map, start_x, ch_y['bump'], x_step)
         if bump_out:
             _link_to_bsdf(node_tree, bump_out, bsdf, ["Normal", "normal"], "bump")
 
