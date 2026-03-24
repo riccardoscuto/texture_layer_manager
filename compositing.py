@@ -387,14 +387,32 @@ _LAYER_WIDTH = {
 }
 
 
-def _layer_x_positions(layers, x0):
-    """Return a list of x positions, one per layer, based on each layer's type width."""
+_COLS_PER_ROW = 4     # layers per row before wrapping to next line
+_ROW_HEIGHT   = 400   # vertical drop between rows
+
+
+def _layer_positions(layers, x0, y0):
+    """Return list of (x, y) positions, one per layer, wrapping into rows."""
     positions = []
     x = x0
+    y = y0
+    col = 0
     for layer in layers:
-        positions.append(x)
-        x += _LAYER_WIDTH.get(layer.layer_type, 300)
+        positions.append((x, y))
+        col += 1
+        if col >= _COLS_PER_ROW:
+            # Wrap: new row below, reset x
+            col = 0
+            x = x0
+            y -= _ROW_HEIGHT
+        else:
+            x += _LAYER_WIDTH.get(layer.layer_type, 300)
     return positions
+
+
+def _layer_x_positions(layers, x0):
+    """Legacy helper — returns just x positions (used by end_x calculation)."""
+    return [pos[0] for pos in _layer_positions(layers, x0, 0)]
 
 
 # ── Per-channel composite builder ─────────────────────────────────────────────
@@ -429,11 +447,10 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
 
     current = None
     prev_alpha = None
-    y = y_base
-    x_positions = _layer_x_positions(layers, x0)
+    positions = _layer_positions(layers, x0, y_base)
 
     for i, layer in enumerate(layers):
-        x = x_positions[i]
+        x, y = positions[i]
 
         # Adjustment layers only affect base color
         if layer.layer_type == "ADJUSTMENT":
@@ -615,8 +632,9 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
         nm = node_tree.nodes.new("ShaderNodeNormalMap")
         nm.name = f"{TLM_PREFIX}normalmap_{id(nm)}"
         # Place after the last layer column
-        end_pos = (x_positions[-1] + _LAYER_WIDTH.get(layers[-1].layer_type, 300)) if x_positions else x0
-        nm.location = (end_pos, y)
+        last_x = positions[-1][0] if positions else x0
+        end_pos = last_x + _LAYER_WIDTH.get(layers[-1].layer_type, 300)
+        nm.location = (end_pos, y_base)
         nm.inputs["Strength"].default_value = 1.0
         node_tree.links.new(current, nm.inputs["Color"])
         current = nm.outputs["Normal"]
@@ -1075,11 +1093,16 @@ def rebuild_node_tree(material):
         return
 
     # Calculate where the chain ends so BSDF + passthrough nodes go to the right
-    root_positions = _layer_x_positions(root_layers, start_x)
-    expanded_positions = _layer_x_positions(expanded, start_x)
-    end_x_root = (root_positions[-1] + _LAYER_WIDTH.get(root_layers[-1].layer_type, 300)) if root_positions else start_x
-    end_x_exp = (expanded_positions[-1] + _LAYER_WIDTH.get(expanded[-1].layer_type, 300)) if expanded_positions else start_x
-    end_x = max(end_x_root, end_x_exp) + 100
+    # With grid layout, find the maximum x + width across ALL rows
+    def _max_end_x(layers, x0):
+        if not layers:
+            return x0
+        positions = _layer_positions(layers, x0, 0)
+        return max(px + _LAYER_WIDTH.get(layers[j].layer_type, 300)
+                   for j, (px, _py) in enumerate(positions))
+
+    end_x = max(_max_end_x(root_layers, start_x),
+                _max_end_x(expanded, start_x)) + 100
 
     # ── Channel y positions — spaced 400px apart ──
     ch_y = {
@@ -1169,15 +1192,15 @@ def _build_base_color(node_tree, root_layers, group_children, uv_map, start_x, y
     """
     current = None
     prev_alpha = None
-    x_positions = _layer_x_positions(root_layers, start_x)
+    positions = _layer_positions(root_layers, start_x, y_base)
 
     for i, layer in enumerate(root_layers):
-        x = x_positions[i]
+        x, y = positions[i]
 
         if layer.layer_type == "ADJUSTMENT":
             if current is None:
                 continue
-            current = _apply_adjustment(node_tree, layer, current, x, y_base)
+            current = _apply_adjustment(node_tree, layer, current, x, y)
             continue
 
         elif layer.layer_type == "GROUP":
@@ -1185,7 +1208,7 @@ def _build_base_color(node_tree, root_layers, group_children, uv_map, start_x, y
             if not children:
                 continue
             group_out = _composite_layer_list(
-                node_tree, children, uv_map, x - 200, y_base - 200, 220
+                node_tree, children, uv_map, x - 200, y - 200, 220
             )
             if group_out is None:
                 continue
@@ -1195,21 +1218,21 @@ def _build_base_color(node_tree, root_layers, group_children, uv_map, start_x, y
             alpha_node = node_tree.nodes.new("ShaderNodeValue")
             alpha_node.name = f"{TLM_PREFIX}group_alpha_{i}"
             alpha_node.outputs[0].default_value = 1.0
-            alpha_node.location = (x, y_base - 150)
+            alpha_node.location = (x, y - 150)
             layer_alpha_out = alpha_node.outputs[0]
 
         elif layer.layer_type == "PAINT" and layer.image:
-            tex = _new_img_tex(node_tree, layer.image, uv_map, x, y_base, layer=layer)
+            tex = _new_img_tex(node_tree, layer.image, uv_map, x, y, layer=layer)
             layer_color_out = tex.outputs["Color"]
             layer_alpha_out = tex.outputs["Alpha"]
 
         elif layer.layer_type == "FILL":
-            fn = _new_fill(node_tree, layer.fill_color, x, y_base)
+            fn = _new_fill(node_tree, layer.fill_color, x, y)
             layer_color_out = fn.outputs["Color"]
             layer_alpha_out = None
 
         elif layer.layer_type == "PROCEDURAL":
-            p_color, p_alpha = _build_procedural_node(node_tree, layer, uv_map, x, y_base)
+            p_color, p_alpha = _build_procedural_node(node_tree, layer, uv_map, x, y)
             if p_color is None:
                 continue
             layer_color_out = p_color
@@ -1224,10 +1247,10 @@ def _build_base_color(node_tree, root_layers, group_children, uv_map, start_x, y
             continue
 
         mix_x = x + 280
-        mix = _new_mix(node_tree, layer.blend_mode, layer.opacity, mix_x, y_base - 40)
+        mix = _new_mix(node_tree, layer.blend_mode, layer.opacity, mix_x, y - 40)
         node_tree.links.new(current, _a_socket(mix))
         node_tree.links.new(layer_color_out, _b_socket(mix))
-        _set_factor(node_tree, mix, layer, layer_alpha_out, prev_alpha, mix_x, y_base, i, uv_map)
+        _set_factor(node_tree, mix, layer, layer_alpha_out, prev_alpha, mix_x, y, i, uv_map)
         current = _result_socket(mix)
         prev_alpha = layer_alpha_out
 
@@ -1383,25 +1406,25 @@ def _build_bump_channel(node_tree, layers, uv_map, start_x, y_base, x_step):
     Returns a Normal socket ready to connect to BSDF Normal input.
     """
     bump_inputs = []  # list of (fac_socket, strength, distance) tuples
-    x_positions = _layer_x_positions(layers, start_x)
+    positions = _layer_positions(layers, start_x, y_base)
 
     for i, layer in enumerate(layers):
         if not getattr(layer, 'use_bump', False):
             continue
 
-        x = x_positions[i]
+        x, y = positions[i]
         fac_out = None
 
         if layer.layer_type == "PROCEDURAL":
             # Reuse shared Fac helper — avoids duplicating all the texture branches
-            fac_out = _build_proc_fac_node(node_tree, layer, f"bump_{i}", x, y_base)
+            fac_out = _build_proc_fac_node(node_tree, layer, f"bump_{i}", x, y)
 
         elif layer.layer_type == "PAINT" and layer.image:
             # Use R channel of the paint image as height
             tex = node_tree.nodes.new("ShaderNodeTexImage")
             tex.name = f"{TLM_PREFIX}bump_img_{i}"
             tex.image = layer.image
-            tex.location = (x, y_base)
+            tex.location = (x, y)
             try:
                 tex.image.colorspace_settings.name = "Non-Color"
             except Exception:
@@ -1409,11 +1432,11 @@ def _build_bump_channel(node_tree, layers, uv_map, start_x, y_base, x_step):
             uv = node_tree.nodes.new("ShaderNodeUVMap")
             uv.name = f"{TLM_PREFIX}bump_uv_{i}"
             uv.uv_map = uv_map
-            uv.location = (x - 220, y_base)
+            uv.location = (x - 220, y)
             node_tree.links.new(uv.outputs["UV"], tex.inputs["Vector"])
             sep = node_tree.nodes.new("ShaderNodeSeparateColor")
             sep.name = f"{TLM_PREFIX}bump_sep_{i}"
-            sep.location = (x + 220, y_base)
+            sep.location = (x + 220, y)
             node_tree.links.new(tex.outputs["Color"], sep.inputs["Color"])
             fac_out = sep.outputs["Red"]
 
@@ -1431,11 +1454,11 @@ def _build_bump_channel(node_tree, layers, uv_map, start_x, y_base, x_step):
     else:
         # Mix multiple height inputs together
         combined_fac = bump_inputs[0][0]
+        last_x = positions[-1][0] if positions else start_x
         for j in range(1, len(bump_inputs)):
             add = node_tree.nodes.new("ShaderNodeMath")
             add.operation = 'ADD'
             add.name = f"{TLM_PREFIX}bump_add_{j}"
-            last_x = x_positions[-1] if x_positions else start_x
             add.location = (last_x + 300 + j * 200, y_base)
             add.use_clamp = True
             node_tree.links.new(combined_fac, add.inputs[0])
@@ -1448,7 +1471,7 @@ def _build_bump_channel(node_tree, layers, uv_map, start_x, y_base, x_step):
     bump_node = node_tree.nodes.new("ShaderNodeBump")
     bump_node.name = f"{TLM_PREFIX}bump_final"
     bump_node.label = "TLM Bump"
-    last_x = x_positions[-1] if x_positions else start_x
+    last_x = positions[-1][0] if positions else start_x
     bump_node.location = (last_x + 300 + len(bump_inputs) * 200, y_base)
     bump_node.inputs["Strength"].default_value = strength
     bump_node.inputs["Distance"].default_value = distance
