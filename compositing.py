@@ -69,6 +69,60 @@ def _restore_node_positions(node_tree, positions):
             n.location.x, n.location.y = positions[n.name]
 
 
+def _save_custom_links(node_tree):
+    """Save links between custom (non-TLM) nodes and TLM nodes.
+
+    Returns a list of tuples:
+        (custom_node_name, custom_socket_name, custom_is_output,
+         tlm_node_name, tlm_socket_name)
+    so they can be restored after TLM nodes are rebuilt.
+    """
+    saved = []
+    for link in node_tree.links:
+        from_tlm = link.from_node.name.startswith(TLM_PREFIX)
+        to_tlm   = link.to_node.name.startswith(TLM_PREFIX)
+
+        if from_tlm and not to_tlm:
+            # TLM output → custom input
+            saved.append((
+                link.to_node.name,   link.to_socket.name,   False,
+                link.from_node.name, link.from_socket.name,
+            ))
+        elif to_tlm and not from_tlm:
+            # Custom output → TLM input
+            saved.append((
+                link.from_node.name, link.from_socket.name, True,
+                link.to_node.name,   link.to_socket.name,
+            ))
+    return saved
+
+
+def _restore_custom_links(node_tree, saved_links):
+    """Re-create links between custom nodes and rebuilt TLM nodes."""
+    for (cust_name, cust_sock, cust_is_output,
+         tlm_name, tlm_sock) in saved_links:
+        cust_node = node_tree.nodes.get(cust_name)
+        tlm_node  = node_tree.nodes.get(tlm_name)
+        if cust_node is None or tlm_node is None:
+            continue
+        try:
+            if cust_is_output:
+                # custom output → TLM input
+                node_tree.links.new(
+                    cust_node.outputs[cust_sock],
+                    tlm_node.inputs[tlm_sock],
+                )
+            else:
+                # TLM output → custom input
+                node_tree.links.new(
+                    tlm_node.outputs[tlm_sock],
+                    cust_node.inputs[cust_sock],
+                )
+        except (KeyError, IndexError):
+            # Socket no longer exists — skip silently
+            pass
+
+
 def _clear_tlm_nodes(node_tree):
     to_remove = [n for n in node_tree.nodes if n.name.startswith(TLM_PREFIX)]
     for n in to_remove:
@@ -1060,6 +1114,7 @@ def rebuild_node_tree(material):
                     pimg.use_fake_user = True
 
     _saved_positions = _save_node_positions(node_tree)
+    _saved_custom_links = _save_custom_links(node_tree)
     _clear_tlm_nodes(node_tree)
 
     all_layers = list(reversed(tlm.layers))
@@ -1181,6 +1236,7 @@ def rebuild_node_tree(material):
         mat_out.location = (end_x + 600, 0)
 
     # Restore user-customized node positions if they existed before rebuild
+    _restore_custom_links(node_tree, _saved_custom_links)
     _restore_node_positions(node_tree, _saved_positions)
 
 
