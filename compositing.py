@@ -374,6 +374,27 @@ def _apply_mask(node_tree, mix_node, mask_image, uv_map, x, y):
     return mult
 
 
+# ── Layer width helper ────────────────────────────────────────────────────────
+
+_LAYER_WIDTH = {
+    'PAINT': 300,
+    'FILL': 300,
+    'ADJUSTMENT': 500,
+    'PROCEDURAL': 700,
+    'GROUP': 400,
+}
+
+
+def _layer_x_positions(layers, x0):
+    """Return a list of x positions, one per layer, based on each layer's type width."""
+    positions = []
+    x = x0
+    for layer in layers:
+        positions.append(x)
+        x += _LAYER_WIDTH.get(layer.layer_type, 300)
+    return positions
+
+
 # ── Per-channel composite builder ─────────────────────────────────────────────
 
 def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
@@ -407,9 +428,10 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
     current = None
     prev_alpha = None
     y = y_base
+    x_positions = _layer_x_positions(layers, x0)
 
     for i, layer in enumerate(layers):
-        x = x0 + i * x_step
+        x = x_positions[i]
 
         # Adjustment layers only affect base color
         if layer.layer_type == "ADJUSTMENT":
@@ -1033,12 +1055,7 @@ def rebuild_node_tree(material):
 
     uv_map  = tlm.uv_map or "UVMap"
     start_x = -1200
-
-    # x_step sized to the widest layer type in the stack:
-    # Procedural nodes span ~500 (TexCoord→Mapping→Tex→ColorRamp),
-    # Paint/Fill/Adjustment need ~300.
-    has_proc = any(l.layer_type == "PROCEDURAL" for l in all_layers if l.visible)
-    x_step  = 500 if has_proc else 300
+    x_step  = 300  # default for _build_base_color / _build_bump_channel
 
     # For PBR channels we still need a fully expanded list
     expanded = []
@@ -1054,23 +1071,20 @@ def rebuild_node_tree(material):
         return
 
     # Calculate where the chain ends so BSDF + passthrough nodes go to the right
-    n_layers = max(len(root_layers), len(expanded))
-    end_x = start_x + n_layers * x_step + 300
-
-    # Helper to snapshot node names before building a channel
-    def _snap():
-        return {n.name for n in node_tree.nodes}
+    root_positions = _layer_x_positions(root_layers, start_x)
+    expanded_positions = _layer_x_positions(expanded, start_x)
+    end_x_root = (root_positions[-1] + _LAYER_WIDTH.get(root_layers[-1].layer_type, 300)) if root_positions else start_x
+    end_x_exp = (expanded_positions[-1] + _LAYER_WIDTH.get(expanded[-1].layer_type, 300)) if expanded_positions else start_x
+    end_x = max(end_x_root, end_x_exp) + 100
 
     # ── Base Color — built from root_layers to preserve GROUP alpha for clipping mask ─
-    before = _snap()
     bc_out = _build_base_color(node_tree, root_layers, group_children, uv_map, start_x, 300, x_step)
     if bc_out:
         node_tree.links.new(bc_out, bsdf.inputs["Base Color"])
-    _add_channel_frame(node_tree, "Base Color", before, color=(0.2, 0.13, 0.1))
 
     # ── Roughness ─────────────────────────────────────────────────────────────
     if _channel_used(expanded, 'use_roughness'):
-        before = _snap()
+
         r_out = _build_channel(node_tree, expanded, 'roughness', uv_map, start_x, 0, x_step)
         if r_out:
             passthrough = node_tree.nodes.new("ShaderNodeMath")
@@ -1082,11 +1096,10 @@ def rebuild_node_tree(material):
             node_tree.links.new(r_out, passthrough.inputs[0])
             _link_to_bsdf(node_tree, passthrough.outputs["Value"], bsdf,
                           ["Roughness", "Specular Roughness"], "roughness")
-        _add_channel_frame(node_tree, "Roughness", before, color=(0.12, 0.18, 0.12))
 
     # ── Metallic ──────────────────────────────────────────────────────────────
     if _channel_used(expanded, 'use_metallic'):
-        before = _snap()
+
         m_out = _build_channel(node_tree, expanded, 'metallic', uv_map, start_x, -300, x_step)
         if m_out:
             passthrough = node_tree.nodes.new("ShaderNodeMath")
@@ -1098,19 +1111,17 @@ def rebuild_node_tree(material):
             node_tree.links.new(m_out, passthrough.inputs[0])
             _link_to_bsdf(node_tree, passthrough.outputs["Value"], bsdf,
                           ["Metallic", "Metalness"], "metallic")
-        _add_channel_frame(node_tree, "Metallic", before, color=(0.15, 0.15, 0.2))
 
     # ── Normal ────────────────────────────────────────────────────────────────
     if _channel_used(expanded, 'use_normal'):
-        before = _snap()
+
         n_out = _build_channel(node_tree, expanded, 'normal', uv_map, start_x, -600, x_step)
         if n_out:
             _link_to_bsdf(node_tree, n_out, bsdf, ["Normal", "normal"], "normal")
-        _add_channel_frame(node_tree, "Normal", before, color=(0.15, 0.12, 0.2))
 
     # ── Emission ──────────────────────────────────────────────────────────────
     if _channel_used(expanded, 'use_emission'):
-        before = _snap()
+
         e_out = _build_channel(node_tree, expanded, 'emission', uv_map, start_x, -900, x_step)
         if e_out:
             _link_to_bsdf(node_tree, e_out, bsdf,
@@ -1123,15 +1134,13 @@ def rebuild_node_tree(material):
                 val.location = (end_x, -900)
                 _link_to_bsdf(node_tree, val.outputs[0], bsdf,
                               ["Emission Strength", "emission_strength"], "emission_strength")
-        _add_channel_frame(node_tree, "Emission", before, color=(0.2, 0.18, 0.1))
 
     # ── Bump ──────────────────────────────────────────────────────────────────
     if _channel_used(expanded, 'use_bump'):
-        before = _snap()
+
         bump_out = _build_bump_channel(node_tree, expanded, uv_map, start_x, -1200, x_step)
         if bump_out:
             _link_to_bsdf(node_tree, bump_out, bsdf, ["Normal", "normal"], "bump")
-        _add_channel_frame(node_tree, "Bump", before, color=(0.18, 0.12, 0.12))
 
     # Position BSDF and Material Output to the right of all channels
     bsdf.location = (end_x + 300, 0)
@@ -1151,9 +1160,10 @@ def _build_base_color(node_tree, root_layers, group_children, uv_map, start_x, y
     """
     current = None
     prev_alpha = None
+    x_positions = _layer_x_positions(root_layers, start_x)
 
     for i, layer in enumerate(root_layers):
-        x = start_x + i * x_step
+        x = x_positions[i]
 
         if layer.layer_type == "ADJUSTMENT":
             if current is None:
@@ -1364,12 +1374,13 @@ def _build_bump_channel(node_tree, layers, uv_map, start_x, y_base, x_step):
     Returns a Normal socket ready to connect to BSDF Normal input.
     """
     bump_inputs = []  # list of (fac_socket, strength, distance) tuples
+    x_positions = _layer_x_positions(layers, start_x)
 
     for i, layer in enumerate(layers):
         if not getattr(layer, 'use_bump', False):
             continue
 
-        x = start_x + i * x_step
+        x = x_positions[i]
         fac_out = None
 
         if layer.layer_type == "PROCEDURAL":
@@ -1415,7 +1426,8 @@ def _build_bump_channel(node_tree, layers, uv_map, start_x, y_base, x_step):
             add = node_tree.nodes.new("ShaderNodeMath")
             add.operation = 'ADD'
             add.name = f"{TLM_PREFIX}bump_add_{j}"
-            add.location = (start_x + (len(layers)+j) * x_step, y_base)
+            last_x = x_positions[-1] if x_positions else start_x
+            add.location = (last_x + 300 + j * 200, y_base)
             add.use_clamp = True
             node_tree.links.new(combined_fac, add.inputs[0])
             node_tree.links.new(bump_inputs[j][0], add.inputs[1])
@@ -1427,35 +1439,14 @@ def _build_bump_channel(node_tree, layers, uv_map, start_x, y_base, x_step):
     bump_node = node_tree.nodes.new("ShaderNodeBump")
     bump_node.name = f"{TLM_PREFIX}bump_final"
     bump_node.label = "TLM Bump"
-    bump_node.location = (start_x + (len(layers)+len(bump_inputs)) * x_step, y_base)
+    last_x = x_positions[-1] if x_positions else start_x
+    bump_node.location = (last_x + 300 + len(bump_inputs) * 200, y_base)
     bump_node.inputs["Strength"].default_value = strength
     bump_node.inputs["Distance"].default_value = distance
     node_tree.links.new(combined_fac, bump_node.inputs["Height"])
 
     return bump_node.outputs["Normal"]
 
-
-def _add_channel_frame(node_tree, label, nodes_before, color=None):
-    """Add a labeled frame node for a PBR channel group.
-
-    nodes_before: set of node names that existed before building this channel.
-    Only newly created TLM_ nodes get assigned to the frame.
-    """
-    frame = node_tree.nodes.new("NodeFrame")
-    frame.name = f"{TLM_PREFIX}frame_{label.lower().replace(' ', '_')}"
-    frame.label = label
-    frame.use_custom_color = True
-    frame.color = color or (0.15, 0.15, 0.15)
-    frame.label_size = 20
-
-    for node in node_tree.nodes:
-        if (node.name.startswith(TLM_PREFIX)
-                and node.name not in nodes_before
-                and node.parent is None
-                and node != frame
-                and not node.name.startswith(f"{TLM_PREFIX}frame_")):
-            node.parent = frame
-    return frame
 
 
 def _channel_used(layers, flag_attr):
