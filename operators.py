@@ -1904,6 +1904,8 @@ class TLM_OT_ApplyPreset(Operator):
             layer.opacity    = ld.get("opacity", 1.0)
             layer.visible    = ld.get("visible", True)
             layer.group_name = ld.get("group_name", "")
+            layer.collapsed  = ld.get("collapsed", False)
+            layer.use_clipping_mask = ld.get("use_clipping_mask", False)
 
             # blend_mode: map UI names to internal enum values
             bm_map = {
@@ -1914,6 +1916,17 @@ class TLM_OT_ApplyPreset(Operator):
                 "Add": "ADD", "ADD": "ADD",
                 "Subtract": "SUBTRACT", "SUBTRACT": "SUBTRACT",
                 "Difference": "DIFFERENCE", "DIFFERENCE": "DIFFERENCE",
+                "Darken": "DARKEN", "DARKEN": "DARKEN",
+                "Lighten": "LIGHTEN", "LIGHTEN": "LIGHTEN",
+                "Color Dodge": "COLOR_DODGE", "COLOR_DODGE": "COLOR_DODGE",
+                "Color Burn": "COLOR_BURN", "COLOR_BURN": "COLOR_BURN",
+                "Soft Light": "SOFT_LIGHT", "SOFT_LIGHT": "SOFT_LIGHT",
+                "Linear Light": "LINEAR_LIGHT", "LINEAR_LIGHT": "LINEAR_LIGHT",
+                "Exclusion": "EXCLUSION", "EXCLUSION": "EXCLUSION",
+                "Hue": "HUE", "HUE": "HUE",
+                "Saturation": "SATURATION", "SATURATION": "SATURATION",
+                "Color": "COLOR", "COLOR": "COLOR",
+                "Luminosity": "LUMINOSITY", "LUMINOSITY": "LUMINOSITY",
             }
             layer.blend_mode = bm_map.get(ld.get("blend_mode", "MIX"), "MIX")
 
@@ -1927,9 +1940,36 @@ class TLM_OT_ApplyPreset(Operator):
                 layer.proc_detail          = ld.get("proc_detail", 2.0)
                 layer.proc_roughness_proc  = ld.get("proc_roughness_proc", 0.5)
                 layer.proc_distortion      = ld.get("proc_distortion", 0.0)
+                layer.proc_lacunarity      = ld.get("proc_lacunarity", 2.0)
+                layer.proc_offset_x        = ld.get("proc_offset_x", 0.0)
+                layer.proc_offset_y        = ld.get("proc_offset_y", 0.0)
+                layer.proc_offset_z        = ld.get("proc_offset_z", 0.0)
                 layer.proc_wave_type       = ld.get("proc_wave_type", "BANDS")
+                layer.proc_wave_profile    = ld.get("proc_wave_profile", "SIN")
+                layer.proc_wave_detail_scale = ld.get("proc_wave_detail_scale", 1.0)
                 layer.proc_gradient_type   = ld.get("proc_gradient_type", "LINEAR")
                 layer.proc_checker_scale   = ld.get("proc_checker_scale", 5.0)
+                layer.proc_voronoi_feature  = ld.get("proc_voronoi_feature", "F1")
+                layer.proc_voronoi_distance = ld.get("proc_voronoi_distance", "EUCLIDEAN")
+                layer.proc_randomness       = ld.get("proc_randomness", 1.0)
+                layer.proc_marble_distortion = ld.get("proc_marble_distortion", 5.0)
+                layer.proc_marble_wave_type  = ld.get("proc_marble_wave_type", "BANDS")
+            elif layer.layer_type == "ADJUSTMENT":
+                layer.adj_type             = ld.get("adj_type", "HUE_SAT")
+                layer.adj_hue              = ld.get("adj_hue", 0.5)
+                layer.adj_saturation       = ld.get("adj_saturation", 1.0)
+                layer.adj_value            = ld.get("adj_value", 1.0)
+                layer.adj_brightness       = ld.get("adj_brightness", 0.0)
+                layer.adj_contrast         = ld.get("adj_contrast", 0.0)
+                layer.adj_in_min           = ld.get("adj_in_min", 0.0)
+                layer.adj_in_max           = ld.get("adj_in_max", 1.0)
+                layer.adj_levels_gamma     = ld.get("adj_levels_gamma", 1.0)
+                layer.adj_out_min          = ld.get("adj_out_min", 0.0)
+                layer.adj_out_max          = ld.get("adj_out_max", 1.0)
+                layer.adj_curve_contrast   = ld.get("adj_curve_contrast", 0.0)
+                layer.adj_curve_brightness = ld.get("adj_curve_brightness", 0.0)
+                layer.adj_curve_black_point = ld.get("adj_curve_black_point", 0.0)
+                layer.adj_curve_white_point = ld.get("adj_curve_white_point", 1.0)
 
             # PBR channels
             layer.use_roughness   = ld.get("use_roughness", False)
@@ -1939,6 +1979,13 @@ class TLM_OT_ApplyPreset(Operator):
             layer.use_bump        = ld.get("use_bump", False)
             layer.bump_strength   = ld.get("bump_strength", 0.5)
             layer.bump_distance   = ld.get("bump_distance", 0.05)
+            if hasattr(layer, 'use_normal'):
+                layer.use_normal  = ld.get("use_normal", False)
+            if hasattr(layer, 'use_emission'):
+                layer.use_emission = ld.get("use_emission", False)
+                if layer.use_emission:
+                    layer.emission_color    = ld.get("emission_color", [1,1,1,1])
+                    layer.emission_strength = ld.get("emission_strength", 1.0)
 
         tlm.active_layer_index = max(0, len(tlm.layers) - 1)
         if tlm.auto_composite:
@@ -1978,6 +2025,8 @@ class TLM_OT_SavePreset(Operator):
                 "name": layer.name, "type": layer.layer_type,
                 "opacity": round(layer.opacity, 4), "blend_mode": layer.blend_mode,
                 "visible": layer.visible, "group_name": layer.group_name,
+                "collapsed": layer.collapsed,
+                "use_clipping_mask": layer.use_clipping_mask,
             }
             if layer.layer_type == "FILL":
                 d["fill_color"] = list(layer.fill_color)
@@ -1987,14 +2036,52 @@ class TLM_OT_SavePreset(Operator):
                     "proc_color1": list(layer.proc_color1), "proc_color2": list(layer.proc_color2),
                     "proc_detail": layer.proc_detail, "proc_distortion": layer.proc_distortion,
                     "proc_roughness_proc": layer.proc_roughness_proc,
+                    "proc_lacunarity": layer.proc_lacunarity,
+                    "proc_offset_x": layer.proc_offset_x,
+                    "proc_offset_y": layer.proc_offset_y,
+                    "proc_offset_z": layer.proc_offset_z,
                     "proc_wave_type": layer.proc_wave_type,
+                    "proc_wave_profile": layer.proc_wave_profile,
+                    "proc_wave_detail_scale": layer.proc_wave_detail_scale,
                     "proc_gradient_type": layer.proc_gradient_type,
                     "proc_checker_scale": layer.proc_checker_scale,
+                    "proc_voronoi_feature": layer.proc_voronoi_feature,
+                    "proc_voronoi_distance": layer.proc_voronoi_distance,
+                    "proc_randomness": layer.proc_randomness,
+                    "proc_marble_distortion": layer.proc_marble_distortion,
+                    "proc_marble_wave_type": layer.proc_marble_wave_type,
                 })
+            elif layer.layer_type == "ADJUSTMENT":
+                d.update({
+                    "adj_type": layer.adj_type,
+                    "adj_hue": layer.adj_hue,
+                    "adj_saturation": layer.adj_saturation,
+                    "adj_value": layer.adj_value,
+                    "adj_brightness": layer.adj_brightness,
+                    "adj_contrast": layer.adj_contrast,
+                    "adj_in_min": layer.adj_in_min,
+                    "adj_in_max": layer.adj_in_max,
+                    "adj_levels_gamma": layer.adj_levels_gamma,
+                    "adj_out_min": layer.adj_out_min,
+                    "adj_out_max": layer.adj_out_max,
+                    "adj_curve_contrast": layer.adj_curve_contrast,
+                    "adj_curve_brightness": layer.adj_curve_brightness,
+                    "adj_curve_black_point": layer.adj_curve_black_point,
+                    "adj_curve_white_point": layer.adj_curve_white_point,
+                })
+            # PBR channels
             d["use_roughness"]  = layer.use_roughness
             d["roughness_fill"] = layer.roughness_fill
             d["use_metallic"]   = layer.use_metallic
             d["metallic_fill"]  = layer.metallic_fill
+            d["use_bump"]       = layer.use_bump
+            d["bump_strength"]  = layer.bump_strength
+            d["bump_distance"]  = layer.bump_distance
+            d["use_normal"]     = getattr(layer, 'use_normal', False)
+            d["use_emission"]   = getattr(layer, 'use_emission', False)
+            if getattr(layer, 'use_emission', False):
+                d["emission_color"]    = list(layer.emission_color)
+                d["emission_strength"] = layer.emission_strength
             layers_data.append(d)
 
         data = {"preset_name": self.preset_name, "layers": layers_data}
@@ -2004,6 +2091,28 @@ class TLM_OT_SavePreset(Operator):
 
         self.report({'INFO'}, f"Saved preset '{self.preset_name}'")
         return {'FINISHED'}
+
+
+class TLM_OT_DeletePreset(Operator):
+    """Delete a user-saved preset file."""
+    bl_idname = "tlm.delete_preset"
+    bl_label = "Delete Preset"
+    bl_options = {'REGISTER'}
+
+    preset_name: bpy.props.StringProperty(default="")
+
+    def execute(self, context):
+        preset_dir = _os.path.join(_os.path.dirname(__file__), "presets")
+        filepath = _os.path.join(preset_dir, f"{self.preset_name}.tlm")
+        if _os.path.exists(filepath):
+            _os.remove(filepath)
+            self.report({'INFO'}, f"Deleted preset '{self.preset_name}'")
+        else:
+            self.report({'WARNING'}, f"Preset file not found: {self.preset_name}")
+        return {'FINISHED'}
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_confirm(self, event)
 
 
 # ─── Layer da Clipboard ───────────────────────────────────────────────────────
@@ -2124,6 +2233,7 @@ classes = [
     TLM_OT_AddSmartMask,
     TLM_OT_ApplyPreset,
     TLM_OT_SavePreset,
+    TLM_OT_DeletePreset,
     TLM_OT_LayerFromClipboard,
 ]
 

@@ -597,6 +597,18 @@ class TLM_LayerItem(PropertyGroup):
         update=_on_layer_update,
     )
 
+    proc_coord_type: EnumProperty(
+        name="Coordinates",
+        description="Texture coordinate space for procedural patterns",
+        items=[
+            ('GENERATED', "Generated", "Normalized to object bounding box (0-1). Consistent across different objects"),
+            ('OBJECT',    "Object",    "World-space object coordinates. Pattern changes with object size/position"),
+            ('UV',        "UV",        "UV map coordinates. Follows UV unwrap, may show seams"),
+        ],
+        default='GENERATED',
+        update=_on_layer_update,
+    )
+
     @property
     def image(self):
         """Convenience accessor for the Blender Image datablock."""

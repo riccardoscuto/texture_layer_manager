@@ -187,7 +187,7 @@ def _new_triplanar_tex(node_tree, image, x, y, colorspace="sRGB", scale=1.0, sha
 
         # Scale via Mapping
         mapping = node_tree.nodes.new("ShaderNodeMapping")
-        mapping.name = f"{TLM_PREFIX}tri_map_{label}_{id(mapping)}"
+        mapping.name = f"{TLM_PREFIX}tri_map_{label}_{_next_id()}"
         mapping.location = (x - 250 + offset_x, y - 300)
         mapping.inputs["Scale"].default_value = (scale, scale, scale)
         node_tree.links.new(combine.outputs["Vector"], mapping.inputs["Vector"])
@@ -416,7 +416,7 @@ def _new_value(node_tree, value, x, y):
 def _apply_mask(node_tree, mix_node, mask_image, uv_map, x, y):
     mask_tex = _new_img_tex(node_tree, mask_image, uv_map, x - 440, y - 100, "Non-Color")
     sep = node_tree.nodes.new("ShaderNodeSeparateColor")
-    sep.name = f"{TLM_PREFIX}sep_{id(sep)}"
+    sep.name = f"{TLM_PREFIX}sep_{_next_id()}"
     sep.location = (x - 220, y - 100)
     node_tree.links.new(mask_tex.outputs["Color"], sep.inputs["Color"])
     mult = node_tree.nodes.new("ShaderNodeMath")
@@ -576,7 +576,7 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
             if is_scalar:
                 # Use R channel for scalar maps
                 sep = node_tree.nodes.new("ShaderNodeSeparateColor")
-                sep.name = f"{TLM_PREFIX}sep_{id(sep)}"
+                sep.name = f"{TLM_PREFIX}sep_{_next_id()}"
                 sep.location = (x + 220, y)
                 node_tree.links.new(tex.outputs["Color"], sep.inputs["Color"])
                 layer_out = sep.outputs["Red"]
@@ -597,7 +597,7 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
                     print(f"[TLM] FILL {channel_id}: using image '{img.name}' for layer '{layer.name}'")
                     tex = _new_img_tex(node_tree, img, uv_map, x, y, "Non-Color", layer=layer)
                     sep = node_tree.nodes.new("ShaderNodeSeparateColor")
-                    sep.name = f"{TLM_PREFIX}sep_scalar_{id(sep)}"
+                    sep.name = f"{TLM_PREFIX}sep_scalar_{_next_id()}"
                     sep.location = (x + 220, y)
                     node_tree.links.new(tex.outputs["Color"], sep.inputs["Color"])
                     layer_out = sep.outputs["Red"]
@@ -684,7 +684,7 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
     # Normal map needs a Normal Map node wrapper
     if is_normal and current is not None:
         nm = node_tree.nodes.new("ShaderNodeNormalMap")
-        nm.name = f"{TLM_PREFIX}normalmap_{id(nm)}"
+        nm.name = f"{TLM_PREFIX}normalmap_{_next_id()}"
         # Place after the last layer column
         last_x = positions[-1][0] if positions else x0
         end_pos = last_x + _LAYER_WIDTH.get(layers[-1].layer_type, 300)
@@ -748,17 +748,27 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
     """
     # ── Texture coordinate + mapping ─────────────────────────────────────
     tc = node_tree.nodes.new("ShaderNodeTexCoord")
-    tc.name = f"{TLM_PREFIX}proc_tc_{id(tc)}"
+    tc.name = f"{TLM_PREFIX}proc_tc_{_next_id()}"
     tc.location = (x - 500, y)
 
     mapping = node_tree.nodes.new("ShaderNodeMapping")
-    mapping.name = f"{TLM_PREFIX}proc_map_{id(mapping)}"
+    mapping.name = f"{TLM_PREFIX}proc_map_{_next_id()}"
     mapping.location = (x - 300, y)
     mapping.inputs["Location"].default_value = (
         layer.proc_offset_x, layer.proc_offset_y, layer.proc_offset_z
     )
-    # Use Object coordinates for procedural layers — no UV seams, works on any mesh
-    node_tree.links.new(tc.outputs["Object"], mapping.inputs["Vector"])
+    # Select coordinate space based on layer setting
+    coord_type = getattr(layer, 'proc_coord_type', 'GENERATED')
+    if coord_type == 'UV':
+        uv_node = node_tree.nodes.new("ShaderNodeUVMap")
+        uv_node.name = f"{TLM_PREFIX}proc_uv_{_next_id()}"
+        uv_node.uv_map = uv_map
+        uv_node.location = (x - 500, y - 50)
+        node_tree.links.new(uv_node.outputs["UV"], mapping.inputs["Vector"])
+    elif coord_type == 'OBJECT':
+        node_tree.links.new(tc.outputs["Object"], mapping.inputs["Vector"])
+    else:  # GENERATED (default)
+        node_tree.links.new(tc.outputs["Generated"], mapping.inputs["Vector"])
 
     # ── Texture node ──────────────────────────────────────────────────────
     pt = layer.proc_type
@@ -823,7 +833,7 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
         tex_node.inputs["Scale"].default_value  = layer.proc_checker_scale
         tex_node.inputs["Color1"].default_value = layer.proc_color1
         tex_node.inputs["Color2"].default_value = layer.proc_color2
-        tex_node.name = f"{TLM_PREFIX}proc_tex_{id(tex_node)}"
+        tex_node.name = f"{TLM_PREFIX}proc_tex_{_next_id()}"
         tex_node.location = (x - 100, y)
         node_tree.links.new(mapping.outputs["Vector"], tex_node.inputs["Vector"])
         # Checker already outputs Color directly
@@ -885,13 +895,13 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
     if tex_node is None:
         return None, None
 
-    tex_node.name = f"{TLM_PREFIX}proc_tex_{id(tex_node)}"
+    tex_node.name = f"{TLM_PREFIX}proc_tex_{_next_id()}"
     tex_node.location = (x - 100, y)
     node_tree.links.new(mapping.outputs["Vector"], tex_node.inputs["Vector"])
 
     # ── ColorRamp: map Fac → Color1..Color2 ──────────────────────────────
     cr = node_tree.nodes.new("ShaderNodeValToRGB")
-    cr.name = f"{TLM_PREFIX}proc_cr_{id(cr)}"
+    cr.name = f"{TLM_PREFIX}proc_cr_{_next_id()}"
     cr.label = "Proc Color"
     cr.location = (x + 180, y)
     # Set stop colors
@@ -1337,7 +1347,18 @@ def _build_proc_fac_node(node_tree, layer, name_suffix, x, y):
     mapping.inputs["Location"].default_value = (
         layer.proc_offset_x, layer.proc_offset_y, layer.proc_offset_z
     )
-    node_tree.links.new(tc.outputs["Object"], mapping.inputs["Vector"])
+    # Select coordinate space based on layer setting
+    coord_type = getattr(layer, 'proc_coord_type', 'GENERATED')
+    if coord_type == 'UV':
+        uv_node = node_tree.nodes.new("ShaderNodeUVMap")
+        uv_node.name = f"{TLM_PREFIX}pfac_uv_{name_suffix}"
+        uv_node.uv_map = "UVMap"
+        uv_node.location = (x - 500, y - 50)
+        node_tree.links.new(uv_node.outputs["UV"], mapping.inputs["Vector"])
+    elif coord_type == 'OBJECT':
+        node_tree.links.new(tc.outputs["Object"], mapping.inputs["Vector"])
+    else:  # GENERATED (default)
+        node_tree.links.new(tc.outputs["Generated"], mapping.inputs["Vector"])
 
     tex = None
     fac_out = None

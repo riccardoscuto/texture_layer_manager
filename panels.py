@@ -241,6 +241,8 @@ def _draw_procedural(col, active, tlm):
     off_row.prop(active, "proc_offset_y", text="Y")
     off_row.prop(active, "proc_offset_z", text="Z")
 
+    col.prop(active, "proc_coord_type", text="Coords")
+
     col.separator(factor=0.8)
     br = col.row(align=True)
     br.prop(active, "blend_mode", text="")
@@ -486,6 +488,25 @@ def draw_tlm_settings(layout, context):
         op.preset_name = pname
     layout.separator(factor=0.3)
     layout.operator("tlm.save_preset", text="Save Current as Preset…", icon='FILE_TICK')
+
+    # ── User-saved presets ───────────────────────────────────────────────
+    import os as _os
+    preset_dir = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "presets")
+    if _os.path.isdir(preset_dir):
+        user_presets = sorted(
+            f[:-4] for f in _os.listdir(preset_dir) if f.endswith(".tlm")
+        )
+        if user_presets:
+            layout.separator(factor=0.3)
+            layout.label(text="Saved Presets:", icon='FILE_FOLDER')
+            ugrid = layout.column(align=True)
+            ugrid.scale_y = 0.95
+            for pname in user_presets:
+                urow = ugrid.row(align=True)
+                op = urow.operator("tlm.apply_preset", text=pname, icon='PRESET')
+                op.preset_name = pname
+                dop = urow.operator("tlm.delete_preset", text="", icon='TRASH')
+                dop.preset_name = pname
 
     layout.separator(factor=0.8)
     layout.label(text="Layer Stack I/O", icon='FILE_FOLDER')
