@@ -2,9 +2,8 @@
 previews.py
 Thumbnail preview system for Texture Layer Manager.
 
-Blender 5.0 enforces 64x64 preview size (16384 flat RGBA bytes).
-Older versions used 128x128 (65536 flat RGBA bytes).
-Both use flat [R,G,B,A, R,G,B,A, ...] uint8 format.
+Blender 5.0: image_pixels expects w*h int32 (packed RGBA).
+We use image_pixels_float (w*h*4 floats, 0.0-1.0) for simplicity.
 """
 
 import bpy
@@ -78,15 +77,14 @@ def _generate_thumbnail(image):
     x_idx = np.linspace(0, w - 1, th).astype(int)
     thumb = buf[np.ix_(y_idx, x_idx)]
 
-    # flat uint8 list length = th*th*4  (16384 for Blender 5.0)
-    flat = (np.clip(thumb, 0.0, 1.0) * 255).astype(np.uint8).flatten().tolist()
+    flat = np.clip(thumb, 0.0, 1.0).flatten().tolist()
 
     if key in pcoll:
         del pcoll[key]
 
     preview = pcoll.new(key)
     preview.image_size = (th, th)
-    preview.image_pixels = flat
+    preview.image_pixels_float = flat
 
     return int(preview.icon_id) & 0x7FFFFFFF
 
@@ -121,13 +119,11 @@ def get_fill_icon_id(layer):
         return int(pcoll[key].icon_id) & 0x7FFFFFFF
 
     th = THUMB_SIZE
-    ri, gi, bi, ai = int(r * 255), int(g * 255), int(b * 255), int(a * 255)
-    # length = th*th*4 = 16384 for Blender 5.0
-    flat = [ri, gi, bi, ai] * (th * th)
+    flat = [r, g, b, a] * (th * th)
 
     preview = pcoll.new(key)
     preview.image_size = (th, th)
-    preview.image_pixels = flat
+    preview.image_pixels_float = flat
 
     return int(preview.icon_id) & 0x7FFFFFFF
 

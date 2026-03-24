@@ -12,6 +12,15 @@ import bpy
 
 TLM_PREFIX = "TLM_"
 
+# Deterministic node counter — resets each rebuild so names are stable
+_node_counter = 0
+
+def _next_id():
+    """Return a sequential int that's stable across rebuilds."""
+    global _node_counter
+    _node_counter += 1
+    return _node_counter
+
 # ── Blend mode mapping ────────────────────────────────────────────────────────
 
 BLEND_TO_MIX_MODE = {
@@ -71,7 +80,7 @@ def _new_img_tex(node_tree, image, uv_map, x, y, colorspace="sRGB", layer=None):
                                   layer.triplanar_scale, layer.triplanar_sharpness)
 
     node = node_tree.nodes.new("ShaderNodeTexImage")
-    node.name = f"{TLM_PREFIX}img_{image.name}_{id(node)}"
+    node.name = f"{TLM_PREFIX}img_{image.name}_{_next_id()}"
     node.image = image
     node.location = (x, y)
     if colorspace == "Non-Color":
@@ -80,7 +89,7 @@ def _new_img_tex(node_tree, image, uv_map, x, y, colorspace="sRGB", layer=None):
         except Exception:
             pass
     uv = node_tree.nodes.new("ShaderNodeUVMap")
-    uv.name = f"{TLM_PREFIX}uv_{id(uv)}"
+    uv.name = f"{TLM_PREFIX}uv_{_next_id()}"
     uv.uv_map = uv_map
     uv.location = (x - 220, y)
     node_tree.links.new(uv.outputs["UV"], node.inputs["Vector"])
@@ -97,7 +106,7 @@ def _new_triplanar_tex(node_tree, image, x, y, colorspace="sRGB", scale=1.0, sha
     """
     # Geometry node for normal and position
     geo = node_tree.nodes.new("ShaderNodeNewGeometry")
-    geo.name = f"{TLM_PREFIX}tri_geo_{id(geo)}"
+    geo.name = f"{TLM_PREFIX}tri_geo_{_next_id()}"
     geo.location = (x - 700, y)
     # Separate XYZ from normal for blending weights
     sep_n = node_tree.nodes.new("ShaderNodeSeparateXYZ")
@@ -268,7 +277,7 @@ def _new_mix(node_tree, blend_mode, opacity, x, y):
         node = node_tree.nodes.new("ShaderNodeMixRGB")
         node.blend_type = BLEND_TO_MIX_MODE.get(blend_mode, "MIX")
         node.inputs["Fac"].default_value = opacity
-    node.name = f"{TLM_PREFIX}mix_{id(node)}"
+    node.name = f"{TLM_PREFIX}mix_{_next_id()}"
     node.location = (x, y)
     return node
 
@@ -284,7 +293,7 @@ def _new_mix_scalar(node_tree, opacity, x, y):
         node = node_tree.nodes.new("ShaderNodeMixRGB")
         node.blend_type = 'MIX'
         node.inputs["Fac"].default_value = opacity
-    node.name = f"{TLM_PREFIX}mix_scalar_{id(node)}"
+    node.name = f"{TLM_PREFIX}mix_scalar_{_next_id()}"
     node.location = (x, y)
     return node
 
@@ -333,7 +342,7 @@ def _result_socket_scalar(node):
 
 def _new_fill(node_tree, color, x, y):
     node = node_tree.nodes.new("ShaderNodeRGB")
-    node.name = f"{TLM_PREFIX}fill_{id(node)}"
+    node.name = f"{TLM_PREFIX}fill_{_next_id()}"
     node.outputs[0].default_value = color
     node.location = (x, y)
     return node
@@ -342,7 +351,7 @@ def _new_fill(node_tree, color, x, y):
 def _new_value(node_tree, value, x, y):
     """Single float Value node for scalar fill."""
     node = node_tree.nodes.new("ShaderNodeValue")
-    node.name = f"{TLM_PREFIX}val_{id(node)}"
+    node.name = f"{TLM_PREFIX}val_{_next_id()}"
     node.outputs[0].default_value = value
     node.location = (x, y)
     return node
@@ -744,7 +753,7 @@ def _apply_adjustment(node_tree, layer, current_output, x, y):
 
     if adj == 'HUE_SAT':
         node = node_tree.nodes.new("ShaderNodeHueSaturation")
-        node.name = f"{TLM_PREFIX}adj_huesat_{id(node)}"
+        node.name = f"{TLM_PREFIX}adj_huesat_{_next_id()}"
         node.label = "Hue/Saturation"
         node.location = (x, y)
         node.inputs["Hue"].default_value        = layer.adj_hue
@@ -756,7 +765,7 @@ def _apply_adjustment(node_tree, layer, current_output, x, y):
 
     elif adj == 'BRIGHT_CONTRAST':
         node = node_tree.nodes.new("ShaderNodeBrightContrast")
-        node.name = f"{TLM_PREFIX}adj_bc_{id(node)}"
+        node.name = f"{TLM_PREFIX}adj_bc_{_next_id()}"
         node.label = "Brightness/Contrast"
         node.location = (x, y)
         node.inputs["Bright"].default_value   = layer.adj_brightness
@@ -895,6 +904,10 @@ def rebuild_node_tree(material):
     # Cancel any pending deferred rebuild — this explicit call supersedes it.
     from . import properties
     properties.cancel_pending_rebuild()
+
+    # Reset deterministic counter so node names match between rebuilds
+    global _node_counter
+    _node_counter = 0
 
     tlm = material.tlm
     node_tree = material.node_tree
