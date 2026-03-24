@@ -1033,7 +1033,12 @@ def rebuild_node_tree(material):
 
     uv_map  = tlm.uv_map or "UVMap"
     start_x = -1200
-    x_step  = 280
+
+    # Calculate x_step based on widest layer type in the stack:
+    # Procedural/Marble need ~800 (TexCoord→Mapping→Tex→ColorRamp),
+    # Paint/Fill need ~350, Adjustment needs ~500 (Levels chain).
+    has_proc = any(l.layer_type == "PROCEDURAL" for l in all_layers if l.visible)
+    x_step  = 750 if has_proc else 350
 
     # For PBR channels we still need a fully expanded list
     expanded = []
@@ -1048,75 +1053,91 @@ def rebuild_node_tree(material):
     if not bsdf:
         return
 
+    # Calculate where the chain ends so BSDF + passthrough nodes go to the right
+    n_layers = max(len(root_layers), len(expanded))
+    end_x = start_x + n_layers * x_step + 300
+
+    # Helper to snapshot node names before building a channel
+    def _snap():
+        return {n.name for n in node_tree.nodes}
+
     # ── Base Color — built from root_layers to preserve GROUP alpha for clipping mask ─
-    bc_out = _build_base_color(node_tree, root_layers, group_children, uv_map, start_x, 300, x_step)
+    before = _snap()
+    bc_out = _build_base_color(node_tree, root_layers, group_children, uv_map, start_x, 400, x_step)
     if bc_out:
         node_tree.links.new(bc_out, bsdf.inputs["Base Color"])
+    _add_channel_frame(node_tree, "Base Color", before, color=(0.2, 0.13, 0.1))
 
     # ── Roughness ─────────────────────────────────────────────────────────────
     if _channel_used(expanded, 'use_roughness'):
-        r_out = _build_channel(node_tree, expanded, 'roughness', uv_map, start_x, -50, x_step)
+        before = _snap()
+        r_out = _build_channel(node_tree, expanded, 'roughness', uv_map, start_x, -100, x_step)
         if r_out:
-            # Pass through a Math node to ensure correct socket type in Blender 5.0
             passthrough = node_tree.nodes.new("ShaderNodeMath")
             passthrough.operation = 'ADD'
             passthrough.name = f"{TLM_PREFIX}rough_pass"
             passthrough.inputs[1].default_value = 0.0
             passthrough.use_clamp = True
-            passthrough.location = (200, -50)
+            passthrough.location = (end_x, -100)
             node_tree.links.new(r_out, passthrough.inputs[0])
             _link_to_bsdf(node_tree, passthrough.outputs["Value"], bsdf,
                           ["Roughness", "Specular Roughness"], "roughness")
-        else:
-            print("[TLM] WARNING: roughness channel enabled but _build_channel returned None")
+        _add_channel_frame(node_tree, "Roughness", before, color=(0.12, 0.18, 0.12))
 
     # ── Metallic ──────────────────────────────────────────────────────────────
     if _channel_used(expanded, 'use_metallic'):
-        m_out = _build_channel(node_tree, expanded, 'metallic', uv_map, start_x, -250, x_step)
+        before = _snap()
+        m_out = _build_channel(node_tree, expanded, 'metallic', uv_map, start_x, -500, x_step)
         if m_out:
             passthrough = node_tree.nodes.new("ShaderNodeMath")
             passthrough.operation = 'ADD'
             passthrough.name = f"{TLM_PREFIX}metal_pass"
             passthrough.inputs[1].default_value = 0.0
             passthrough.use_clamp = True
-            passthrough.location = (200, -150)
+            passthrough.location = (end_x, -500)
             node_tree.links.new(m_out, passthrough.inputs[0])
             _link_to_bsdf(node_tree, passthrough.outputs["Value"], bsdf,
                           ["Metallic", "Metalness"], "metallic")
-        else:
-            print("[TLM] WARNING: metallic channel enabled but _build_channel returned None")
+        _add_channel_frame(node_tree, "Metallic", before, color=(0.15, 0.15, 0.2))
 
     # ── Normal ────────────────────────────────────────────────────────────────
     if _channel_used(expanded, 'use_normal'):
-        n_out = _build_channel(node_tree, expanded, 'normal', uv_map, start_x, -450, x_step)
+        before = _snap()
+        n_out = _build_channel(node_tree, expanded, 'normal', uv_map, start_x, -900, x_step)
         if n_out:
             _link_to_bsdf(node_tree, n_out, bsdf, ["Normal", "normal"], "normal")
-        else:
-            print("[TLM] WARNING: normal channel enabled but _build_channel returned None")
+        _add_channel_frame(node_tree, "Normal", before, color=(0.15, 0.12, 0.2))
 
     # ── Emission ──────────────────────────────────────────────────────────────
     if _channel_used(expanded, 'use_emission'):
-        e_out = _build_channel(node_tree, expanded, 'emission', uv_map, start_x, -650, x_step)
+        before = _snap()
+        e_out = _build_channel(node_tree, expanded, 'emission', uv_map, start_x, -1300, x_step)
         if e_out:
             _link_to_bsdf(node_tree, e_out, bsdf,
                           ["Emission Color", "Emission", "emission"], "emission")
-            # Emission Strength: use a Value node for reliable Blender 5.0 connection
             strengths = [l.emission_strength for l in expanded if l.use_emission]
             if strengths:
                 val = node_tree.nodes.new("ShaderNodeValue")
                 val.name = f"{TLM_PREFIX}emission_strength"
                 val.outputs[0].default_value = strengths[-1]
-                val.location = (200, -350)
+                val.location = (end_x, -1300)
                 _link_to_bsdf(node_tree, val.outputs[0], bsdf,
                               ["Emission Strength", "emission_strength"], "emission_strength")
-        else:
-            print("[TLM] WARNING: emission channel enabled but _build_channel returned None")
+        _add_channel_frame(node_tree, "Emission", before, color=(0.2, 0.18, 0.1))
 
     # ── Bump ──────────────────────────────────────────────────────────────────
     if _channel_used(expanded, 'use_bump'):
-        bump_out = _build_bump_channel(node_tree, expanded, uv_map, start_x, -850, x_step)
+        before = _snap()
+        bump_out = _build_bump_channel(node_tree, expanded, uv_map, start_x, -1700, x_step)
         if bump_out:
             _link_to_bsdf(node_tree, bump_out, bsdf, ["Normal", "normal"], "bump")
+        _add_channel_frame(node_tree, "Bump", before, color=(0.18, 0.12, 0.12))
+
+    # Position BSDF and Material Output to the right of all channels
+    bsdf.location = (end_x + 300, 0)
+    mat_out = next((n for n in node_tree.nodes if n.type == 'OUTPUT_MATERIAL'), None)
+    if mat_out:
+        mat_out.location = (end_x + 600, 0)
 
     # Restore user-customized node positions if they existed before rebuild
     _restore_node_positions(node_tree, _saved_positions)
@@ -1414,6 +1435,29 @@ def _build_bump_channel(node_tree, layers, uv_map, start_x, y_base, x_step):
     return bump_node.outputs["Normal"]
 
 
+def _add_channel_frame(node_tree, label, nodes_before, color=None):
+    """Add a labeled frame node for a PBR channel group.
+
+    nodes_before: set of node names that existed before building this channel.
+    Only newly created TLM_ nodes get assigned to the frame.
+    """
+    frame = node_tree.nodes.new("NodeFrame")
+    frame.name = f"{TLM_PREFIX}frame_{label.lower().replace(' ', '_')}"
+    frame.label = label
+    frame.use_custom_color = True
+    frame.color = color or (0.15, 0.15, 0.15)
+    frame.label_size = 20
+
+    for node in node_tree.nodes:
+        if (node.name.startswith(TLM_PREFIX)
+                and node.name not in nodes_before
+                and node.parent is None
+                and node != frame
+                and not node.name.startswith(f"{TLM_PREFIX}frame_")):
+            node.parent = frame
+    return frame
+
+
 def _channel_used(layers, flag_attr):
     """Check if any layer in the list has a channel enabled."""
     return any(getattr(l, flag_attr, False) for l in layers)
@@ -1425,7 +1469,7 @@ def _find_bsdf(node_tree):
             return node
     # Create one if missing
     bsdf = node_tree.nodes.new("ShaderNodeBsdfPrincipled")
-    bsdf.location = (400, 300)
+    bsdf.location = (400, 0)
     out = next((n for n in node_tree.nodes if n.type == 'OUTPUT_MATERIAL'
                 and not n.name.startswith(TLM_PREFIX)), None)
     if out:
