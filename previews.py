@@ -105,7 +105,9 @@ def get_layer_icon_id(layer):
         icon_id = _generate_thumbnail(image)
         _cache[key] = (current_hash, icon_id)
         return icon_id
-    except Exception:
+    except Exception as e:
+        print(f"[TLM] Thumbnail generation failed for {image.name}: {e}")
+        import traceback; traceback.print_exc()
         return 0
 
 

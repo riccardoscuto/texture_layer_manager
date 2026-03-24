@@ -59,7 +59,8 @@ class TLM_UL_LayerList(UIList):
                     iid = previews.get_layer_icon_id(layer)
                 elif layer.layer_type == "FILL":
                     iid = previews.get_fill_icon_id(layer)
-            except Exception:
+            except Exception as e:
+                print(f"[TLM] Preview error for {layer.name}: {e}")
                 iid = 0
             if iid and 0 < iid <= 0x7FFFFFFF:
                 row.label(text="", icon_value=iid)
