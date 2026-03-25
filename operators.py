@@ -1003,9 +1003,10 @@ class TLM_OT_ImportJSON(Operator):
 
 # Map channel id → (flag_attr, image_name_attr, label)
 CHANNEL_INFO = {
-    'roughness': ('use_roughness', 'roughness_image_name', 'Roughness'),
-    'metallic':  ('use_metallic',  'metallic_image_name',  'Metallic'),
-    'normal':    ('use_normal',    'normal_image_name',    'Normal'),
+    'roughness':    ('use_roughness',    'roughness_image_name',    'Roughness'),
+    'metallic':     ('use_metallic',     'metallic_image_name',     'Metallic'),
+    'normal':       ('use_normal',       'normal_image_name',       'Normal'),
+    'transmission': ('use_transmission', 'transmission_image_name', 'Transmission'),
     'emission':  ('use_emission',  'emission_image_name',  'Emission'),
 }
 
@@ -1043,7 +1044,8 @@ class TLM_OT_AddChannelImage(Operator):
             'roughness': [0.5, 0.5, 0.5, 1.0],
             'metallic':  [0.0, 0.0, 0.0, 1.0],
             'normal':    [0.5, 0.5, 1.0, 1.0],  # flat normal map color
-            'emission':  [0.0, 0.0, 0.0, 1.0],
+            'emission':     [0.0, 0.0, 0.0, 1.0],
+            'transmission': [0.0, 0.0, 0.0, 1.0],
         }
         fill = defaults.get(self.channel, [0.5, 0.5, 0.5, 1.0])
 
@@ -1054,7 +1056,7 @@ class TLM_OT_AddChannelImage(Operator):
         img.pack()
 
         # Mark non-color for technical maps
-        if self.channel in ('roughness', 'metallic', 'normal'):
+        if self.channel in ('roughness', 'metallic', 'normal', 'transmission'):
             try:
                 img.colorspace_settings.name = "Non-Color"
             except Exception:

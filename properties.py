@@ -271,6 +271,19 @@ class TLM_LayerItem(PropertyGroup):
         update=_on_layer_update,
     )
 
+    # Transmission (Glass/Transparency)
+    use_transmission: BoolProperty(name="Transmission",
+        description="Enable transmission channel for this layer (glass/transparency effect)",
+        default=False, update=_on_layer_update)
+    transmission_image_name: StringProperty(name="Transmission Image",
+        description="Image texture for the transmission channel", default="",
+        update=_on_layer_update)
+    transmission_fill: FloatProperty(
+        name="Transmission", description="Constant transmission value (0 = opaque, 1 = fully transparent/glass)",
+        default=0.0, min=0.0, max=1.0, subtype='FACTOR',
+        update=_on_layer_update,
+    )
+
     # Bump — derived from the layer's own Fac signal (Proc) or image (Paint)
     use_bump: BoolProperty(
         name="Bump",
@@ -304,6 +317,10 @@ class TLM_LayerItem(PropertyGroup):
     @property
     def emission_image(self):
         return bpy.data.images.get(self.emission_image_name)
+
+    @property
+    def transmission_image(self):
+        return bpy.data.images.get(self.transmission_image_name)
 
     # ── Group / folder properties ─────────────────────────────────────────────
 

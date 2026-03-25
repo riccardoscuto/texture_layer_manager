@@ -42,6 +42,7 @@ CHANNELS = [
     ("metallic",   "use_metallic",  "metallic_image_name", "Metallic",     False, True),
     ("normal",     "use_normal",    "normal_image_name",   "Normal",       True,  False),
     ("emission",   "use_emission",  "emission_image_name", "Emission Color",False, False),
+    ("transmission","use_transmission","transmission_image_name","Transmission Weight",False, True),
 ]
 
 
@@ -504,27 +505,29 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
     Build a compositing chain for one PBR channel.
     Returns the final output socket, or None if no layer contributes.
 
-    channel_id: 'base_color' | 'roughness' | 'metallic' | 'normal' | 'emission'
+    channel_id: 'base_color' | 'roughness' | 'metallic' | 'normal' | 'emission' | 'transmission'
     """
-    is_scalar = channel_id in ('roughness', 'metallic')
+    is_scalar = channel_id in ('roughness', 'metallic', 'transmission')
     is_normal = channel_id == 'normal'
     is_emission = channel_id == 'emission'
 
     # Map channel_id → attribute names on TLM_LayerItem
     img_attr  = {
-        'base_color': 'image_name',
-        'roughness':  'roughness_image_name',
-        'metallic':   'metallic_image_name',
-        'normal':     'normal_image_name',
-        'emission':   'emission_image_name',
+        'base_color':   'image_name',
+        'roughness':    'roughness_image_name',
+        'metallic':     'metallic_image_name',
+        'normal':       'normal_image_name',
+        'emission':     'emission_image_name',
+        'transmission': 'transmission_image_name',
     }[channel_id]
 
     flag_attr = {
-        'base_color': None,      # base color is always enabled
-        'roughness':  'use_roughness',
-        'metallic':   'use_metallic',
-        'normal':     'use_normal',
-        'emission':   'use_emission',
+        'base_color':   None,      # base color is always enabled
+        'roughness':    'use_roughness',
+        'metallic':     'use_metallic',
+        'normal':       'use_normal',
+        'emission':     'use_emission',
+        'transmission': 'use_transmission',
     }[channel_id]
 
     current = None
@@ -630,7 +633,9 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
                     node_tree.links.new(tex.outputs["Color"], sep.inputs["Color"])
                     layer_out = sep.outputs["Red"]
                 else:
-                    fill_val = layer.roughness_fill if channel_id == 'roughness' else layer.metallic_fill
+                    fill_val = (layer.roughness_fill if channel_id == 'roughness'
+                               else layer.transmission_fill if channel_id == 'transmission'
+                               else layer.metallic_fill)
                     print(f"[TLM] FILL {channel_id}: no image, using fill value {fill_val} for layer '{layer.name}'")
                     vn = _new_value(node_tree, fill_val, x, y)
                     layer_out = vn.outputs["Value"]
@@ -1396,8 +1401,9 @@ def rebuild_node_tree(material):
         'roughness':    0,
         'metallic':  -400,
         'normal':    -800,
-        'emission': -1200,
-        'bump':     -1600,
+        'emission':     -1200,
+        'transmission': -1600,
+        'bump':         -2000,
     }
 
     # ── Base Color — built from root_layers to preserve GROUP alpha for clipping mask ─
@@ -1455,6 +1461,20 @@ def rebuild_node_tree(material):
                 val.location = (end_x, ch_y['emission'])
                 _link_to_bsdf(node_tree, val.outputs[0], bsdf,
                               ["Emission Strength", "emission_strength"], "emission_strength")
+
+    # ── Transmission ─────────────────────────────────────────────────────────
+    if _channel_used(expanded, 'use_transmission'):
+        t_out = _build_channel(node_tree, expanded, 'transmission', uv_map, start_x, ch_y['transmission'], x_step)
+        if t_out:
+            passthrough = node_tree.nodes.new("ShaderNodeMath")
+            passthrough.operation = 'ADD'
+            passthrough.name = f"{TLM_PREFIX}trans_pass"
+            passthrough.inputs[1].default_value = 0.0
+            passthrough.use_clamp = True
+            passthrough.location = (end_x, ch_y['transmission'])
+            node_tree.links.new(t_out, passthrough.inputs[0])
+            _link_to_bsdf(node_tree, passthrough.outputs["Value"], bsdf,
+                          ["Transmission Weight", "Transmission", "transmission"], "transmission")
 
     # ── Bump ──────────────────────────────────────────────────────────────────
     bump_out = None

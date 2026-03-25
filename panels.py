@@ -19,11 +19,12 @@ from bpy.types import Panel, UIList
 from . import previews
 
 _PBR_BADGE = {
-    'use_roughness': 'RNDCURVE',
-    'use_metallic':  'MATFLUID',
-    'use_normal':    'NORMALS_FACE',
-    'use_emission':  'LIGHT',
-    'use_bump':      'MOD_DISPLACE',
+    'use_roughness':    'RNDCURVE',
+    'use_metallic':     'MATFLUID',
+    'use_normal':       'NORMALS_FACE',
+    'use_emission':     'LIGHT',
+    'use_transmission': 'MATSPHERE',
+    'use_bump':         'MOD_DISPLACE',
 }
 
 
@@ -398,6 +399,8 @@ def _draw_pbr_channels(col, layer, tlm):
          None,            "Normal",    'NORMALS_FACE'),
         ('emission',  'use_emission',  'emission_image_name',  None,
          'emission_color',"Emission",  'LIGHT'),
+        ('transmission','use_transmission','transmission_image_name','transmission_fill',
+         None,            "Transmission",'MATSPHERE'),
     ]
 
     for ch_id, flag, img_attr, fill_attr, color_attr, label, icon in channels:
