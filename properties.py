@@ -609,6 +609,56 @@ class TLM_LayerItem(PropertyGroup):
         update=_on_layer_update,
     )
 
+    proc_contrast: FloatProperty(
+        name="Contrast",
+        description="Controls how sharp the transition between Color1 and Color2 is. "
+                    "Low = soft gradient, High = hard edge",
+        default=0.5, min=0.0, max=1.0,
+        update=_on_layer_update,
+    )
+
+    # Vector coordinate distortion — inject Noise into texture coordinates
+    # for organic, non-geometric patterns (e.g. warped Voronoi cracks)
+    proc_vector_distortion: FloatProperty(
+        name="Vector Distortion",
+        description="Distort texture coordinates with Noise for organic patterns. "
+                    "0 = no distortion, higher = more warped",
+        default=0.0, min=0.0, max=2.0,
+        update=_on_layer_update,
+    )
+
+    # Less Than threshold for emission mask — binary crack detection
+    proc_emission_threshold: FloatProperty(
+        name="Emission Threshold",
+        description="Distance threshold for emission mask. "
+                    "Values below this distance are lit. 0 = use Power sharpening instead",
+        default=0.0, min=0.0, max=1.0, subtype='FACTOR',
+        update=_on_layer_update,
+    )
+
+    # Fresnel mask — edge glow based on viewing angle
+    use_fresnel_mask: BoolProperty(
+        name="Fresnel Mask",
+        description="Apply a Fresnel (viewing angle) mask to this layer. "
+                    "Creates edge glow / rim lighting effects",
+        default=False,
+        update=_on_layer_update,
+    )
+    fresnel_ior: FloatProperty(
+        name="Fresnel IOR",
+        description="Index of refraction for the Fresnel effect. "
+                    "Lower = wider edge effect, Higher = narrower edge",
+        default=1.45, min=1.0, max=5.0,
+        update=_on_layer_update,
+    )
+    fresnel_strength: FloatProperty(
+        name="Fresnel Strength",
+        description="How strongly the Fresnel mask affects this layer. "
+                    "1.0 = full Fresnel, 0.0 = no effect",
+        default=1.0, min=0.0, max=1.0, subtype='FACTOR',
+        update=_on_layer_update,
+    )
+
     @property
     def image(self):
         """Convenience accessor for the Blender Image datablock."""

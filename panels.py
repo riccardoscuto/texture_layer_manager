@@ -193,12 +193,19 @@ def _draw_active_layer(layout, active, tlm, mat):
 
 
 def _draw_procedural(col, active, tlm):
+    # Blend mode + Opacity at top (same position as Fill/Paint)
+    br = col.row(align=True)
+    br.prop(active, "blend_mode", text="")
+    br.prop(active, "opacity",    text="Opacity", slider=True)
+
+    col.separator(factor=0.5)
     col.prop(active, "proc_type")
     col.separator(factor=0.5)
-    col.prop(active, "proc_scale", slider=False)
     cr = col.row(align=True)
     cr.prop(active, "proc_color1", text="")
     cr.prop(active, "proc_color2", text="")
+    col.separator(factor=0.5)
+    col.prop(active, "proc_scale", slider=False)
     col.separator(factor=0.5)
 
     pt = active.proc_type
@@ -242,11 +249,15 @@ def _draw_procedural(col, active, tlm):
     off_row.prop(active, "proc_offset_z", text="Z")
 
     col.prop(active, "proc_coord_type", text="Coords")
+    col.prop(active, "proc_contrast", slider=True)
+    col.prop(active, "proc_vector_distortion", slider=True, text="Vec Distort")
 
-    col.separator(factor=0.8)
-    br = col.row(align=True)
-    br.prop(active, "blend_mode", text="")
-    br.prop(active, "opacity",    text="Opacity", slider=True)
+    col.separator(factor=0.6)
+    fr = col.row(align=True)
+    fr.prop(active, "use_fresnel_mask", text="Fresnel", icon='LIGHT_HEMI', toggle=True)
+    if active.use_fresnel_mask:
+        fr.prop(active, "fresnel_ior", text="IOR")
+        fr.prop(active, "fresnel_strength", text="Str", slider=True)
 
     col.separator(factor=0.6)
     mr = col.row(align=True)
@@ -262,25 +273,8 @@ def _draw_procedural(col, active, tlm):
     col.prop(active, "use_clipping_mask",
              text="Clipping Mask", icon='CLIPUV_DEHLT', toggle=True)
 
-    col.separator(factor=0.8)
-    col.label(text="PBR Channels:", icon='NODE_MATERIAL')
-    pbox = col.box()
-    pbox.scale_y = 0.9
-    rr = pbox.row(align=True)
-    rr.prop(active, "use_roughness", text="Roughness", icon='RNDCURVE')
-    if active.use_roughness:
-        rr.prop(active, "roughness_fill", text="", slider=True)
-    mr = pbox.row(align=True)
-    mr.prop(active, "use_metallic", text="Metallic", icon='MATFLUID')
-    if active.use_metallic:
-        mr.prop(active, "metallic_fill", text="", slider=True)
-    bumpr = pbox.row(align=True)
-    bumpr.prop(active, "use_bump", text="Bump", icon='MOD_DISPLACE')
-    if active.use_bump:
-        bs = pbox.column(align=True)
-        bs.scale_y = 0.85
-        bs.prop(active, "bump_strength", text="Strength", slider=True)
-        bs.prop(active, "bump_distance", text="Distance", slider=True)
+    col.separator(factor=0.6)
+    _draw_pbr_channels(col, active, tlm)
 
     col.separator(factor=0.5)
     _draw_group_assignment(col, active, tlm)
@@ -360,6 +354,13 @@ def _draw_paint_fill(col, active, tlm):
              text="Clipping Mask", icon='CLIPUV_DEHLT', toggle=True)
 
     col.separator(factor=0.6)
+    fr = col.row(align=True)
+    fr.prop(active, "use_fresnel_mask", text="Fresnel", icon='LIGHT_HEMI', toggle=True)
+    if active.use_fresnel_mask:
+        fr.prop(active, "fresnel_ior", text="IOR")
+        fr.prop(active, "fresnel_strength", text="Str", slider=True)
+
+    col.separator(factor=0.6)
     tr = col.row(align=True)
     tr.prop(active, "use_triplanar", text="Triplanar", icon='ORIENTATION_GLOBAL', toggle=True)
     if active.use_triplanar:
@@ -424,6 +425,8 @@ def _draw_pbr_channels(col, layer, tlm):
             imp.add_to_active = True
             if ch_id == 'emission' and enabled:
                 pc.prop(layer, "emission_strength", slider=True)
+                if layer.layer_type == "PROCEDURAL":
+                    pc.prop(layer, "proc_emission_threshold", slider=True, text="Threshold")
                 if layer.blend_mode == "ADD":
                     pc.label(text="ADD + Emission: use only one", icon='ERROR')
         else:

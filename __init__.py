@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Texture Layer Manager",
     "author": "TLM Dev",
-    "version": (0, 3, 18),
+    "version": (0, 3, 21),
     "blender": (4, 0, 0),
     "location": "Properties > Material > Texture Layers",
     "description": "Non-destructive layer system for texture painting, similar to Photoshop/Substance",
