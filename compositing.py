@@ -1051,7 +1051,7 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
         return tex_node.outputs["Color"], None
 
     elif pt == 'MARBLE':
-        # Wave + Noise distortion → marble veins
+        # Marble = Wave base + Noise turbulence on phase
         wave = node_tree.nodes.new("ShaderNodeTexWave")
         wave.wave_type = layer.proc_marble_wave_type
         wave.bands_direction = 'X'
@@ -1059,7 +1059,11 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
         wave.location = (x - 100, y)
         wave.inputs["Scale"].default_value = layer.proc_scale
         wave.inputs["Detail"].default_value = layer.proc_detail
-        wave.inputs["Distortion"].default_value = 0.0
+        wave.inputs["Distortion"].default_value = layer.proc_distortion
+        try:
+            wave.wave_profile = 'SIN'
+        except Exception:
+            pass
         node_tree.links.new(vec_out, wave.inputs["Vector"])
 
         noise = node_tree.nodes.new("ShaderNodeTexNoise")
@@ -1068,6 +1072,7 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
         noise.inputs["Scale"].default_value = layer.proc_scale * 2.0
         noise.inputs["Detail"].default_value = layer.proc_detail
         noise.inputs["Roughness"].default_value = layer.proc_roughness_proc
+        noise.inputs["Distortion"].default_value = layer.proc_distortion * 0.5
         node_tree.links.new(vec_out, noise.inputs["Vector"])
 
         mult = node_tree.nodes.new("ShaderNodeMath")
@@ -1077,25 +1082,34 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
         node_tree.links.new(noise.outputs["Fac"], mult.inputs[0])
         mult.inputs[1].default_value = layer.proc_marble_distortion
 
-        # Feed noise into wave Phase Offset for organic distortion
         phase_input = wave.inputs.get("Phase Offset")
         if phase_input:
             node_tree.links.new(mult.outputs["Value"], phase_input)
         else:
-            # Fallback: feed into Distortion input
-            node_tree.links.new(mult.outputs["Value"], wave.inputs["Distortion"])
+            add = node_tree.nodes.new("ShaderNodeMath")
+            add.operation = 'ADD'
+            add.name = f"{TLM_PREFIX}proc_marble_adddist_{_next_id()}"
+            add.location = (x, y - 150)
+            add.inputs[0].default_value = layer.proc_distortion
+            node_tree.links.new(mult.outputs["Value"], add.inputs[1])
+            node_tree.links.new(add.outputs["Value"], wave.inputs["Distortion"])
 
         fac_out = wave.outputs["Fac"]
+
         cr = node_tree.nodes.new("ShaderNodeValToRGB")
         cr.name = f"{TLM_PREFIX}proc_cr_{_next_id()}"
         cr.label = "Proc Color"
         cr.location = (x + 180, y)
+
         contrast = getattr(layer, 'proc_contrast', 0.5)
         half = contrast * 0.49
         cr.color_ramp.elements[0].position = half
         cr.color_ramp.elements[0].color = layer.proc_color1
         cr.color_ramp.elements[1].position = 1.0 - half
         cr.color_ramp.elements[1].color = layer.proc_color2
+        if getattr(layer, 'use_proc_color3', False):
+            el = cr.color_ramp.elements.new(layer.proc_color3_position)
+            el.color = layer.proc_color3
         node_tree.links.new(fac_out, cr.inputs["Fac"])
         return cr.outputs["Color"], None
 
@@ -1104,7 +1118,8 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
         tex_node.inputs["Scale"].default_value      = layer.proc_scale
         tex_node.inputs["Detail"].default_value     = layer.proc_detail
         tex_node.inputs["Roughness"].default_value  = layer.proc_roughness_proc
-        tex_node.inputs["Distortion"].default_value = 0.0
+        tex_node.inputs["Lacunarity"].default_value = layer.proc_lacunarity
+        tex_node.inputs["Distortion"].default_value = layer.proc_distortion
         fac_out = tex_node.outputs["Fac"]
 
     if tex_node is None:
@@ -1133,6 +1148,9 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
     cr.color_ramp.elements[0].color = layer.proc_color1
     cr.color_ramp.elements[1].position = stop_hi
     cr.color_ramp.elements[1].color = layer.proc_color2
+    if getattr(layer, 'use_proc_color3', False):
+        el = cr.color_ramp.elements.new(layer.proc_color3_position)
+        el.color = layer.proc_color3
     node_tree.links.new(fac_out, cr.inputs["Fac"])
 
     return cr.outputs["Color"], None
@@ -1687,7 +1705,6 @@ def _build_proc_fac_node(node_tree, layer, name_suffix, x, y, uv_map="UVMap"):
         fac_out = tex.outputs["Fac"]
 
     elif pt == 'MARBLE':
-        # Wave + Noise for marble fac channel
         wave = node_tree.nodes.new("ShaderNodeTexWave")
         wave.wave_type = layer.proc_marble_wave_type
         wave.bands_direction = 'X'
@@ -1695,7 +1712,11 @@ def _build_proc_fac_node(node_tree, layer, name_suffix, x, y, uv_map="UVMap"):
         wave.location = (x - 100, y)
         wave.inputs["Scale"].default_value = layer.proc_scale
         wave.inputs["Detail"].default_value = layer.proc_detail
-        wave.inputs["Distortion"].default_value = 0.0
+        wave.inputs["Distortion"].default_value = layer.proc_distortion
+        try:
+            wave.wave_profile = 'SIN'
+        except Exception:
+            pass
         node_tree.links.new(vec_out, wave.inputs["Vector"])
 
         noise = node_tree.nodes.new("ShaderNodeTexNoise")
@@ -1704,6 +1725,7 @@ def _build_proc_fac_node(node_tree, layer, name_suffix, x, y, uv_map="UVMap"):
         noise.inputs["Scale"].default_value = layer.proc_scale * 2.0
         noise.inputs["Detail"].default_value = layer.proc_detail
         noise.inputs["Roughness"].default_value = layer.proc_roughness_proc
+        noise.inputs["Distortion"].default_value = layer.proc_distortion * 0.5
         node_tree.links.new(vec_out, noise.inputs["Vector"])
 
         mult = node_tree.nodes.new("ShaderNodeMath")
@@ -1717,7 +1739,13 @@ def _build_proc_fac_node(node_tree, layer, name_suffix, x, y, uv_map="UVMap"):
         if phase_input:
             node_tree.links.new(mult.outputs["Value"], phase_input)
         else:
-            node_tree.links.new(mult.outputs["Value"], wave.inputs["Distortion"])
+            add = node_tree.nodes.new("ShaderNodeMath")
+            add.operation = 'ADD'
+            add.name = f"{TLM_PREFIX}pfac_marble_adddist_{name_suffix}"
+            add.location = (x, y - 150)
+            add.inputs[0].default_value = layer.proc_distortion
+            node_tree.links.new(mult.outputs["Value"], add.inputs[1])
+            node_tree.links.new(add.outputs["Value"], wave.inputs["Distortion"])
 
         return wave.outputs["Fac"]
 
@@ -1726,7 +1754,7 @@ def _build_proc_fac_node(node_tree, layer, name_suffix, x, y, uv_map="UVMap"):
         tex.inputs["Scale"].default_value      = layer.proc_scale
         tex.inputs["Detail"].default_value     = layer.proc_detail
         tex.inputs["Roughness"].default_value  = layer.proc_roughness_proc
-        tex.inputs["Distortion"].default_value = 0.0
+        tex.inputs["Distortion"].default_value = layer.proc_distortion
         node_tree.links.new(vec_out, tex.inputs["Vector"])
         fac_out = tex.outputs["Fac"]
 

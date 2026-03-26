@@ -242,12 +242,14 @@ def _draw_procedural(col, active, tlm):
         col.prop(active, "proc_checker_scale")
     elif pt == 'MARBLE':
         col.prop(active, "proc_marble_wave_type", text="Pattern")
-        col.prop(active, "proc_detail",              slider=True)
-        col.prop(active, "proc_roughness_proc",      slider=True, text="Roughness")
-        col.prop(active, "proc_marble_distortion",   slider=True)
+        col.prop(active, "proc_detail", slider=True)
+        col.prop(active, "proc_roughness_proc", slider=True, text="Roughness")
+        col.prop(active, "proc_distortion", slider=True, text="Wave Distortion")
+        col.prop(active, "proc_marble_distortion", slider=True, text="Turbulence")
     elif pt == 'CLOUDS':
         col.prop(active, "proc_detail",         slider=True)
-        col.prop(active, "proc_roughness_proc", slider=True, text="Softness")
+        col.prop(active, "proc_roughness_proc", slider=True, text="Roughness")
+        col.prop(active, "proc_lacunarity",     slider=True)
         col.prop(active, "proc_distortion",     slider=True)
 
 
