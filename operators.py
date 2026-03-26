@@ -1130,7 +1130,8 @@ class TLM_OT_ImportTextureAsLayer(Operator):
             ('roughness',  "Roughness",  "Assign as roughness channel"),
             ('metallic',   "Metallic",   "Assign as metallic channel"),
             ('normal',     "Normal Map", "Assign as normal map channel"),
-            ('emission',   "Emission",   "Assign as emission channel"),
+            ('emission',      "Emission",     "Assign as emission channel"),
+            ('transmission',  "Transmission", "Assign as transmission channel"),
         ],
         default='base_color',
     )
@@ -2128,10 +2129,12 @@ class TLM_OT_LayerFromClipboard(Operator):
     channel: bpy.props.EnumProperty(
         name="Channel",
         items=[
-            ('base_color', "Base Color", ""),
-            ('roughness',  "Roughness",  ""),
-            ('metallic',   "Metallic",   ""),
-            ('normal',     "Normal Map", ""),
+            ('base_color',    "Base Color",    ""),
+            ('roughness',     "Roughness",     ""),
+            ('metallic',      "Metallic",      ""),
+            ('normal',        "Normal Map",    ""),
+            ('emission',      "Emission",      ""),
+            ('transmission',  "Transmission",  ""),
         ],
         default='base_color',
     )

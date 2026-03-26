@@ -205,6 +205,13 @@ def _draw_procedural(col, active, tlm):
     cr = col.row(align=True)
     cr.prop(active, "proc_color1", text="")
     cr.prop(active, "proc_color2", text="")
+    c3r = col.row(align=True)
+    c3r.prop(active, "use_proc_color3", text="", icon='ADD' if not active.use_proc_color3 else 'REMOVE', toggle=True)
+    if active.use_proc_color3:
+        c3r.prop(active, "proc_color3", text="")
+        c3r.prop(active, "proc_color3_position", text="Pos", slider=True)
+    else:
+        c3r.label(text="Color 3")
     col.separator(factor=0.5)
     col.prop(active, "proc_scale", slider=False)
     col.separator(factor=0.5)

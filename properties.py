@@ -495,6 +495,24 @@ class TLM_LayerItem(PropertyGroup):
         default=(1.0, 1.0, 1.0, 1.0), update=_on_layer_update,
     )
 
+    # Optional third color stop
+    use_proc_color3: BoolProperty(
+        name="Use Color 3",
+        description="Enable a third color stop in the procedural gradient",
+        default=False, update=_on_layer_update,
+    )
+    proc_color3: bpy.props.FloatVectorProperty(
+        name="Color 3", description="Middle color of the procedural gradient (between Color1 and Color2)",
+        subtype='COLOR', min=0.0, max=1.0, size=4,
+        default=(0.5, 0.5, 0.5, 1.0), update=_on_layer_update,
+    )
+    proc_color3_position: FloatProperty(
+        name="Color 3 Pos",
+        description="Position of the third color stop (0 = at Color1, 1 = at Color2)",
+        default=0.5, min=0.01, max=0.99, subtype='FACTOR',
+        update=_on_layer_update,
+    )
+
     # Noise / Musgrave
     proc_detail: FloatProperty(
         name="Detail", description="Number of noise octaves — more detail means finer grain",
