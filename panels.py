@@ -248,6 +248,8 @@ def _draw_procedural(col, active, tlm):
     elif pt == 'CLOUDS':
         col.prop(active, "proc_detail",         slider=True)
         col.prop(active, "proc_roughness_proc", slider=True, text="Softness")
+        col.prop(active, "proc_distortion",     slider=True)
+
 
     col.separator(factor=0.5)
     off_row = col.row(align=True)
