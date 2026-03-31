@@ -1752,6 +1752,11 @@ def rebuild_node_tree(material):
     _node_counter = 0
 
     tlm = material.tlm
+    node_tree = material.node_tree
+
+    if node_tree is None:
+        material.use_nodes = True
+        node_tree = material.node_tree
 
     # Protect all referenced images BEFORE clearing nodes — prevents Blender GC
     # from collecting images that become temporarily unreferenced during rebuild
