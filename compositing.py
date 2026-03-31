@@ -1733,28 +1733,16 @@ def _link_to_bsdf(node_tree, output_socket, bsdf, input_names, channel_label):
           f"tried {input_names}, BSDF inputs: {[i.name for i in bsdf.inputs]}")
 
 
-def rebuild_node_tree(material):
-    # Probe: try a trivial node-tree write to detect restricted context
-    # (e.g. inside depsgraph_update_pre handler). If it fails, defer.
-    node_tree = material.node_tree
-    if node_tree is None:
-        material.use_nodes = True
-        node_tree = material.node_tree
-    try:
-        # Probe: writing to an ID property on the node_tree tests whether
-        # we're in a restricted context. This is the same restriction that
-        # blocks node.name writes, but doesn't create orphan nodes.
-        node_tree["_tlm_probe"] = 1
-        del node_tree["_tlm_probe"]
-    except (AttributeError, RuntimeError):
-        # Cannot modify ID data right now — schedule a deferred rebuild
-        from . import properties
-        properties._pending_materials.add(material.name)
-        if len(properties._pending_materials) == 1:
-            import bpy
-            bpy.app.timers.register(properties._do_deferred_rebuild, first_interval=0.05)
-        return
+def _defer_rebuild(material):
+    """Schedule a rebuild via timer when we can't do it right now."""
+    from . import properties
+    properties._pending_materials.add(material.name)
+    if len(properties._pending_materials) == 1:
+        import bpy
+        bpy.app.timers.register(properties._do_deferred_rebuild, first_interval=0.05)
 
+
+def rebuild_node_tree(material):
     # Cancel any pending deferred rebuild — this explicit call supersedes it.
     from . import properties
     properties.cancel_pending_rebuild()
@@ -1796,6 +1784,23 @@ def rebuild_node_tree(material):
         # Nothing to build — clear TLM nodes (no layers visible) but don't
         # leave a half-built tree.
         _clear_tlm_nodes(node_tree)
+        return
+
+    # Guard: verify we can write to nodes before destroying anything.
+    # In depsgraph_update_pre handlers Blender blocks .name writes.
+    _probe = None
+    try:
+        _probe = node_tree.nodes.new("ShaderNodeValue")
+        _probe.name = "_tlm_ctx_probe_"   # this is what fails in restricted ctx
+        node_tree.nodes.remove(_probe)
+    except AttributeError:
+        # We're in a restricted context. Clean up orphan probe if created.
+        if _probe is not None:
+            try:
+                node_tree.nodes.remove(_probe)
+            except Exception:
+                pass  # can't remove either — will be cleaned on next rebuild
+        _defer_rebuild(material)
         return
 
     _saved_positions = _save_node_positions(node_tree)
