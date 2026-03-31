@@ -1733,7 +1733,29 @@ def _link_to_bsdf(node_tree, output_socket, bsdf, input_names, channel_label):
           f"tried {input_names}, BSDF inputs: {[i.name for i in bsdf.inputs]}")
 
 
+def _is_restricted_context():
+    """Check if we're in a context where node tree modification is forbidden."""
+    try:
+        # Try a harmless write to detect restricted context.
+        # In depsgraph handlers, any ID write raises AttributeError.
+        import bpy as _b
+        _b.context.window_manager["_tlm_ctx_test"] = 1
+        del _b.context.window_manager["_tlm_ctx_test"]
+        return False
+    except (AttributeError, RuntimeError, TypeError):
+        return True
+
+
 def rebuild_node_tree(material):
+    # If we're inside a restricted context (depsgraph handler), defer to a timer
+    if _is_restricted_context():
+        from . import properties
+        properties._pending_materials.add(material.name)
+        if len(properties._pending_materials) == 1:
+            import bpy
+            bpy.app.timers.register(properties._do_deferred_rebuild, first_interval=0.05)
+        return
+
     # Cancel any pending deferred rebuild — this explicit call supersedes it.
     from . import properties
     properties.cancel_pending_rebuild()
