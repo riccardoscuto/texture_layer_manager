@@ -17,29 +17,32 @@ from . import compositing
 # Prevents a full node-tree rebuild on every individual slider tick.
 # Multiple rapid changes within 0.05 s are batched into a single rebuild.
 
-_rebuild_pending = False
+# Set of material names that need rebuilding — accumulates across rapid changes.
+_pending_materials: set = set()
 
 
 def _do_deferred_rebuild():
     """Timer callback — runs once after the debounce interval."""
-    global _rebuild_pending
-    if not _rebuild_pending:
-        # An operator already performed the rebuild — skip redundant work.
+    global _pending_materials
+    if not _pending_materials:
         return None
-    _rebuild_pending = False
+    # Snapshot and clear immediately so new triggers during rebuild
+    # register a fresh timer.
+    mats_to_rebuild = _pending_materials
+    _pending_materials = set()
     try:
-        ctx = bpy.context
-        obj = ctx.active_object if ctx else None
-        if obj and obj.active_material:
-            mat = obj.active_material
-            if mat.tlm.auto_composite:
+        for mat_name in mats_to_rebuild:
+            mat = bpy.data.materials.get(mat_name)
+            if mat and mat.tlm.auto_composite:
                 compositing.rebuild_node_tree(mat)
-                # Force shader editor redraw — timer callbacks don't
-                # automatically trigger UI updates like operators do.
-                for window in ctx.window_manager.windows:
-                    for area in window.screen.areas:
-                        if area.type == 'NODE_EDITOR':
-                            area.tag_redraw()
+        # Force shader editor redraw — timer callbacks don't
+        # automatically trigger UI updates like operators do.
+        ctx = bpy.context
+        if ctx:
+            for window in ctx.window_manager.windows:
+                for area in window.screen.areas:
+                    if area.type == 'NODE_EDITOR':
+                        area.tag_redraw()
     except Exception:
         import traceback
         traceback.print_exc()
@@ -54,22 +57,36 @@ def cancel_pending_rebuild():
     that clears and recreates all nodes (which can fail to trigger a UI
     redraw in the shader editor).
     """
-    global _rebuild_pending
-    _rebuild_pending = False
+    global _pending_materials
+    _pending_materials = set()
 
 
 def _on_layer_update(self, context):
-    """Called whenever any layer property changes. Triggers a debounced recomposite."""
-    global _rebuild_pending
+    """Called whenever a STRUCTURAL property changes. Triggers a debounced full rebuild."""
+    global _pending_materials
     # Guard: context may not have an active object (e.g. during file load)
     if not context or not context.active_object:
         return
     mat = context.active_object.active_material
     if not mat or not mat.tlm.auto_composite:
         return
-    if not _rebuild_pending:
-        _rebuild_pending = True
+    need_timer = not _pending_materials  # first material in this batch
+    _pending_materials.add(mat.name)
+    if need_timer:
         bpy.app.timers.register(_do_deferred_rebuild, first_interval=0.05)
+
+
+def _make_hot_callback(prop_name):
+    """Create a callback that attempts hot update, falling back to full rebuild."""
+    def _cb(self, context):
+        if not context or not context.active_object:
+            return
+        mat = context.active_object.active_material
+        if not mat or not mat.tlm.auto_composite:
+            return
+        if not compositing.hot_update_property(mat, self, prop_name):
+            _on_layer_update(self, context)
+    return _cb
 
 
 # ─── Blend mode enum ─────────────────────────────────────────────────────────
@@ -137,7 +154,7 @@ class TLM_LayerItem(PropertyGroup):
         min=0.0, max=1.0,
         default=1.0,
         subtype='FACTOR',
-        update=_on_layer_update,
+        update=_make_hot_callback("opacity"),
     )
 
     blend_mode: EnumProperty(
@@ -145,7 +162,7 @@ class TLM_LayerItem(PropertyGroup):
         description="How this layer blends with layers below",
         items=BLEND_MODES,
         default="MIX",
-        update=_on_layer_update,
+        update=_make_hot_callback("blend_mode"),
     )
 
     # Reference to the Blender Image datablock (by name, the Blender way)
@@ -163,7 +180,7 @@ class TLM_LayerItem(PropertyGroup):
         min=0.0, max=1.0,
         size=4,
         default=(1.0, 1.0, 1.0, 1.0),
-        update=_on_layer_update,
+        update=_make_hot_callback("fill_color"),
     )
 
     # Optional mask
@@ -226,7 +243,7 @@ class TLM_LayerItem(PropertyGroup):
     roughness_fill: FloatProperty(
         name="Roughness", description="Constant roughness value (0 = smooth, 1 = rough)",
         default=0.5, min=0.0, max=1.0, subtype='FACTOR',
-        update=_on_layer_update,
+        update=_make_hot_callback("roughness_fill"),
     )
 
     # Metallic
@@ -238,7 +255,7 @@ class TLM_LayerItem(PropertyGroup):
     metallic_fill: FloatProperty(
         name="Metallic", description="Constant metallic value (0 = dielectric, 1 = metal)",
         default=0.0, min=0.0, max=1.0, subtype='FACTOR',
-        update=_on_layer_update,
+        update=_make_hot_callback("metallic_fill"),
     )
 
     # Normal Map
@@ -263,12 +280,12 @@ class TLM_LayerItem(PropertyGroup):
         name="Emission Color", description="Emission color when no image is assigned",
         subtype='COLOR',
         min=0.0, max=1.0, size=4, default=(1.0, 1.0, 1.0, 1.0),
-        update=_on_layer_update,
+        update=_make_hot_callback("emission_color"),
     )
     emission_strength: FloatProperty(
         name="Emission Strength", description="Intensity multiplier for the emission effect",
         default=1.0, min=0.0, max=100.0,
-        update=_on_layer_update,
+        update=_make_hot_callback("emission_strength"),
     )
 
     # Transmission (Glass/Transparency)
@@ -281,7 +298,7 @@ class TLM_LayerItem(PropertyGroup):
     transmission_fill: FloatProperty(
         name="Transmission", description="Constant transmission value (0 = opaque, 1 = fully transparent/glass)",
         default=0.0, min=0.0, max=1.0, subtype='FACTOR',
-        update=_on_layer_update,
+        update=_make_hot_callback("transmission_fill"),
     )
 
     # Bump — derived from the layer's own Fac signal (Proc) or image (Paint)
@@ -294,12 +311,12 @@ class TLM_LayerItem(PropertyGroup):
     bump_strength: FloatProperty(
         name="Bump Strength", description="How strongly the bump displaces the surface",
         default=0.5, min=0.0, max=5.0,
-        update=_on_layer_update,
+        update=_make_hot_callback("bump_strength"),
     )
     bump_distance: FloatProperty(
         name="Bump Distance", description="Scale of the bump displacement",
         default=0.05, min=0.001, max=1.0,
-        update=_on_layer_update,
+        update=_make_hot_callback("bump_distance"),
     )
 
     @property
@@ -357,73 +374,73 @@ class TLM_LayerItem(PropertyGroup):
     adj_hue: FloatProperty(
         name="Hue", description="Rotate hue — 0.5 is no change",
         default=0.5, min=0.0, max=1.0, subtype='FACTOR',
-        update=_on_layer_update,
+        update=_make_hot_callback("adj_hue"),
     )
     adj_saturation: FloatProperty(
         name="Saturation", description="Saturation multiplier — 1.0 is no change, 0 is greyscale",
         default=1.0, min=0.0, max=2.0,
-        update=_on_layer_update,
+        update=_make_hot_callback("adj_saturation"),
     )
     adj_value: FloatProperty(
         name="Value", description="Value/brightness multiplier — 1.0 is no change",
         default=1.0, min=0.0, max=2.0,
-        update=_on_layer_update,
+        update=_make_hot_callback("adj_value"),
     )
 
     # Brightness/Contrast
     adj_brightness: FloatProperty(
         name="Brightness", description="Shift brightness up or down",
         default=0.0, min=-1.0, max=1.0,
-        update=_on_layer_update,
+        update=_make_hot_callback("adj_brightness"),
     )
     adj_contrast: FloatProperty(
         name="Contrast", description="Increase or decrease contrast",
         default=0.0, min=-1.0, max=1.0,
-        update=_on_layer_update,
+        update=_make_hot_callback("adj_contrast"),
     )
 
     # Levels
     adj_in_min: FloatProperty(
         name="Input Black", description="Black point of the input tonal range",
         default=0.0, min=0.0, max=1.0, subtype='FACTOR',
-        update=_on_layer_update,
+        update=_make_hot_callback("adj_in_min"),
     )
     adj_in_max: FloatProperty(
         name="Input White", description="White point of the input tonal range",
         default=1.0, min=0.0, max=1.0, subtype='FACTOR',
-        update=_on_layer_update,
+        update=_make_hot_callback("adj_in_max"),
     )
     adj_levels_gamma: FloatProperty(
         name="Gamma (Midtones)", description="Midtone gamma correction",
         default=1.0, min=0.1, max=10.0,
-        update=_on_layer_update,
+        update=_make_hot_callback("adj_levels_gamma"),
     )
     adj_out_min: FloatProperty(
         name="Output Black", description="Black point of the output tonal range",
         default=0.0, min=0.0, max=1.0, subtype='FACTOR',
-        update=_on_layer_update,
+        update=_make_hot_callback("adj_out_min"),
     )
     adj_out_max: FloatProperty(
         name="Output White", description="White point of the output tonal range",
         default=1.0, min=0.0, max=1.0, subtype='FACTOR',
-        update=_on_layer_update,
+        update=_make_hot_callback("adj_out_max"),
     )
 
     # Color Balance (Lift / Gamma / Gain)
     adj_lift: bpy.props.FloatVectorProperty(
         name="Lift", description="Shadows color correction",
         subtype='COLOR', min=0.0, max=2.0, size=3,
-        default=(1.0, 1.0, 1.0), update=_on_layer_update,
+        default=(1.0, 1.0, 1.0), update=_make_hot_callback("adj_lift"),
     )
     adj_gamma: bpy.props.FloatVectorProperty(
         name="Gamma", description="Midtones color correction",
         subtype='COLOR', min=0.0, max=2.0, size=3,
-        default=(1.0, 1.0, 1.0), update=_on_layer_update,
+        default=(1.0, 1.0, 1.0), update=_make_hot_callback("adj_gamma"),
     )
     adj_gain: bpy.props.FloatVectorProperty(
         name="Gain", description="Highlights color correction",
         subtype='COLOR', min=0.0, max=2.0, size=3,
-        default=(1.0, 1.0, 1.0), update=_on_layer_update,
+        default=(1.0, 1.0, 1.0), update=_make_hot_callback("adj_gain"),
     )
 
     # Curves (parametric)
@@ -431,25 +448,25 @@ class TLM_LayerItem(PropertyGroup):
         name="Contrast",
         description="S-curve contrast: positive increases contrast, negative decreases",
         default=0.0, min=-1.0, max=1.0,
-        update=_on_layer_update,
+        update=_make_hot_callback("adj_curve_contrast"),
     )
     adj_curve_brightness: FloatProperty(
         name="Brightness",
         description="Shift midpoint of curve up or down",
         default=0.0, min=-1.0, max=1.0,
-        update=_on_layer_update,
+        update=_make_hot_callback("adj_curve_brightness"),
     )
     adj_curve_black_point: FloatProperty(
         name="Black Point",
         description="Raise shadows — crush blacks by lifting the low end",
         default=0.0, min=0.0, max=1.0, subtype='FACTOR',
-        update=_on_layer_update,
+        update=_make_hot_callback("adj_curve_black_point"),
     )
     adj_curve_white_point: FloatProperty(
         name="White Point",
         description="Lower highlights — clip whites by pulling down the high end",
         default=1.0, min=0.0, max=1.0, subtype='FACTOR',
-        update=_on_layer_update,
+        update=_make_hot_callback("adj_curve_white_point"),
     )
 
     # ── Procedural layer properties ───────────────────────────────────────────

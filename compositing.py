@@ -141,6 +141,373 @@ def _clear_tlm_nodes(node_tree):
         node_tree.nodes.remove(n)
 
 
+# ── Hot-update tagging infrastructure ────────────────────────────────────────
+
+def _tag(node, layer_name, role, **extra):
+    """Stamp a node with layer identity and role for hot-update lookup."""
+    node["tlm_layer"] = layer_name
+    node["tlm_role"] = role
+    for k, v in extra.items():
+        node[f"tlm_{k}"] = v
+
+
+def _find_tagged(node_tree, layer_name, role):
+    """Find first node matching layer + role."""
+    for n in node_tree.nodes:
+        if n.get("tlm_layer") == layer_name and n.get("tlm_role") == role:
+            return n
+    return None
+
+
+def _find_all_tagged(node_tree, layer_name, role):
+    """Find ALL nodes matching layer + role."""
+    return [n for n in node_tree.nodes
+            if n.get("tlm_layer") == layer_name and n.get("tlm_role") == role]
+
+
+# ── Hot-update dispatch ──────────────────────────────────────────────────────
+
+# Mapping of proc property names to Blender shader node input names
+_PROC_INPUT_MAP = {
+    "proc_scale": "Scale",
+    "proc_detail": "Detail",
+    "proc_roughness_proc": "Roughness",
+    "proc_distortion": "Distortion",
+    "proc_lacunarity": "Lacunarity",
+    "proc_randomness": "Randomness",
+    "proc_checker_scale": "Scale",
+    "proc_wave_detail_scale": "Detail Scale",
+}
+
+_ALL_CHANNELS = ("base_color", "roughness", "metallic", "normal",
+                 "emission", "transmission", "bump")
+
+
+def _hot_opacity(node_tree, layer, prop_name):
+    found = False
+    for ch in _ALL_CHANNELS:
+        node = _find_tagged(node_tree, layer.name, f"opacity_target_{ch}")
+        if not node:
+            continue
+        idx = node.get("tlm_opacity_input_idx", -1)
+        if idx == -1:
+            _factor_socket(node).default_value = layer.opacity
+        else:
+            node.inputs[idx].default_value = layer.opacity
+        found = True
+    return found
+
+
+def _hot_blend_mode(node_tree, layer, prop_name):
+    node = _find_tagged(node_tree, layer.name, "mix_base_color")
+    if not node:
+        return False
+    node.blend_type = BLEND_TO_MIX_MODE.get(layer.blend_mode, "MIX")
+    return True
+
+
+def _hot_fill_color(node_tree, layer, prop_name):
+    node = _find_tagged(node_tree, layer.name, "fill_base_color")
+    if not node:
+        node = _find_tagged(node_tree, layer.name, "fill")
+    if not node:
+        return False
+    node.outputs[0].default_value = layer.fill_color
+    return True
+
+
+def _hot_scalar_fill(node_tree, layer, prop_name):
+    channel_map = {
+        "roughness_fill": "roughness",
+        "metallic_fill": "metallic",
+        "transmission_fill": "transmission",
+    }
+    ch = channel_map.get(prop_name)
+    if not ch:
+        return False
+    node = _find_tagged(node_tree, layer.name, f"val_{ch}")
+    if not node:
+        return False
+    node.outputs[0].default_value = getattr(layer, prop_name, 0.0)
+    return True
+
+
+def _hot_emission_color(node_tree, layer, prop_name):
+    node = _find_tagged(node_tree, layer.name, "fill_emission")
+    if not node:
+        return False
+    node.outputs[0].default_value = layer.emission_color
+    return True
+
+
+def _hot_emission_strength(node_tree, layer, prop_name):
+    node = _find_tagged(node_tree, "__global__", "emission_strength")
+    if not node:
+        return False
+    node.outputs[0].default_value = layer.emission_strength
+    return True
+
+
+def _hot_proc_tex_input(node_tree, layer, prop_name):
+    input_name = _PROC_INPUT_MAP.get(prop_name)
+    if not input_name:
+        return False
+    nodes = _find_all_tagged(node_tree, layer.name, "proc_tex")
+    if not nodes:
+        return False
+    val = getattr(layer, prop_name, 0.0)
+    for n in nodes:
+        if input_name in n.inputs:
+            n.inputs[input_name].default_value = val
+    # Marble has separate noise nodes that need scale/detail sync
+    if prop_name == "proc_scale":
+        for mn in _find_all_tagged(node_tree, layer.name, "marble_noise"):
+            if "Scale" in mn.inputs:
+                mn.inputs["Scale"].default_value = val * 2.0
+    if prop_name == "proc_detail":
+        for mn in _find_all_tagged(node_tree, layer.name, "marble_noise"):
+            if "Detail" in mn.inputs:
+                mn.inputs["Detail"].default_value = val
+    if prop_name == "proc_roughness_proc":
+        for mn in _find_all_tagged(node_tree, layer.name, "marble_noise"):
+            if "Roughness" in mn.inputs:
+                mn.inputs["Roughness"].default_value = val
+    if prop_name == "proc_distortion":
+        for mn in _find_all_tagged(node_tree, layer.name, "marble_noise"):
+            if "Distortion" in mn.inputs:
+                mn.inputs["Distortion"].default_value = val * 0.5
+    return True
+
+
+def _hot_proc_offset(node_tree, layer, prop_name):
+    nodes = _find_all_tagged(node_tree, layer.name, "proc_map")
+    if not nodes:
+        return False
+    loc = (layer.proc_offset_x, layer.proc_offset_y, layer.proc_offset_z)
+    for n in nodes:
+        n.inputs["Location"].default_value = loc
+    return True
+
+
+def _hot_proc_color(node_tree, layer, prop_name):
+    nodes = _find_all_tagged(node_tree, layer.name, "proc_cr")
+    if not nodes:
+        return False
+    for cr in nodes:
+        elems = cr.color_ramp.elements
+        contrast = getattr(layer, 'proc_contrast', 0.5)
+        half = contrast * 0.49
+        elems[0].position = half
+        elems[0].color = layer.proc_color1
+        elems[1].position = 1.0 - half
+        elems[1].color = layer.proc_color2
+        if getattr(layer, 'use_proc_color3', False) and len(elems) >= 3:
+            elems[2].position = layer.proc_color3_position
+            elems[2].color = layer.proc_color3
+        elif getattr(layer, 'use_proc_color3', False) and len(elems) < 3:
+            return False  # element count mismatch — need rebuild
+    return True
+
+
+def _hot_vector_distortion(node_tree, layer, prop_name):
+    distortion = getattr(layer, 'proc_vector_distortion', 0.0)
+    if distortion <= 0.0:
+        return False  # need rebuild to remove nodes
+    noise_nodes = _find_all_tagged(node_tree, layer.name, "vdist_noise")
+    mix_nodes = _find_all_tagged(node_tree, layer.name, "vdist_mix")
+    if not noise_nodes and not mix_nodes:
+        return False
+    for n in noise_nodes:
+        n.inputs["Scale"].default_value = layer.proc_scale * 0.5
+    for m in mix_nodes:
+        m.inputs["Factor"].default_value = distortion * 0.15
+    return True
+
+
+def _hot_marble_distortion(node_tree, layer, prop_name):
+    nodes = _find_all_tagged(node_tree, layer.name, "marble_mult")
+    if not nodes:
+        return False
+    for n in nodes:
+        n.inputs[1].default_value = layer.proc_marble_distortion
+    return True
+
+
+def _hot_adj_hue_sat(node_tree, layer, prop_name):
+    node = _find_tagged(node_tree, layer.name, "adj_hue_sat")
+    if not node:
+        return False
+    node.inputs["Hue"].default_value = layer.adj_hue
+    node.inputs["Saturation"].default_value = layer.adj_saturation
+    node.inputs["Value"].default_value = layer.adj_value
+    return True
+
+
+def _hot_adj_bc(node_tree, layer, prop_name):
+    node = _find_tagged(node_tree, layer.name, "adj_bc")
+    if not node:
+        return False
+    node.inputs["Bright"].default_value = layer.adj_brightness
+    node.inputs["Contrast"].default_value = layer.adj_contrast
+    return True
+
+
+def _hot_adj_levels(node_tree, layer, prop_name):
+    mr_in = _find_tagged(node_tree, layer.name, "adj_lvl_in")
+    gamma = _find_tagged(node_tree, layer.name, "adj_lvl_gamma")
+    mr_out = _find_tagged(node_tree, layer.name, "adj_lvl_out")
+    if not (mr_in and gamma and mr_out):
+        return False
+    if hasattr(mr_in, 'data_type') and mr_in.data_type == 'FLOAT_VECTOR':
+        mr_in.inputs["From Min"].default_value = (layer.adj_in_min,) * 3
+        mr_in.inputs["From Max"].default_value = (layer.adj_in_max,) * 3
+        mr_out.inputs["To Min"].default_value = (layer.adj_out_min,) * 3
+        mr_out.inputs["To Max"].default_value = (layer.adj_out_max,) * 3
+    else:
+        mr_in.inputs["From Min"].default_value = layer.adj_in_min
+        mr_in.inputs["From Max"].default_value = layer.adj_in_max
+        mr_out.inputs["To Min"].default_value = layer.adj_out_min
+        mr_out.inputs["To Max"].default_value = layer.adj_out_max
+    gamma.inputs["Gamma"].default_value = layer.adj_levels_gamma
+    return True
+
+
+def _hot_adj_cb(node_tree, layer, prop_name):
+    lift = _find_tagged(node_tree, layer.name, "adj_cb_lift")
+    gamma = _find_tagged(node_tree, layer.name, "adj_cb_gamma")
+    gain = _find_tagged(node_tree, layer.name, "adj_cb_gain")
+    if not (lift and gamma and gain):
+        return False
+    if _use_new_mix():
+        _enabled_socket(lift.inputs, "B").default_value = (*layer.adj_lift, 1.0)
+        _enabled_socket(gain.inputs, "B").default_value = (*layer.adj_gain, 1.0)
+    else:
+        lift.inputs["Color2"].default_value = (*layer.adj_lift, 1.0)
+        gain.inputs["Color2"].default_value = (*layer.adj_gain, 1.0)
+    g = layer.adj_gamma
+    gamma.inputs["Gamma"].default_value = max(0.001, (g[0] + g[1] + g[2]) / 3.0)
+    return True
+
+
+def _hot_adj_curves(node_tree, layer, prop_name):
+    node = _find_tagged(node_tree, layer.name, "adj_curves")
+    if not node:
+        return False
+    curve = node.mapping.curves[3]
+    # Reset curve points to 2 (remove extras from contrast/brightness)
+    while len(curve.points) > 2:
+        curve.points.remove(curve.points[-1])
+    curve.points[0].location = (0.0, layer.adj_curve_black_point)
+    curve.points[1].location = (1.0, layer.adj_curve_white_point)
+    contrast = layer.adj_curve_contrast
+    brightness = layer.adj_curve_brightness
+    if abs(contrast) > 0.001 or abs(brightness) > 0.001:
+        shadow_y = max(0.0, min(1.0, 0.25 - contrast * 0.25 + brightness * 0.25))
+        highlight_y = max(0.0, min(1.0, 0.75 + contrast * 0.25 + brightness * 0.25))
+        curve.points.new(0.25, shadow_y)
+        curve.points.new(0.75, highlight_y)
+    node.mapping.update()
+    return True
+
+
+def _hot_bump(node_tree, layer, prop_name):
+    node = _find_tagged(node_tree, "__global__", "bump_final")
+    if not node:
+        return False
+    node.inputs["Strength"].default_value = layer.bump_strength
+    node.inputs["Distance"].default_value = layer.bump_distance
+    return True
+
+
+def _hot_fresnel(node_tree, layer, prop_name):
+    fr = _find_tagged(node_tree, layer.name, "fresnel")
+    if not fr:
+        return False
+    fr.inputs["IOR"].default_value = getattr(layer, 'fresnel_ior', 1.45)
+    fstr = _find_tagged(node_tree, layer.name, "fresnel_str")
+    if fstr:
+        fstr.inputs[1].default_value = getattr(layer, 'fresnel_strength', 1.0)
+    return True
+
+
+# Dispatch table: property name -> handler function
+_HOT_DISPATCH = {
+    "opacity": _hot_opacity,
+    "blend_mode": _hot_blend_mode,
+    "fill_color": _hot_fill_color,
+    "roughness_fill": _hot_scalar_fill,
+    "metallic_fill": _hot_scalar_fill,
+    "transmission_fill": _hot_scalar_fill,
+    "emission_color": _hot_emission_color,
+    "emission_strength": _hot_emission_strength,
+    "proc_scale": _hot_proc_tex_input,
+    "proc_detail": _hot_proc_tex_input,
+    "proc_roughness_proc": _hot_proc_tex_input,
+    "proc_distortion": _hot_proc_tex_input,
+    "proc_lacunarity": _hot_proc_tex_input,
+    "proc_randomness": _hot_proc_tex_input,
+    "proc_checker_scale": _hot_proc_tex_input,
+    "proc_wave_detail_scale": _hot_proc_tex_input,
+    "proc_offset_x": _hot_proc_offset,
+    "proc_offset_y": _hot_proc_offset,
+    "proc_offset_z": _hot_proc_offset,
+    "proc_color1": _hot_proc_color,
+    "proc_color2": _hot_proc_color,
+    "proc_color3": _hot_proc_color,
+    "proc_color3_position": _hot_proc_color,
+    "proc_contrast": _hot_proc_color,
+    "proc_vector_distortion": _hot_vector_distortion,
+    "proc_marble_distortion": _hot_marble_distortion,
+    "adj_hue": _hot_adj_hue_sat,
+    "adj_saturation": _hot_adj_hue_sat,
+    "adj_value": _hot_adj_hue_sat,
+    "adj_brightness": _hot_adj_bc,
+    "adj_contrast": _hot_adj_bc,
+    "adj_in_min": _hot_adj_levels,
+    "adj_in_max": _hot_adj_levels,
+    "adj_levels_gamma": _hot_adj_levels,
+    "adj_out_min": _hot_adj_levels,
+    "adj_out_max": _hot_adj_levels,
+    "adj_lift": _hot_adj_cb,
+    "adj_gamma": _hot_adj_cb,
+    "adj_gain": _hot_adj_cb,
+    "adj_curve_contrast": _hot_adj_curves,
+    "adj_curve_brightness": _hot_adj_curves,
+    "adj_curve_black_point": _hot_adj_curves,
+    "adj_curve_white_point": _hot_adj_curves,
+    "bump_strength": _hot_bump,
+    "bump_distance": _hot_bump,
+    "fresnel_ior": _hot_fresnel,
+    "fresnel_strength": _hot_fresnel,
+}
+
+
+_hot_updating = False
+
+def hot_update_property(material, layer, prop_name):
+    """Attempt to hot-update a single property without full rebuild.
+    Returns True on success, False if fallback rebuild is needed."""
+    global _hot_updating
+    if _hot_updating:
+        return True  # re-entrant call from depsgraph — suppress
+    node_tree = material.node_tree
+    if not node_tree:
+        return False
+    handler = _HOT_DISPATCH.get(prop_name)
+    if not handler:
+        return False
+    try:
+        _hot_updating = True
+        ok = handler(node_tree, layer, prop_name)
+        return ok
+    except Exception:
+        import traceback
+        traceback.print_exc()
+        return False
+    finally:
+        _hot_updating = False
+
+
 def _new_img_tex(node_tree, image, uv_map, x, y, colorspace="sRGB", layer=None):
     """Create an Image Texture node. If layer.use_triplanar, uses triplanar projection."""
     if layer and getattr(layer, 'use_triplanar', False):
@@ -337,7 +704,7 @@ def _new_triplanar_tex(node_tree, image, x, y, colorspace="sRGB", scale=1.0, sha
     return _FakeNode(final_out)
 
 
-def _new_mix(node_tree, blend_mode, opacity, x, y):
+def _new_mix(node_tree, blend_mode, opacity, x, y, layer_name="", channel=""):
     if _use_new_mix():
         node = node_tree.nodes.new("ShaderNodeMix")
         node.data_type = 'RGBA'
@@ -349,10 +716,12 @@ def _new_mix(node_tree, blend_mode, opacity, x, y):
         node.inputs["Fac"].default_value = opacity
     node.name = f"{TLM_PREFIX}mix_{_next_id()}"
     node.location = (x, y)
+    if layer_name:
+        _tag(node, layer_name, f"mix_{channel}" if channel else "mix")
     return node
 
 
-def _new_mix_scalar(node_tree, opacity, x, y):
+def _new_mix_scalar(node_tree, opacity, x, y, layer_name="", channel=""):
     """Mix node for scalar channels (Roughness, Metallic) — Float type."""
     if _use_new_mix():
         node = node_tree.nodes.new("ShaderNodeMix")
@@ -365,6 +734,8 @@ def _new_mix_scalar(node_tree, opacity, x, y):
         node.inputs["Fac"].default_value = opacity
     node.name = f"{TLM_PREFIX}mix_scalar_{_next_id()}"
     node.location = (x, y)
+    if layer_name:
+        _tag(node, layer_name, f"mix_{channel}" if channel else "mix_scalar")
     return node
 
 
@@ -425,20 +796,25 @@ def _result_socket_scalar(node):
     return node.outputs["Color"]
 
 
-def _new_fill(node_tree, color, x, y):
+def _new_fill(node_tree, color, x, y, layer_name="", channel=""):
     node = node_tree.nodes.new("ShaderNodeRGB")
     node.name = f"{TLM_PREFIX}fill_{_next_id()}"
     node.outputs[0].default_value = color
     node.location = (x, y)
+    if layer_name:
+        role = f"fill_{channel}" if channel else "fill"
+        _tag(node, layer_name, role)
     return node
 
 
-def _new_value(node_tree, value, x, y):
+def _new_value(node_tree, value, x, y, layer_name="", channel=""):
     """Single float Value node for scalar fill."""
     node = node_tree.nodes.new("ShaderNodeValue")
     node.name = f"{TLM_PREFIX}val_{_next_id()}"
     node.outputs[0].default_value = value
     node.location = (x, y)
+    if layer_name:
+        _tag(node, layer_name, f"val_{channel}")
     return node
 
 
@@ -552,10 +928,10 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
                     current = tex.outputs["Color"]
                     prev_alpha = tex.outputs["Alpha"]
                 else:
-                    mix = _new_mix(node_tree, layer.blend_mode, layer.opacity, x + 280, y - 40)
+                    mix = _new_mix(node_tree, layer.blend_mode, layer.opacity, x + 280, y - 40, layer_name=layer.name, channel=channel_id)
                     node_tree.links.new(current, _a_socket(mix))
                     node_tree.links.new(tex.outputs["Color"], _b_socket(mix))
-                    _set_factor(node_tree, mix, layer, tex.outputs["Alpha"], prev_alpha, x + 280, y, i, uv_map)
+                    _set_factor(node_tree, mix, layer, tex.outputs["Alpha"], prev_alpha, x + 280, y, i, uv_map, channel=channel_id)
                     current = _result_socket(mix)
                     prev_alpha = tex.outputs["Alpha"]
             continue
@@ -578,7 +954,7 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
                     layer_out = tex.outputs["Color"]
                     layer_alpha = tex.outputs["Alpha"]
                 else:
-                    fn = _new_fill(node_tree, layer.emission_color, x, y)
+                    fn = _new_fill(node_tree, layer.emission_color, x, y, layer_name=layer.name, channel="emission")
                     layer_out = fn.outputs["Color"]
                     layer_alpha = None
                 # Don't fall through to generic path below
@@ -587,10 +963,10 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
                     prev_alpha = layer_alpha
                     continue
                 mix_x = x + 280
-                mix = _new_mix(node_tree, layer.blend_mode, layer.opacity, mix_x, y - 40)
+                mix = _new_mix(node_tree, layer.blend_mode, layer.opacity, mix_x, y - 40, layer_name=layer.name, channel=channel_id)
                 node_tree.links.new(current, _a_socket(mix))
                 node_tree.links.new(layer_out, _b_socket(mix))
-                _set_factor(node_tree, mix, layer, layer_alpha, prev_alpha, mix_x, y, i, uv_map)
+                _set_factor(node_tree, mix, layer, layer_alpha, prev_alpha, mix_x, y, i, uv_map, channel=channel_id)
                 current = _result_socket(mix)
                 prev_alpha = layer_alpha
                 continue
@@ -616,12 +992,9 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
         elif layer.layer_type == "FILL":
             layer_alpha = None
             if channel_id == 'base_color':
-                fn = _new_fill(node_tree, layer.fill_color, x, y)
+                fn = _new_fill(node_tree, layer.fill_color, x, y, layer_name=layer.name, channel="base_color")
                 layer_out = fn.outputs["Color"]
             elif is_scalar:
-                # Prefer an assigned image over the scalar fill value.
-                # "New" button in the PBR panel creates and assigns an image;
-                # if one exists we must read it or the user sees no effect.
                 img_name = getattr(layer, img_attr, "")
                 img = bpy.data.images.get(img_name) if img_name else None
                 if img:
@@ -637,7 +1010,7 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
                                else layer.transmission_fill if channel_id == 'transmission'
                                else layer.metallic_fill)
                     print(f"[TLM] FILL {channel_id}: no image, using fill value {fill_val} for layer '{layer.name}'")
-                    vn = _new_value(node_tree, fill_val, x, y)
+                    vn = _new_value(node_tree, fill_val, x, y, layer_name=layer.name, channel=channel_id)
                     layer_out = vn.outputs["Value"]
             elif is_emission:
                 # Prefer an assigned image over the emission_color fill
@@ -649,7 +1022,7 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
                     layer_out = tex.outputs["Color"]
                 else:
                     print(f"[TLM] FILL emission: no image, using emission_color for layer '{layer.name}'")
-                    fn = _new_fill(node_tree, layer.emission_color, x, y)
+                    fn = _new_fill(node_tree, layer.emission_color, x, y, layer_name=layer.name, channel="emission")
                     layer_out = fn.outputs["Color"]
             elif is_normal:
                 # Normal map image on a Fill layer
@@ -769,15 +1142,17 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
 
         mix_x = x + 280
         if is_scalar:
-            mix = _new_mix_scalar(node_tree, layer.opacity, mix_x, y - 40)
+            mix = _new_mix_scalar(node_tree, layer.opacity, mix_x, y - 40, layer_name=layer.name, channel=channel_id)
             node_tree.links.new(current, _a_socket_scalar(mix))
             node_tree.links.new(layer_out, _b_socket_scalar(mix))
+            # Tag the scalar mix factor as opacity target
+            _tag(mix, layer.name, f"opacity_target_{channel_id}", opacity_input_idx=-1)
             current = _result_socket_scalar(mix)
         else:
-            mix = _new_mix(node_tree, layer.blend_mode, layer.opacity, mix_x, y - 40)
+            mix = _new_mix(node_tree, layer.blend_mode, layer.opacity, mix_x, y - 40, layer_name=layer.name, channel=channel_id)
             node_tree.links.new(current, _a_socket(mix))
             node_tree.links.new(layer_out, _b_socket(mix))
-            _set_factor(node_tree, mix, layer, layer_alpha, prev_alpha, mix_x, y, i, uv_map)
+            _set_factor(node_tree, mix, layer, layer_alpha, prev_alpha, mix_x, y, i, uv_map, channel=channel_id)
             current = _result_socket(mix)
             prev_alpha = layer_alpha
 
@@ -796,15 +1171,13 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
     return current
 
 
-def _set_factor(node_tree, mix_node, layer, layer_alpha, prev_alpha, x, y, i, uv_map="UVMap"):
+def _set_factor(node_tree, mix_node, layer, layer_alpha, prev_alpha, x, y, i, uv_map="UVMap", channel="base_color"):
     """Wire up the blend factor for a color mix node."""
     if layer.use_mask and layer.mask_image:
-        # FIX: pass uv_map instead of hardcoded None — previously caused UVMap node
-        # to be created with uv.uv_map = None (silently used active UV instead of
-        # the material's configured UV map).
         mult = _apply_mask(node_tree, mix_node, layer.mask_image, uv_map, x, y)
         if mult:
             mult.inputs[1].default_value = layer.opacity
+            _tag(mult, layer.name, f"opacity_target_{channel}", opacity_input_idx=1)
     elif layer.use_clipping_mask and prev_alpha is not None:
         clip = node_tree.nodes.new("ShaderNodeMath")
         clip.operation = 'MULTIPLY'
@@ -819,10 +1192,12 @@ def _set_factor(node_tree, mix_node, layer, layer_alpha, prev_alpha, x, y, i, uv
             op.location = (x - 50, y - 180)
             node_tree.links.new(clip.outputs["Value"], op.inputs[0])
             op.inputs[1].default_value = layer.opacity
+            _tag(op, layer.name, f"opacity_target_{channel}", opacity_input_idx=1)
             node_tree.links.new(op.outputs["Value"], _factor_socket(mix_node))
         else:
             node_tree.links.new(prev_alpha, clip.inputs[0])
             clip.inputs[1].default_value = layer.opacity
+            _tag(clip, layer.name, f"opacity_target_{channel}", opacity_input_idx=1)
             node_tree.links.new(clip.outputs["Value"], _factor_socket(mix_node))
     else:
         if layer_alpha and layer.blend_mode == "MIX":
@@ -832,9 +1207,13 @@ def _set_factor(node_tree, mix_node, layer, layer_alpha, prev_alpha, x, y, i, uv
             am.location = (x - 160, y - 180)
             node_tree.links.new(layer_alpha, am.inputs[0])
             am.inputs[1].default_value = layer.opacity
+            _tag(am, layer.name, f"opacity_target_{channel}", opacity_input_idx=1)
             node_tree.links.new(am.outputs["Value"], _factor_socket(mix_node))
         else:
             _factor_socket(mix_node).default_value = layer.opacity
+            # Tag the mix node itself as opacity target (direct factor write)
+            _tag(mix_node, layer.name, f"opacity_target_{channel}",
+                 opacity_input_idx=-1)  # -1 = factor socket
 
     # ── Fresnel mask: multiply the current factor by a Fresnel output ─────
     # This makes the layer visible only at glancing angles (edge glow / rim)
@@ -889,17 +1268,17 @@ def _inject_vector_distortion(node_tree, layer, mapping_out, x, y, name_tag=""):
     noise.inputs["Detail"].default_value = 3.0
     noise.inputs["Roughness"].default_value = 0.6
     noise.inputs["Distortion"].default_value = 0.0
+    _tag(noise, layer.name, "vdist_noise")
     node_tree.links.new(mapping_out, noise.inputs["Vector"])
 
     # Mix(Vector, Linear Light) with low factor to blend distortion into coordinates
-    # Formula: result = lerp(original_coords, LinearLight(original, noise), Factor)
-    # Low factor = subtle warping, high factor = strong warping
     mix = node_tree.nodes.new("ShaderNodeMix")
     mix.data_type = 'VECTOR'
     mix.blend_type = 'LINEAR_LIGHT'
     mix.name = f"{TLM_PREFIX}vdist_mix_{name_tag}_{_next_id()}"
     mix.location = (x - 50, y - 180)
     mix.inputs["Factor"].default_value = distortion * 0.15  # scale down for usable range
+    _tag(mix, layer.name, "vdist_mix")
     # Find the enabled Vector A and B sockets
     a_sock = _enabled_socket(mix.inputs, "A")
     b_sock = _enabled_socket(mix.inputs, "B")
@@ -924,6 +1303,7 @@ def _build_fresnel_mask(node_tree, layer, x, y, name_tag=""):
     fresnel.name = f"{TLM_PREFIX}fresnel_{name_tag}_{_next_id()}"
     fresnel.location = (x - 200, y - 300)
     fresnel.inputs["IOR"].default_value = getattr(layer, 'fresnel_ior', 1.45)
+    _tag(fresnel, layer.name, "fresnel")
 
     strength = getattr(layer, 'fresnel_strength', 1.0)
     if strength < 1.0:
@@ -933,6 +1313,7 @@ def _build_fresnel_mask(node_tree, layer, x, y, name_tag=""):
         mult.name = f"{TLM_PREFIX}fresnel_str_{name_tag}_{_next_id()}"
         mult.location = (x - 50, y - 300)
         mult.use_clamp = True
+        _tag(mult, layer.name, "fresnel_str")
         node_tree.links.new(fresnel.outputs["Fac"], mult.inputs[0])
         mult.inputs[1].default_value = strength
         return mult.outputs["Value"]
@@ -953,6 +1334,7 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
     tc = node_tree.nodes.new("ShaderNodeTexCoord")
     tc.name = f"{TLM_PREFIX}proc_tc_{_next_id()}"
     tc.location = (x - 500, y)
+    _tag(tc, layer.name, "proc_tc")
 
     mapping = node_tree.nodes.new("ShaderNodeMapping")
     mapping.name = f"{TLM_PREFIX}proc_map_{_next_id()}"
@@ -960,6 +1342,7 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
     mapping.inputs["Location"].default_value = (
         layer.proc_offset_x, layer.proc_offset_y, layer.proc_offset_z
     )
+    _tag(mapping, layer.name, "proc_map")
     # Select coordinate space based on layer setting
     coord_type = getattr(layer, 'proc_coord_type', 'GENERATED')
     if coord_type == 'UV':
@@ -1046,6 +1429,7 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
         tex_node.inputs["Color2"].default_value = layer.proc_color2
         tex_node.name = f"{TLM_PREFIX}proc_tex_{_next_id()}"
         tex_node.location = (x - 100, y)
+        _tag(tex_node, layer.name, "proc_tex")
         node_tree.links.new(vec_out, tex_node.inputs["Vector"])
         # Checker already outputs Color directly
         return tex_node.outputs["Color"], None
@@ -1060,6 +1444,7 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
         wave.inputs["Scale"].default_value = layer.proc_scale
         wave.inputs["Detail"].default_value = layer.proc_detail
         wave.inputs["Distortion"].default_value = layer.proc_distortion
+        _tag(wave, layer.name, "proc_tex")
         try:
             wave.wave_profile = 'SIN'
         except Exception:
@@ -1073,6 +1458,7 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
         noise.inputs["Detail"].default_value = layer.proc_detail
         noise.inputs["Roughness"].default_value = layer.proc_roughness_proc
         noise.inputs["Distortion"].default_value = layer.proc_distortion * 0.5
+        _tag(noise, layer.name, "marble_noise")
         node_tree.links.new(vec_out, noise.inputs["Vector"])
 
         mult = node_tree.nodes.new("ShaderNodeMath")
@@ -1081,6 +1467,7 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
         mult.location = (x - 200, y - 150)
         node_tree.links.new(noise.outputs["Fac"], mult.inputs[0])
         mult.inputs[1].default_value = layer.proc_marble_distortion
+        _tag(mult, layer.name, "marble_mult")
 
         phase_input = wave.inputs.get("Phase Offset")
         if phase_input:
@@ -1100,6 +1487,7 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
         cr.name = f"{TLM_PREFIX}proc_cr_{_next_id()}"
         cr.label = "Proc Color"
         cr.location = (x + 180, y)
+        _tag(cr, layer.name, "proc_cr")
 
         contrast = getattr(layer, 'proc_contrast', 0.5)
         half = contrast * 0.49
@@ -1127,6 +1515,7 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
 
     tex_node.name = f"{TLM_PREFIX}proc_tex_{_next_id()}"
     tex_node.location = (x - 100, y)
+    _tag(tex_node, layer.name, "proc_tex")
     node_tree.links.new(vec_out, tex_node.inputs["Vector"])
 
     # ── ColorRamp: map Fac → Color1..Color2 ──────────────────────────────
@@ -1134,6 +1523,7 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
     cr.name = f"{TLM_PREFIX}proc_cr_{_next_id()}"
     cr.label = "Proc Color"
     cr.location = (x + 180, y)
+    _tag(cr, layer.name, "proc_cr")
 
     # Contrast controls ColorRamp stop positions:
     # contrast=0.0 → stops at (0.0, 1.0) = full soft gradient
@@ -1163,6 +1553,7 @@ def _apply_adjustment(node_tree, layer, current_output, x, y):
         node.name = f"{TLM_PREFIX}adj_huesat_{_next_id()}"
         node.label = "Hue/Saturation"
         node.location = (x, y)
+        _tag(node, layer.name, "adj_hue_sat")
         node.inputs["Hue"].default_value        = layer.adj_hue
         node.inputs["Saturation"].default_value = layer.adj_saturation
         node.inputs["Value"].default_value      = layer.adj_value
@@ -1175,6 +1566,7 @@ def _apply_adjustment(node_tree, layer, current_output, x, y):
         node.name = f"{TLM_PREFIX}adj_bc_{_next_id()}"
         node.label = "Brightness/Contrast"
         node.location = (x, y)
+        _tag(node, layer.name, "adj_bc")
         node.inputs["Bright"].default_value   = layer.adj_brightness
         node.inputs["Contrast"].default_value = layer.adj_contrast
         node_tree.links.new(current_output, node.inputs["Color"])
@@ -1186,6 +1578,7 @@ def _apply_adjustment(node_tree, layer, current_output, x, y):
         mr_in.label = "Levels In"
         mr_in.location = (x, y)
         mr_in.clamp = True
+        _tag(mr_in, layer.name, "adj_lvl_in")
         if hasattr(mr_in, 'data_type'):
             mr_in.data_type = 'FLOAT_VECTOR'
             mr_in.inputs["From Min"].default_value = (layer.adj_in_min,) * 3
@@ -1205,6 +1598,7 @@ def _apply_adjustment(node_tree, layer, current_output, x, y):
         gamma_node = node_tree.nodes.new("ShaderNodeGamma")
         gamma_node.name = f"{TLM_PREFIX}adj_gamma_{_next_id()}"
         gamma_node.location = (x + 200, y)
+        _tag(gamma_node, layer.name, "adj_lvl_gamma")
         # FIX: use adj_levels_gamma (renamed from adj_gamma which was overwritten
         # by the Color Balance FloatVectorProperty in properties.py)
         gamma_node.inputs["Gamma"].default_value = layer.adj_levels_gamma
@@ -1214,6 +1608,7 @@ def _apply_adjustment(node_tree, layer, current_output, x, y):
         mr_out.name = f"{TLM_PREFIX}adj_lvl_out_{_next_id()}"
         mr_out.location = (x + 400, y)
         mr_out.clamp = True
+        _tag(mr_out, layer.name, "adj_lvl_out")
         if hasattr(mr_out, 'data_type'):
             mr_out.data_type = 'FLOAT_VECTOR'
             mr_out.inputs["From Min"].default_value = (0.0, 0.0, 0.0)
@@ -1240,6 +1635,7 @@ def _apply_adjustment(node_tree, layer, current_output, x, y):
         lift_node.name = f"{TLM_PREFIX}adj_lift_{_next_id()}"
         lift_node.label = "Lift"
         lift_node.location = (x, y)
+        _tag(lift_node, layer.name, "adj_cb_lift")
         if _use_new_mix():
             lift_node.data_type = 'RGBA'
             lift_node.blend_type = 'MULTIPLY'
@@ -1259,6 +1655,7 @@ def _apply_adjustment(node_tree, layer, current_output, x, y):
         gamma_node.name = f"{TLM_PREFIX}adj_gamma_cb_{_next_id()}"
         gamma_node.label = "Gamma"
         gamma_node.location = (x + 220, y)
+        _tag(gamma_node, layer.name, "adj_cb_gamma")
         # Use average of gamma RGB as scalar gamma
         g = layer.adj_gamma
         gamma_val = (g[0] + g[1] + g[2]) / 3.0
@@ -1270,6 +1667,7 @@ def _apply_adjustment(node_tree, layer, current_output, x, y):
         gain_node.name = f"{TLM_PREFIX}adj_gain_{_next_id()}"
         gain_node.label = "Gain"
         gain_node.location = (x + 440, y)
+        _tag(gain_node, layer.name, "adj_cb_gain")
         if _use_new_mix():
             gain_node.data_type = 'RGBA'
             gain_node.blend_type = 'MULTIPLY'
@@ -1289,6 +1687,7 @@ def _apply_adjustment(node_tree, layer, current_output, x, y):
         node.name = f"{TLM_PREFIX}adj_curves_{_next_id()}"
         node.label = "Curves"
         node.location = (x, y)
+        _tag(node, layer.name, "adj_curves")
         node.inputs["Fac"].default_value = 1.0
         node_tree.links.new(current_output, node.inputs["Color"])
 
@@ -1367,10 +1766,6 @@ def rebuild_node_tree(material):
                 if pimg:
                     pimg.use_fake_user = True
 
-    _saved_positions = _save_node_positions(node_tree)
-    _saved_custom_links = _save_custom_links(node_tree)
-    _clear_tlm_nodes(node_tree)
-
     all_layers = list(reversed(tlm.layers))
     group_children = {}
     for layer in all_layers:
@@ -1382,142 +1777,159 @@ def rebuild_node_tree(material):
     root_layers = [l for l in all_layers if l.visible and not l.group_name]
 
     if not root_layers:
+        # Nothing to build — clear TLM nodes (no layers visible) but don't
+        # leave a half-built tree.
+        _clear_tlm_nodes(node_tree)
         return
 
-    uv_map  = tlm.uv_map or "UVMap"
-    start_x = -1200
-    x_step  = 300  # default for _build_base_color / _build_bump_channel
+    _saved_positions = _save_node_positions(node_tree)
+    _saved_custom_links = _save_custom_links(node_tree)
+    _clear_tlm_nodes(node_tree)
 
-    # For PBR channels we still need a fully expanded list
-    expanded = []
-    for layer in root_layers:
-        if layer.layer_type == "GROUP":
-            children = [l for l in group_children.get(layer.name, []) if l.visible]
-            expanded.extend(children)
-        else:
-            expanded.append(layer)
+    try:
+        uv_map  = tlm.uv_map or "UVMap"
+        start_x = -1200
+        x_step  = 300  # default for _build_base_color / _build_bump_channel
 
-    bsdf = _find_bsdf(node_tree)
-    if not bsdf:
-        return
+        # For PBR channels we still need a fully expanded list
+        expanded = []
+        for layer in root_layers:
+            if layer.layer_type == "GROUP":
+                children = [l for l in group_children.get(layer.name, []) if l.visible]
+                expanded.extend(children)
+            else:
+                expanded.append(layer)
 
-    # Calculate where the chain ends so BSDF + passthrough nodes go to the right
-    # With grid layout, find the maximum x + width across ALL rows
-    def _max_end_x(layers, x0):
-        if not layers:
-            return x0
-        positions = _layer_positions(layers, x0, 0)
-        return max(px + _LAYER_WIDTH.get(layers[j].layer_type, 300)
-                   for j, (px, _py) in enumerate(positions))
+        bsdf = _find_bsdf(node_tree)
+        if not bsdf:
+            print("[TLM] WARNING: No Principled BSDF found — skipping rebuild")
+            _restore_custom_links(node_tree, _saved_custom_links)
+            _restore_node_positions(node_tree, _saved_positions)
+            return
 
-    end_x = max(_max_end_x(root_layers, start_x),
-                _max_end_x(expanded, start_x)) + 100
+        # Calculate where the chain ends so BSDF + passthrough nodes go to the right
+        # With grid layout, find the maximum x + width across ALL rows
+        def _max_end_x(layers, x0):
+            if not layers:
+                return x0
+            positions = _layer_positions(layers, x0, 0)
+            return max(px + _LAYER_WIDTH.get(layers[j].layer_type, 300)
+                       for j, (px, _py) in enumerate(positions))
 
-    # ── Channel y positions — spaced 400px apart ──
-    ch_y = {
-        'base_color': 400,
-        'roughness':    0,
-        'metallic':  -400,
-        'normal':    -800,
-        'emission':     -1200,
-        'transmission': -1600,
-        'bump':         -2000,
-    }
+        end_x = max(_max_end_x(root_layers, start_x),
+                    _max_end_x(expanded, start_x)) + 100
 
-    # ── Base Color — built from root_layers to preserve GROUP alpha for clipping mask ─
-    bc_out = _build_base_color(node_tree, root_layers, group_children, uv_map, start_x, ch_y['base_color'], x_step)
-    if bc_out:
-        node_tree.links.new(bc_out, bsdf.inputs["Base Color"])
+        # ── Channel y positions — spaced 400px apart ──
+        ch_y = {
+            'base_color': 400,
+            'roughness':    0,
+            'metallic':  -400,
+            'normal':    -800,
+            'emission':     -1200,
+            'transmission': -1600,
+            'bump':         -2000,
+        }
 
-    # ── Roughness ─────────────────────────────────────────────────────────────
-    if _channel_used(expanded, 'use_roughness'):
-        r_out = _build_channel(node_tree, expanded, 'roughness', uv_map, start_x, ch_y['roughness'], x_step)
-        if r_out:
-            passthrough = node_tree.nodes.new("ShaderNodeMath")
-            passthrough.operation = 'ADD'
-            passthrough.name = f"{TLM_PREFIX}rough_pass"
-            passthrough.inputs[1].default_value = 0.0
-            passthrough.use_clamp = True
-            passthrough.location = (end_x, ch_y['roughness'])
-            node_tree.links.new(r_out, passthrough.inputs[0])
-            _link_to_bsdf(node_tree, passthrough.outputs["Value"], bsdf,
-                          ["Roughness", "Specular Roughness"], "roughness")
+        # ── Base Color — built from root_layers to preserve GROUP alpha for clipping mask ─
+        bc_out = _build_base_color(node_tree, root_layers, group_children, uv_map, start_x, ch_y['base_color'], x_step)
+        if bc_out:
+            node_tree.links.new(bc_out, bsdf.inputs["Base Color"])
 
-    # ── Metallic ──────────────────────────────────────────────────────────────
-    if _channel_used(expanded, 'use_metallic'):
-        m_out = _build_channel(node_tree, expanded, 'metallic', uv_map, start_x, ch_y['metallic'], x_step)
-        if m_out:
-            passthrough = node_tree.nodes.new("ShaderNodeMath")
-            passthrough.operation = 'ADD'
-            passthrough.name = f"{TLM_PREFIX}metal_pass"
-            passthrough.inputs[1].default_value = 0.0
-            passthrough.use_clamp = True
-            passthrough.location = (end_x, ch_y['metallic'])
-            node_tree.links.new(m_out, passthrough.inputs[0])
-            _link_to_bsdf(node_tree, passthrough.outputs["Value"], bsdf,
-                          ["Metallic", "Metalness"], "metallic")
+        # ── Roughness ─────────────────────────────────────────────────────────────
+        if _channel_used(expanded, 'use_roughness'):
+            r_out = _build_channel(node_tree, expanded, 'roughness', uv_map, start_x, ch_y['roughness'], x_step)
+            if r_out:
+                passthrough = node_tree.nodes.new("ShaderNodeMath")
+                passthrough.operation = 'ADD'
+                passthrough.name = f"{TLM_PREFIX}rough_pass"
+                passthrough.inputs[1].default_value = 0.0
+                passthrough.use_clamp = True
+                passthrough.location = (end_x, ch_y['roughness'])
+                node_tree.links.new(r_out, passthrough.inputs[0])
+                _link_to_bsdf(node_tree, passthrough.outputs["Value"], bsdf,
+                              ["Roughness", "Specular Roughness"], "roughness")
 
-    # ── Normal ────────────────────────────────────────────────────────────────
-    normal_out = None
-    if _channel_used(expanded, 'use_normal'):
-        n_out = _build_channel(node_tree, expanded, 'normal', uv_map, start_x, ch_y['normal'], x_step)
-        if n_out:
-            normal_out = n_out
+        # ── Metallic ──────────────────────────────────────────────────────────────
+        if _channel_used(expanded, 'use_metallic'):
+            m_out = _build_channel(node_tree, expanded, 'metallic', uv_map, start_x, ch_y['metallic'], x_step)
+            if m_out:
+                passthrough = node_tree.nodes.new("ShaderNodeMath")
+                passthrough.operation = 'ADD'
+                passthrough.name = f"{TLM_PREFIX}metal_pass"
+                passthrough.inputs[1].default_value = 0.0
+                passthrough.use_clamp = True
+                passthrough.location = (end_x, ch_y['metallic'])
+                node_tree.links.new(m_out, passthrough.inputs[0])
+                _link_to_bsdf(node_tree, passthrough.outputs["Value"], bsdf,
+                              ["Metallic", "Metalness"], "metallic")
 
-    # ── Emission ──────────────────────────────────────────────────────────────
-    if _channel_used(expanded, 'use_emission'):
-        e_out = _build_channel(node_tree, expanded, 'emission', uv_map, start_x, ch_y['emission'], x_step)
-        if e_out:
-            _link_to_bsdf(node_tree, e_out, bsdf,
-                          ["Emission Color", "Emission", "emission"], "emission")
-            # Use max emission strength weighted by opacity
-            strengths = [(l.emission_strength * l.opacity) for l in expanded if l.use_emission]
-            if strengths:
-                val = node_tree.nodes.new("ShaderNodeValue")
-                val.name = f"{TLM_PREFIX}emission_strength"
-                val.outputs[0].default_value = max(strengths)
-                val.location = (end_x, ch_y['emission'])
-                _link_to_bsdf(node_tree, val.outputs[0], bsdf,
-                              ["Emission Strength", "emission_strength"], "emission_strength")
+        # ── Normal ────────────────────────────────────────────────────────────────
+        normal_out = None
+        if _channel_used(expanded, 'use_normal'):
+            n_out = _build_channel(node_tree, expanded, 'normal', uv_map, start_x, ch_y['normal'], x_step)
+            if n_out:
+                normal_out = n_out
 
-    # ── Transmission ─────────────────────────────────────────────────────────
-    if _channel_used(expanded, 'use_transmission'):
-        t_out = _build_channel(node_tree, expanded, 'transmission', uv_map, start_x, ch_y['transmission'], x_step)
-        if t_out:
-            passthrough = node_tree.nodes.new("ShaderNodeMath")
-            passthrough.operation = 'ADD'
-            passthrough.name = f"{TLM_PREFIX}trans_pass"
-            passthrough.inputs[1].default_value = 0.0
-            passthrough.use_clamp = True
-            passthrough.location = (end_x, ch_y['transmission'])
-            node_tree.links.new(t_out, passthrough.inputs[0])
-            _link_to_bsdf(node_tree, passthrough.outputs["Value"], bsdf,
-                          ["Transmission Weight", "Transmission", "transmission"], "transmission")
+        # ── Emission ──────────────────────────────────────────────────────────────
+        if _channel_used(expanded, 'use_emission'):
+            e_out = _build_channel(node_tree, expanded, 'emission', uv_map, start_x, ch_y['emission'], x_step)
+            if e_out:
+                _link_to_bsdf(node_tree, e_out, bsdf,
+                              ["Emission Color", "Emission", "emission"], "emission")
+                # Use max emission strength weighted by opacity
+                strengths = [(l.emission_strength * l.opacity) for l in expanded if l.use_emission]
+                if strengths:
+                    val = node_tree.nodes.new("ShaderNodeValue")
+                    val.name = f"{TLM_PREFIX}emission_strength"
+                    val.outputs[0].default_value = max(strengths)
+                    val.location = (end_x, ch_y['emission'])
+                    _tag(val, "__global__", "emission_strength")
+                    _link_to_bsdf(node_tree, val.outputs[0], bsdf,
+                                  ["Emission Strength", "emission_strength"], "emission_strength")
 
-    # ── Bump ──────────────────────────────────────────────────────────────────
-    bump_out = None
-    if _channel_used(expanded, 'use_bump'):
-        bump_out_socket = _build_bump_channel(node_tree, expanded, uv_map, start_x, ch_y['bump'], x_step)
-        if bump_out_socket:
-            bump_out = bump_out_socket
-            # If we have both Normal Map and Bump, chain them: Normal → Bump.Normal
-            if normal_out:
-                bump_node = bump_out_socket.node  # the Bump node
-                node_tree.links.new(normal_out, bump_node.inputs["Normal"])
+        # ── Transmission ─────────────────────────────────────────────────────────
+        if _channel_used(expanded, 'use_transmission'):
+            t_out = _build_channel(node_tree, expanded, 'transmission', uv_map, start_x, ch_y['transmission'], x_step)
+            if t_out:
+                passthrough = node_tree.nodes.new("ShaderNodeMath")
+                passthrough.operation = 'ADD'
+                passthrough.name = f"{TLM_PREFIX}trans_pass"
+                passthrough.inputs[1].default_value = 0.0
+                passthrough.use_clamp = True
+                passthrough.location = (end_x, ch_y['transmission'])
+                node_tree.links.new(t_out, passthrough.inputs[0])
+                _link_to_bsdf(node_tree, passthrough.outputs["Value"], bsdf,
+                              ["Transmission Weight", "Transmission", "transmission"], "transmission")
 
-    # ── Connect final normal to BSDF ─────────────────────────────────────────
-    # Bump takes priority (it already incorporates the Normal Map via its Normal input)
-    final_normal = bump_out or normal_out
-    if final_normal:
-        _link_to_bsdf(node_tree, final_normal, bsdf, ["Normal", "normal"], "normal")
+        # ── Bump ──────────────────────────────────────────────────────────────────
+        bump_out = None
+        if _channel_used(expanded, 'use_bump'):
+            bump_out_socket = _build_bump_channel(node_tree, expanded, uv_map, start_x, ch_y['bump'], x_step)
+            if bump_out_socket:
+                bump_out = bump_out_socket
+                # If we have both Normal Map and Bump, chain them: Normal → Bump.Normal
+                if normal_out:
+                    bump_node = bump_out_socket.node  # the Bump node
+                    node_tree.links.new(normal_out, bump_node.inputs["Normal"])
 
-    # Position BSDF and Material Output to the right of all channels
-    bsdf.location = (end_x + 300, 0)
-    mat_out = next((n for n in node_tree.nodes if n.type == 'OUTPUT_MATERIAL'), None)
-    if mat_out:
-        mat_out.location = (end_x + 600, 0)
+        # ── Connect final normal to BSDF ─────────────────────────────────────────
+        # Bump takes priority (it already incorporates the Normal Map via its Normal input)
+        final_normal = bump_out or normal_out
+        if final_normal:
+            _link_to_bsdf(node_tree, final_normal, bsdf, ["Normal", "normal"], "normal")
 
-    # Restore user-customized node positions if they existed before rebuild
+        # Position BSDF and Material Output to the right of all channels
+        bsdf.location = (end_x + 300, 0)
+        mat_out = next((n for n in node_tree.nodes if n.type == 'OUTPUT_MATERIAL'), None)
+        if mat_out:
+            mat_out.location = (end_x + 600, 0)
+
+    except Exception:
+        import traceback
+        print("[TLM] ERROR during node tree rebuild:")
+        traceback.print_exc()
+
+    # Always restore custom links and positions, even if build partially failed
     _restore_custom_links(node_tree, _saved_custom_links)
     _restore_node_positions(node_tree, _saved_positions)
 
@@ -1569,7 +1981,7 @@ def _build_base_color(node_tree, root_layers, group_children, uv_map, start_x, y
             layer_alpha_out = tex.outputs["Alpha"]
 
         elif layer.layer_type == "FILL":
-            fn = _new_fill(node_tree, layer.fill_color, x, y)
+            fn = _new_fill(node_tree, layer.fill_color, x, y, layer_name=layer.name, channel="base_color")
             layer_color_out = fn.outputs["Color"]
             layer_alpha_out = None
 
@@ -1589,10 +2001,10 @@ def _build_base_color(node_tree, root_layers, group_children, uv_map, start_x, y
             continue
 
         mix_x = x + 280
-        mix = _new_mix(node_tree, layer.blend_mode, layer.opacity, mix_x, y - 40)
+        mix = _new_mix(node_tree, layer.blend_mode, layer.opacity, mix_x, y - 40, layer_name=layer.name, channel="base_color")
         node_tree.links.new(current, _a_socket(mix))
         node_tree.links.new(layer_color_out, _b_socket(mix))
-        _set_factor(node_tree, mix, layer, layer_alpha_out, prev_alpha, mix_x, y, i, uv_map)
+        _set_factor(node_tree, mix, layer, layer_alpha_out, prev_alpha, mix_x, y, i, uv_map, channel="base_color")
         current = _result_socket(mix)
         prev_alpha = layer_alpha_out
 
@@ -1613,10 +2025,12 @@ def _build_proc_fac_node(node_tree, layer, name_suffix, x, y, uv_map="UVMap"):
     tc = node_tree.nodes.new("ShaderNodeTexCoord")
     tc.name = f"{TLM_PREFIX}pfac_tc_{name_suffix}"
     tc.location = (x - 500, y)
+    _tag(tc, layer.name, "proc_tc")
 
     mapping = node_tree.nodes.new("ShaderNodeMapping")
     mapping.name = f"{TLM_PREFIX}pfac_map_{name_suffix}"
     mapping.location = (x - 300, y)
+    _tag(mapping, layer.name, "proc_map")
     # NOTE: Scale is applied at the texture node level, not the Mapping node,
     # to match _build_procedural_node and avoid doubling the scale.
     mapping.inputs["Location"].default_value = (
@@ -1713,6 +2127,7 @@ def _build_proc_fac_node(node_tree, layer, name_suffix, x, y, uv_map="UVMap"):
         wave.inputs["Scale"].default_value = layer.proc_scale
         wave.inputs["Detail"].default_value = layer.proc_detail
         wave.inputs["Distortion"].default_value = layer.proc_distortion
+        _tag(wave, layer.name, "proc_tex")
         try:
             wave.wave_profile = 'SIN'
         except Exception:
@@ -1726,6 +2141,7 @@ def _build_proc_fac_node(node_tree, layer, name_suffix, x, y, uv_map="UVMap"):
         noise.inputs["Detail"].default_value = layer.proc_detail
         noise.inputs["Roughness"].default_value = layer.proc_roughness_proc
         noise.inputs["Distortion"].default_value = layer.proc_distortion * 0.5
+        _tag(noise, layer.name, "marble_noise")
         node_tree.links.new(vec_out, noise.inputs["Vector"])
 
         mult = node_tree.nodes.new("ShaderNodeMath")
@@ -1734,6 +2150,7 @@ def _build_proc_fac_node(node_tree, layer, name_suffix, x, y, uv_map="UVMap"):
         mult.location = (x - 200, y - 150)
         node_tree.links.new(noise.outputs["Fac"], mult.inputs[0])
         mult.inputs[1].default_value = layer.proc_marble_distortion
+        _tag(mult, layer.name, "marble_mult")
 
         phase_input = wave.inputs.get("Phase Offset")
         if phase_input:
@@ -1763,6 +2180,7 @@ def _build_proc_fac_node(node_tree, layer, name_suffix, x, y, uv_map="UVMap"):
 
     tex.name = f"{TLM_PREFIX}pfac_tex_{name_suffix}"
     tex.location = (x - 100, y)
+    _tag(tex, layer.name, "proc_tex")
     return fac_out
 
 
@@ -1840,6 +2258,7 @@ def _build_bump_channel(node_tree, layers, uv_map, start_x, y_base, x_step):
     bump_node = node_tree.nodes.new("ShaderNodeBump")
     bump_node.name = f"{TLM_PREFIX}bump_final"
     bump_node.label = "TLM Bump"
+    _tag(bump_node, "__global__", "bump_final")
     last_x = positions[-1][0] if positions else start_x
     bump_node.location = (last_x + 300 + len(bump_inputs) * 200, y_base)
     bump_node.inputs["Strength"].default_value = strength

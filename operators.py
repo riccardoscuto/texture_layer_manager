@@ -810,6 +810,16 @@ def _layer_to_dict(layer):
         d["proc_wave_detail_scale"]= round(layer.proc_wave_detail_scale, 4)
         d["proc_gradient_type"]    = layer.proc_gradient_type
         d["proc_checker_scale"]    = round(layer.proc_checker_scale, 4)
+        d["proc_contrast"]         = round(layer.proc_contrast, 4)
+        d["proc_vector_distortion"]= round(layer.proc_vector_distortion, 4)
+        d["proc_coord_type"]       = layer.proc_coord_type
+        d["proc_marble_distortion"]= round(layer.proc_marble_distortion, 4)
+        d["proc_marble_wave_type"] = layer.proc_marble_wave_type
+        d["proc_emission_threshold"] = round(getattr(layer, 'proc_emission_threshold', 0.0), 4)
+        d["use_proc_color3"]       = getattr(layer, 'use_proc_color3', False)
+        if d["use_proc_color3"]:
+            d["proc_color3"]          = list(layer.proc_color3)
+            d["proc_color3_position"] = round(layer.proc_color3_position, 4)
 
     elif layer.layer_type == "ADJUSTMENT":
         d["adj_type"]        = layer.adj_type
@@ -823,6 +833,39 @@ def _layer_to_dict(layer):
         d["adj_levels_gamma"] = round(layer.adj_levels_gamma, 4)
         d["adj_out_min"]     = round(layer.adj_out_min, 4)
         d["adj_out_max"]     = round(layer.adj_out_max, 4)
+        d["adj_curve_contrast"]    = round(layer.adj_curve_contrast, 4)
+        d["adj_curve_brightness"]  = round(layer.adj_curve_brightness, 4)
+        d["adj_curve_black_point"] = round(layer.adj_curve_black_point, 4)
+        d["adj_curve_white_point"] = round(layer.adj_curve_white_point, 4)
+        d["adj_lift"]  = list(layer.adj_lift)
+        d["adj_gamma"] = list(layer.adj_gamma)
+        d["adj_gain"]  = list(layer.adj_gain)
+
+    # Common properties for non-GROUP, non-ADJUSTMENT layers
+    if layer.layer_type not in ("GROUP", "ADJUSTMENT"):
+        d["use_fresnel_mask"]  = getattr(layer, 'use_fresnel_mask', False)
+        d["fresnel_ior"]       = round(getattr(layer, 'fresnel_ior', 1.45), 4)
+        d["fresnel_strength"]  = round(getattr(layer, 'fresnel_strength', 1.0), 4)
+        d["use_mask"]          = layer.use_mask
+        d["mask_image_name"]   = layer.mask_image_name
+        d["use_triplanar"]     = getattr(layer, 'use_triplanar', False)
+        d["triplanar_scale"]   = round(getattr(layer, 'triplanar_scale', 1.0), 4)
+        d["triplanar_sharpness"] = round(getattr(layer, 'triplanar_sharpness', 1.0), 4)
+        # PBR channels
+        d["use_roughness"]     = layer.use_roughness
+        d["roughness_fill"]    = round(layer.roughness_fill, 4)
+        d["use_metallic"]      = layer.use_metallic
+        d["metallic_fill"]     = round(layer.metallic_fill, 4)
+        d["use_bump"]          = layer.use_bump
+        d["bump_strength"]     = round(layer.bump_strength, 4)
+        d["bump_distance"]     = round(layer.bump_distance, 4)
+        d["use_normal"]        = getattr(layer, 'use_normal', False)
+        d["use_emission"]      = getattr(layer, 'use_emission', False)
+        if layer.use_emission:
+            d["emission_color"]    = list(layer.emission_color)
+            d["emission_strength"] = round(layer.emission_strength, 4)
+        d["use_transmission"]  = getattr(layer, 'use_transmission', False)
+        d["transmission_fill"] = round(getattr(layer, 'transmission_fill', 0.0), 4)
 
     return d
 
@@ -877,6 +920,16 @@ def _dict_to_layer(d, tlm):
         layer.proc_wave_detail_scale= d.get("proc_wave_detail_scale", 1.0)
         layer.proc_gradient_type    = d.get("proc_gradient_type", "LINEAR")
         layer.proc_checker_scale    = d.get("proc_checker_scale", 5.0)
+        layer.proc_contrast         = d.get("proc_contrast", 0.5)
+        layer.proc_vector_distortion= d.get("proc_vector_distortion", 0.0)
+        layer.proc_coord_type       = d.get("proc_coord_type", "GENERATED")
+        layer.proc_marble_distortion= d.get("proc_marble_distortion", 5.0)
+        layer.proc_marble_wave_type = d.get("proc_marble_wave_type", "BANDS")
+        layer.proc_emission_threshold = d.get("proc_emission_threshold", 0.0)
+        layer.use_proc_color3       = d.get("use_proc_color3", False)
+        if layer.use_proc_color3:
+            layer.proc_color3          = d.get("proc_color3", [0.5, 0.5, 0.5, 1])
+            layer.proc_color3_position = d.get("proc_color3_position", 0.5)
 
     elif layer.layer_type == "ADJUSTMENT":
         layer.adj_type       = d.get("adj_type", "HUE_SAT")
@@ -891,6 +944,39 @@ def _dict_to_layer(d, tlm):
         layer.adj_levels_gamma = d.get("adj_levels_gamma", d.get("adj_gamma", 1.0))
         layer.adj_out_min    = d.get("adj_out_min", 0.0)
         layer.adj_out_max    = d.get("adj_out_max", 1.0)
+        layer.adj_curve_contrast    = d.get("adj_curve_contrast", 0.0)
+        layer.adj_curve_brightness  = d.get("adj_curve_brightness", 0.0)
+        layer.adj_curve_black_point = d.get("adj_curve_black_point", 0.0)
+        layer.adj_curve_white_point = d.get("adj_curve_white_point", 1.0)
+        layer.adj_lift  = d.get("adj_lift", [1, 1, 1])
+        layer.adj_gamma = d.get("adj_gamma", [1, 1, 1])
+        layer.adj_gain  = d.get("adj_gain", [1, 1, 1])
+
+    # Common properties for non-GROUP, non-ADJUSTMENT layers
+    if layer.layer_type not in ("GROUP", "ADJUSTMENT"):
+        layer.use_fresnel_mask  = d.get("use_fresnel_mask", False)
+        layer.fresnel_ior       = d.get("fresnel_ior", 1.45)
+        layer.fresnel_strength  = d.get("fresnel_strength", 1.0)
+        layer.use_mask          = d.get("use_mask", False)
+        layer.mask_image_name   = d.get("mask_image_name", "")
+        layer.use_triplanar     = d.get("use_triplanar", False)
+        layer.triplanar_scale   = d.get("triplanar_scale", 1.0)
+        layer.triplanar_sharpness = d.get("triplanar_sharpness", 1.0)
+        # PBR channels
+        layer.use_roughness     = d.get("use_roughness", False)
+        layer.roughness_fill    = d.get("roughness_fill", 0.5)
+        layer.use_metallic      = d.get("use_metallic", False)
+        layer.metallic_fill     = d.get("metallic_fill", 0.0)
+        layer.use_bump          = d.get("use_bump", False)
+        layer.bump_strength     = d.get("bump_strength", 0.5)
+        layer.bump_distance     = d.get("bump_distance", 0.05)
+        layer.use_normal        = d.get("use_normal", False)
+        layer.use_emission      = d.get("use_emission", False)
+        if layer.use_emission:
+            layer.emission_color    = d.get("emission_color", [1,1,1,1])
+            layer.emission_strength = d.get("emission_strength", 1.0)
+        layer.use_transmission  = d.get("use_transmission", False)
+        layer.transmission_fill = d.get("transmission_fill", 0.0)
 
     return layer
 
@@ -1957,6 +2043,14 @@ class TLM_OT_ApplyPreset(Operator):
                 layer.proc_randomness       = ld.get("proc_randomness", 1.0)
                 layer.proc_marble_distortion = ld.get("proc_marble_distortion", 5.0)
                 layer.proc_marble_wave_type  = ld.get("proc_marble_wave_type", "BANDS")
+                layer.proc_contrast         = ld.get("proc_contrast", 0.5)
+                layer.proc_vector_distortion= ld.get("proc_vector_distortion", 0.0)
+                layer.proc_coord_type       = ld.get("proc_coord_type", "GENERATED")
+                layer.proc_emission_threshold = ld.get("proc_emission_threshold", 0.0)
+                layer.use_proc_color3       = ld.get("use_proc_color3", False)
+                if layer.use_proc_color3:
+                    layer.proc_color3          = ld.get("proc_color3", [0.5, 0.5, 0.5, 1])
+                    layer.proc_color3_position = ld.get("proc_color3_position", 0.5)
             elif layer.layer_type == "ADJUSTMENT":
                 layer.adj_type             = ld.get("adj_type", "HUE_SAT")
                 layer.adj_hue              = ld.get("adj_hue", 0.5)
@@ -1973,22 +2067,35 @@ class TLM_OT_ApplyPreset(Operator):
                 layer.adj_curve_brightness = ld.get("adj_curve_brightness", 0.0)
                 layer.adj_curve_black_point = ld.get("adj_curve_black_point", 0.0)
                 layer.adj_curve_white_point = ld.get("adj_curve_white_point", 1.0)
+                layer.adj_lift  = ld.get("adj_lift", [1, 1, 1])
+                layer.adj_gamma = ld.get("adj_gamma", [1, 1, 1])
+                layer.adj_gain  = ld.get("adj_gain", [1, 1, 1])
 
-            # PBR channels
-            layer.use_roughness   = ld.get("use_roughness", False)
-            layer.roughness_fill  = ld.get("roughness_fill", 0.5)
-            layer.use_metallic    = ld.get("use_metallic", False)
-            layer.metallic_fill   = ld.get("metallic_fill", 0.0)
-            layer.use_bump        = ld.get("use_bump", False)
-            layer.bump_strength   = ld.get("bump_strength", 0.5)
-            layer.bump_distance   = ld.get("bump_distance", 0.05)
-            if hasattr(layer, 'use_normal'):
-                layer.use_normal  = ld.get("use_normal", False)
-            if hasattr(layer, 'use_emission'):
-                layer.use_emission = ld.get("use_emission", False)
+            # Common properties for non-GROUP, non-ADJUSTMENT layers
+            if layer.layer_type not in ("GROUP", "ADJUSTMENT"):
+                layer.use_fresnel_mask  = ld.get("use_fresnel_mask", False)
+                layer.fresnel_ior       = ld.get("fresnel_ior", 1.45)
+                layer.fresnel_strength  = ld.get("fresnel_strength", 1.0)
+                layer.use_mask          = ld.get("use_mask", False)
+                layer.mask_image_name   = ld.get("mask_image_name", "")
+                layer.use_triplanar     = ld.get("use_triplanar", False)
+                layer.triplanar_scale   = ld.get("triplanar_scale", 1.0)
+                layer.triplanar_sharpness = ld.get("triplanar_sharpness", 1.0)
+                # PBR channels
+                layer.use_roughness   = ld.get("use_roughness", False)
+                layer.roughness_fill  = ld.get("roughness_fill", 0.5)
+                layer.use_metallic    = ld.get("use_metallic", False)
+                layer.metallic_fill   = ld.get("metallic_fill", 0.0)
+                layer.use_bump        = ld.get("use_bump", False)
+                layer.bump_strength   = ld.get("bump_strength", 0.5)
+                layer.bump_distance   = ld.get("bump_distance", 0.05)
+                layer.use_normal      = ld.get("use_normal", False)
+                layer.use_emission    = ld.get("use_emission", False)
                 if layer.use_emission:
                     layer.emission_color    = ld.get("emission_color", [1,1,1,1])
                     layer.emission_strength = ld.get("emission_strength", 1.0)
+                layer.use_transmission  = ld.get("use_transmission", False)
+                layer.transmission_fill = ld.get("transmission_fill", 0.0)
 
         tlm.active_layer_index = max(0, len(tlm.layers) - 1)
         if tlm.auto_composite:
@@ -2053,7 +2160,15 @@ class TLM_OT_SavePreset(Operator):
                     "proc_randomness": layer.proc_randomness,
                     "proc_marble_distortion": layer.proc_marble_distortion,
                     "proc_marble_wave_type": layer.proc_marble_wave_type,
+                    "proc_contrast": layer.proc_contrast,
+                    "proc_vector_distortion": layer.proc_vector_distortion,
+                    "proc_coord_type": layer.proc_coord_type,
+                    "proc_emission_threshold": getattr(layer, 'proc_emission_threshold', 0.0),
+                    "use_proc_color3": getattr(layer, 'use_proc_color3', False),
                 })
+                if getattr(layer, 'use_proc_color3', False):
+                    d["proc_color3"] = list(layer.proc_color3)
+                    d["proc_color3_position"] = layer.proc_color3_position
             elif layer.layer_type == "ADJUSTMENT":
                 d.update({
                     "adj_type": layer.adj_type,
@@ -2071,20 +2186,35 @@ class TLM_OT_SavePreset(Operator):
                     "adj_curve_brightness": layer.adj_curve_brightness,
                     "adj_curve_black_point": layer.adj_curve_black_point,
                     "adj_curve_white_point": layer.adj_curve_white_point,
+                    "adj_lift": list(layer.adj_lift),
+                    "adj_gamma": list(layer.adj_gamma),
+                    "adj_gain": list(layer.adj_gain),
                 })
-            # PBR channels
-            d["use_roughness"]  = layer.use_roughness
-            d["roughness_fill"] = layer.roughness_fill
-            d["use_metallic"]   = layer.use_metallic
-            d["metallic_fill"]  = layer.metallic_fill
-            d["use_bump"]       = layer.use_bump
-            d["bump_strength"]  = layer.bump_strength
-            d["bump_distance"]  = layer.bump_distance
-            d["use_normal"]     = getattr(layer, 'use_normal', False)
-            d["use_emission"]   = getattr(layer, 'use_emission', False)
-            if getattr(layer, 'use_emission', False):
-                d["emission_color"]    = list(layer.emission_color)
-                d["emission_strength"] = layer.emission_strength
+            # Common properties for non-GROUP, non-ADJUSTMENT layers
+            if layer.layer_type not in ("GROUP", "ADJUSTMENT"):
+                d["use_fresnel_mask"]  = getattr(layer, 'use_fresnel_mask', False)
+                d["fresnel_ior"]       = getattr(layer, 'fresnel_ior', 1.45)
+                d["fresnel_strength"]  = getattr(layer, 'fresnel_strength', 1.0)
+                d["use_mask"]          = layer.use_mask
+                d["mask_image_name"]   = layer.mask_image_name
+                d["use_triplanar"]     = getattr(layer, 'use_triplanar', False)
+                d["triplanar_scale"]   = getattr(layer, 'triplanar_scale', 1.0)
+                d["triplanar_sharpness"] = getattr(layer, 'triplanar_sharpness', 1.0)
+                # PBR channels
+                d["use_roughness"]  = layer.use_roughness
+                d["roughness_fill"] = layer.roughness_fill
+                d["use_metallic"]   = layer.use_metallic
+                d["metallic_fill"]  = layer.metallic_fill
+                d["use_bump"]       = layer.use_bump
+                d["bump_strength"]  = layer.bump_strength
+                d["bump_distance"]  = layer.bump_distance
+                d["use_normal"]     = getattr(layer, 'use_normal', False)
+                d["use_emission"]   = getattr(layer, 'use_emission', False)
+                if getattr(layer, 'use_emission', False):
+                    d["emission_color"]    = list(layer.emission_color)
+                    d["emission_strength"] = layer.emission_strength
+                d["use_transmission"]  = getattr(layer, 'use_transmission', False)
+                d["transmission_fill"] = getattr(layer, 'transmission_fill', 0.0)
             layers_data.append(d)
 
         data = {"preset_name": self.preset_name, "layers": layers_data}
