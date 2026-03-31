@@ -1741,11 +1741,13 @@ def rebuild_node_tree(material):
         material.use_nodes = True
         node_tree = material.node_tree
     try:
-        # This will raise AttributeError in restricted contexts
-        _probe = node_tree.nodes.new("ShaderNodeValue")
-        node_tree.nodes.remove(_probe)
+        # Probe: writing to an ID property on the node_tree tests whether
+        # we're in a restricted context. This is the same restriction that
+        # blocks node.name writes, but doesn't create orphan nodes.
+        node_tree["_tlm_probe"] = 1
+        del node_tree["_tlm_probe"]
     except (AttributeError, RuntimeError):
-        # Cannot modify nodes right now — schedule a deferred rebuild
+        # Cannot modify ID data right now — schedule a deferred rebuild
         from . import properties
         properties._pending_materials.add(material.name)
         if len(properties._pending_materials) == 1:
