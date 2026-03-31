@@ -1733,22 +1733,19 @@ def _link_to_bsdf(node_tree, output_socket, bsdf, input_names, channel_label):
           f"tried {input_names}, BSDF inputs: {[i.name for i in bsdf.inputs]}")
 
 
-def _is_restricted_context():
-    """Check if we're in a context where node tree modification is forbidden."""
-    try:
-        # Try a harmless write to detect restricted context.
-        # In depsgraph handlers, any ID write raises AttributeError.
-        import bpy as _b
-        _b.context.window_manager["_tlm_ctx_test"] = 1
-        del _b.context.window_manager["_tlm_ctx_test"]
-        return False
-    except (AttributeError, RuntimeError, TypeError):
-        return True
-
-
 def rebuild_node_tree(material):
-    # If we're inside a restricted context (depsgraph handler), defer to a timer
-    if _is_restricted_context():
+    # Probe: try a trivial node-tree write to detect restricted context
+    # (e.g. inside depsgraph_update_pre handler). If it fails, defer.
+    node_tree = material.node_tree
+    if node_tree is None:
+        material.use_nodes = True
+        node_tree = material.node_tree
+    try:
+        # This will raise AttributeError in restricted contexts
+        _probe = node_tree.nodes.new("ShaderNodeValue")
+        node_tree.nodes.remove(_probe)
+    except (AttributeError, RuntimeError):
+        # Cannot modify nodes right now — schedule a deferred rebuild
         from . import properties
         properties._pending_materials.add(material.name)
         if len(properties._pending_materials) == 1:
@@ -1765,11 +1762,6 @@ def rebuild_node_tree(material):
     _node_counter = 0
 
     tlm = material.tlm
-    node_tree = material.node_tree
-
-    if node_tree is None:
-        material.use_nodes = True
-        node_tree = material.node_tree
 
     # Protect all referenced images BEFORE clearing nodes — prevents Blender GC
     # from collecting images that become temporarily unreferenced during rebuild
