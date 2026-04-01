@@ -1950,6 +1950,21 @@ def rebuild_node_tree(material):
         if mat_out:
             mat_out.location = (end_x + 600, 0)
 
+    except AttributeError as e:
+        if "Writing to ID classes in this context is not allowed" in str(e):
+            # Blender restricted context (e.g. depsgraph handler from another addon).
+            # Schedule a deferred rebuild via timer — it will run in a safe context.
+            print(f"[TLM] Restricted context detected, deferring rebuild")
+            from . import properties as _props
+            if not _props._pending_materials:
+                _props._pending_materials.add(material.name)
+                bpy.app.timers.register(_props._do_deferred_rebuild, first_interval=0.05)
+            else:
+                _props._pending_materials.add(material.name)
+            return
+        import traceback
+        print("[TLM] ERROR during node tree rebuild:")
+        traceback.print_exc()
     except Exception:
         import traceback
         print("[TLM] ERROR during node tree rebuild:")
