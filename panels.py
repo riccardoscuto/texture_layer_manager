@@ -543,6 +543,7 @@ def draw_tlm_settings(layout, context):
     io_row = layout.row(align=True)
     io_row.operator("tlm.export_json", text="Export .tlm", icon='EXPORT')
     io_row.operator("tlm.import_json", text="Import .tlm", icon='IMPORT')
+    layout.operator("tlm.import_pbr_set", text="Import PBR Set...", icon='TEXTURE')
 
 
 class TLM_PT_MainPanel(Panel):
