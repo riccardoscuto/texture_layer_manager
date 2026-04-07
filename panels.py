@@ -78,6 +78,10 @@ class TLM_UL_LayerList(UIList):
         op = row.operator("tlm.toggle_layer_visibility", text="", icon=vis_icon, emboss=False)
         op.layer_index = index
 
+        solo_icon = 'OUTLINER_OB_LIGHT' if (data.solo_layer_index == index) else 'LIGHT'
+        op = row.operator("tlm.solo_layer", text="", icon=solo_icon, emboss=False)
+        op.layer_index = index
+
         if layer.layer_type != "GROUP":
             lock_icon = 'LOCKED' if layer.locked else 'UNLOCKED'
             row.prop(layer, "locked", text="", icon=lock_icon, emboss=False)
@@ -181,6 +185,12 @@ def _draw_active_layer(layout, active, tlm, mat):
     hrow = box.row(align=True)
     hrow.label(text=ltype_label, icon=ltype_icon)
     hrow.prop(active, "name", text="", emboss=True)
+    solo_active = (tlm.solo_layer_index == tlm.active_layer_index)
+    hrow.operator(
+        "tlm.solo_layer", text="",
+        icon='OUTLINER_OB_LIGHT' if solo_active else 'LIGHT',
+        emboss=False,
+    ).layer_index = tlm.active_layer_index
 
     col = box.column(align=True)
 

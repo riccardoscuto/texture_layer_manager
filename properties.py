@@ -767,6 +767,13 @@ class TLM_MaterialProperties(PropertyGroup):
         default="UVMap",
     )
 
+    # Solo layer — isolate one layer without modifying visibility states
+    solo_layer_index: IntProperty(
+        name="Solo Layer",
+        description="Index of the solo'd layer (-1 = off)",
+        default=-1,
+    )
+
     @property
     def active_layer(self):
         if 0 <= self.active_layer_index < len(self.layers):

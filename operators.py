@@ -576,6 +576,40 @@ class TLM_OT_ToggleLayerVisibility(Operator):
         return {'FINISHED'}
 
 
+class TLM_OT_SoloLayer(Operator):
+    """Isolate this layer — hide all others without changing their visibility state."""
+    bl_idname = "tlm.solo_layer"
+    bl_label = "Solo Layer"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    layer_index: IntProperty(default=-1)
+
+    @classmethod
+    def poll(cls, context):
+        return _get_material(context) is not None
+
+    def execute(self, context):
+        mat = _get_material(context)
+        tlm = mat.tlm
+
+        if self.layer_index < 0 or self.layer_index >= len(tlm.layers):
+            return {'CANCELLED'}
+
+        # Toggle: if already solo'd on this layer, un-solo
+        if tlm.solo_layer_index == self.layer_index:
+            tlm.solo_layer_index = -1
+            self.report({'INFO'}, "Solo off")
+        else:
+            tlm.solo_layer_index = self.layer_index
+            layer_name = tlm.layers[self.layer_index].name
+            self.report({'INFO'}, f"Solo: '{layer_name}'")
+
+        if tlm.auto_composite:
+            compositing.rebuild_node_tree(mat)
+
+        return {'FINISHED'}
+
+
 # ─── Rebuild Composite ────────────────────────────────────────────────────────
 
 class TLM_OT_RebuildComposite(Operator):
@@ -2587,6 +2621,7 @@ classes = [
     TLM_OT_DuplicateLayer,
     TLM_OT_SetActivePaintLayer,
     TLM_OT_ToggleLayerVisibility,
+    TLM_OT_SoloLayer,
     TLM_OT_RebuildComposite,
     TLM_OT_FlattenLayers,
     TLM_OT_AddLayerMask,

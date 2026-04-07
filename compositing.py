@@ -1784,6 +1784,16 @@ def rebuild_node_tree(material):
     # This preserves group alpha for Clipping Mask support
     root_layers = [l for l in all_layers if l.visible and not l.group_name]
 
+    # Solo override — show only the solo'd layer, ignoring groups
+    solo_idx = tlm.solo_layer_index
+    if 0 <= solo_idx < len(all_layers):
+        solo_layer = all_layers[solo_idx]
+        if solo_layer.visible:
+            root_layers = [solo_layer]
+            group_children = {}
+        else:
+            root_layers = []
+
     if not root_layers:
         # Nothing to build — clear TLM nodes (no layers visible) but don't
         # leave a half-built tree.
