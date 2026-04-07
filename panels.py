@@ -15,8 +15,15 @@ UI v2 changes:
 """
 
 import bpy
+import os as _os
+import time as _time
 from bpy.types import Panel, UIList
 from . import previews
+
+# Cache user presets list to avoid os.listdir on every draw call
+_preset_cache = []
+_preset_cache_time = 0.0
+_PRESET_CACHE_TTL = 2.0  # seconds
 
 _PBR_BADGE = {
     'use_roughness':    'RNDCURVE',
@@ -506,24 +513,30 @@ def draw_tlm_settings(layout, context):
     layout.separator(factor=0.3)
     layout.operator("tlm.save_preset", text="Save Current as Preset…", icon='FILE_TICK')
 
-    # ── User-saved presets ───────────────────────────────────────────────
-    import os as _os
+    # ── User-saved presets (cached to avoid os.listdir every draw) ──────
+    global _preset_cache, _preset_cache_time
     preset_dir = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "presets")
-    if _os.path.isdir(preset_dir):
-        user_presets = sorted(
-            f[:-4] for f in _os.listdir(preset_dir) if f.endswith(".tlm")
-        )
-        if user_presets:
-            layout.separator(factor=0.3)
-            layout.label(text="Saved Presets:", icon='FILE_FOLDER')
-            ugrid = layout.column(align=True)
-            ugrid.scale_y = 0.95
-            for pname in user_presets:
-                urow = ugrid.row(align=True)
-                op = urow.operator("tlm.apply_preset", text=pname, icon='PRESET')
-                op.preset_name = pname
-                dop = urow.operator("tlm.delete_preset", text="", icon='TRASH')
-                dop.preset_name = pname
+    now = _time.monotonic()
+    if now - _preset_cache_time > _PRESET_CACHE_TTL:
+        _preset_cache_time = now
+        if _os.path.isdir(preset_dir):
+            _preset_cache = sorted(
+                f[:-4] for f in _os.listdir(preset_dir) if f.endswith(".tlm")
+            )
+        else:
+            _preset_cache = []
+    user_presets = _preset_cache
+    if user_presets:
+        layout.separator(factor=0.3)
+        layout.label(text="Saved Presets:", icon='FILE_FOLDER')
+        ugrid = layout.column(align=True)
+        ugrid.scale_y = 0.95
+        for pname in user_presets:
+            urow = ugrid.row(align=True)
+            op = urow.operator("tlm.apply_preset", text=pname, icon='PRESET')
+            op.preset_name = pname
+            dop = urow.operator("tlm.delete_preset", text="", icon='TRASH')
+            dop.preset_name = pname
 
     layout.separator(factor=0.8)
     layout.label(text="Layer Stack I/O", icon='FILE_FOLDER')

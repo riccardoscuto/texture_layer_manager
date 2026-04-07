@@ -46,8 +46,7 @@ CHANNELS = [
 ]
 
 
-def _use_new_mix():
-    return bpy.app.version >= (4, 0, 0)
+_USE_NEW_MIX = bpy.app.version >= (4, 0, 0)
 
 
 # ── Node helpers ──────────────────────────────────────────────────────────────
@@ -378,7 +377,7 @@ def _hot_adj_cb(node_tree, layer, prop_name):
     gain = _find_tagged(node_tree, layer.name, "adj_cb_gain")
     if not (lift and gamma and gain):
         return False
-    if _use_new_mix():
+    if _USE_NEW_MIX:
         _enabled_socket(lift.inputs, "B").default_value = (*layer.adj_lift, 1.0)
         _enabled_socket(gain.inputs, "B").default_value = (*layer.adj_gain, 1.0)
     else:
@@ -639,10 +638,10 @@ def _new_triplanar_tex(node_tree, image, x, y, colorspace="sRGB", scale=1.0, sha
 
     # Blend: result = col_x*nw_x + col_y*nw_y + col_z*nw_z
     def weighted_color(col_out, w_out, label, offset_x):
-        mix = node_tree.nodes.new("ShaderNodeMixRGB") if not _use_new_mix() else node_tree.nodes.new("ShaderNodeMix")
+        mix = node_tree.nodes.new("ShaderNodeMixRGB") if not _USE_NEW_MIX else node_tree.nodes.new("ShaderNodeMix")
         mix.name = f"{TLM_PREFIX}tri_wmix_{label}_{_next_id()}"
         mix.location = (x + 700 + offset_x, y - 200)
-        if _use_new_mix():
+        if _USE_NEW_MIX:
             mix.data_type = 'RGBA'
             mix.blend_type = 'MIX'
             node_tree.links.new(w_out, mix.inputs["Factor"])
@@ -660,10 +659,10 @@ def _new_triplanar_tex(node_tree, image, x, y, colorspace="sRGB", scale=1.0, sha
     wc_z = weighted_color(col_z, nw_z, "Z", 40)
 
     # Add the three weighted colors together
-    add1 = node_tree.nodes.new("ShaderNodeMixRGB") if not _use_new_mix() else node_tree.nodes.new("ShaderNodeMix")
+    add1 = node_tree.nodes.new("ShaderNodeMixRGB") if not _USE_NEW_MIX else node_tree.nodes.new("ShaderNodeMix")
     add1.name = f"{TLM_PREFIX}tri_add1_{_next_id()}"
     add1.location = (x + 880, y - 200)
-    if _use_new_mix():
+    if _USE_NEW_MIX:
         add1.data_type = 'RGBA'
         add1.blend_type = 'ADD'
         add1.inputs["Factor"].default_value = 1.0
@@ -677,10 +676,10 @@ def _new_triplanar_tex(node_tree, image, x, y, colorspace="sRGB", scale=1.0, sha
         node_tree.links.new(wc_y, add1.inputs["Color2"])
         add1_out = add1.outputs["Color"]
 
-    add2 = node_tree.nodes.new("ShaderNodeMixRGB") if not _use_new_mix() else node_tree.nodes.new("ShaderNodeMix")
+    add2 = node_tree.nodes.new("ShaderNodeMixRGB") if not _USE_NEW_MIX else node_tree.nodes.new("ShaderNodeMix")
     add2.name = f"{TLM_PREFIX}tri_add2_{_next_id()}"
     add2.location = (x + 1000, y - 200)
-    if _use_new_mix():
+    if _USE_NEW_MIX:
         add2.data_type = 'RGBA'
         add2.blend_type = 'ADD'
         add2.inputs["Factor"].default_value = 1.0
@@ -705,7 +704,7 @@ def _new_triplanar_tex(node_tree, image, x, y, colorspace="sRGB", scale=1.0, sha
 
 
 def _new_mix(node_tree, blend_mode, opacity, x, y, layer_name="", channel=""):
-    if _use_new_mix():
+    if _USE_NEW_MIX:
         node = node_tree.nodes.new("ShaderNodeMix")
         node.data_type = 'RGBA'
         node.blend_type = BLEND_TO_MIX_MODE.get(blend_mode, "MIX")
@@ -723,7 +722,7 @@ def _new_mix(node_tree, blend_mode, opacity, x, y, layer_name="", channel=""):
 
 def _new_mix_scalar(node_tree, opacity, x, y, layer_name="", channel=""):
     """Mix node for scalar channels (Roughness, Metallic) — Float type."""
-    if _use_new_mix():
+    if _USE_NEW_MIX:
         node = node_tree.nodes.new("ShaderNodeMix")
         node.data_type = 'FLOAT'
         node.blend_type = 'MIX'
@@ -755,43 +754,43 @@ def _enabled_socket(sockets, name):
 
 
 def _factor_socket(node):
-    if _use_new_mix():
+    if _USE_NEW_MIX:
         return node.inputs["Factor"]
     return node.inputs["Fac"]
 
 
 def _a_socket(node):
-    if _use_new_mix():
+    if _USE_NEW_MIX:
         return _enabled_socket(node.inputs, "A")
     return node.inputs["Color1"]
 
 
 def _b_socket(node):
-    if _use_new_mix():
+    if _USE_NEW_MIX:
         return _enabled_socket(node.inputs, "B")
     return node.inputs["Color2"]
 
 
 def _result_socket(node):
-    if _use_new_mix():
+    if _USE_NEW_MIX:
         return _enabled_socket(node.outputs, "Result")
     return node.outputs["Color"]
 
 
 def _a_socket_scalar(node):
-    if _use_new_mix():
+    if _USE_NEW_MIX:
         return _enabled_socket(node.inputs, "A")
     return node.inputs["Color1"]
 
 
 def _b_socket_scalar(node):
-    if _use_new_mix():
+    if _USE_NEW_MIX:
         return _enabled_socket(node.inputs, "B")
     return node.inputs["Color2"]
 
 
 def _result_socket_scalar(node):
-    if _use_new_mix():
+    if _USE_NEW_MIX:
         return _enabled_socket(node.outputs, "Result")
     return node.outputs["Color"]
 
@@ -1631,12 +1630,12 @@ def _apply_adjustment(node_tree, layer, current_output, x, y):
         # Using Blender's Mix + Gamma + Math nodes
 
         # Step 1: Apply Lift (multiply)
-        lift_node = node_tree.nodes.new("ShaderNodeMixRGB") if not _use_new_mix() else node_tree.nodes.new("ShaderNodeMix")
+        lift_node = node_tree.nodes.new("ShaderNodeMixRGB") if not _USE_NEW_MIX else node_tree.nodes.new("ShaderNodeMix")
         lift_node.name = f"{TLM_PREFIX}adj_lift_{_next_id()}"
         lift_node.label = "Lift"
         lift_node.location = (x, y)
         _tag(lift_node, layer.name, "adj_cb_lift")
-        if _use_new_mix():
+        if _USE_NEW_MIX:
             lift_node.data_type = 'RGBA'
             lift_node.blend_type = 'MULTIPLY'
             lift_node.inputs["Factor"].default_value = 1.0
@@ -1663,12 +1662,12 @@ def _apply_adjustment(node_tree, layer, current_output, x, y):
         node_tree.links.new(lift_out, gamma_node.inputs["Color"])
 
         # Step 3: Apply Gain (multiply again)
-        gain_node = node_tree.nodes.new("ShaderNodeMixRGB") if not _use_new_mix() else node_tree.nodes.new("ShaderNodeMix")
+        gain_node = node_tree.nodes.new("ShaderNodeMixRGB") if not _USE_NEW_MIX else node_tree.nodes.new("ShaderNodeMix")
         gain_node.name = f"{TLM_PREFIX}adj_gain_{_next_id()}"
         gain_node.label = "Gain"
         gain_node.location = (x + 440, y)
         _tag(gain_node, layer.name, "adj_cb_gain")
-        if _use_new_mix():
+        if _USE_NEW_MIX:
             gain_node.data_type = 'RGBA'
             gain_node.blend_type = 'MULTIPLY'
             gain_node.inputs["Factor"].default_value = 1.0
@@ -1796,7 +1795,7 @@ def rebuild_node_tree(material):
     _probe = None
     try:
         _probe = node_tree.nodes.new("ShaderNodeValue")
-        _probe.name = "_tlm_ctx_probe_"   # this is what fails in restricted ctx
+        _probe.name = f"{TLM_PREFIX}ctx_probe_"  # TLM_ prefix so _clear_tlm_nodes can clean up
         node_tree.nodes.remove(_probe)
     except AttributeError:
         # We're in a restricted context. Clean up orphan probe if created.
@@ -1859,7 +1858,7 @@ def rebuild_node_tree(material):
         # ── Base Color — built from root_layers to preserve GROUP alpha for clipping mask ─
         bc_out = _build_base_color(node_tree, root_layers, group_children, uv_map, start_x, ch_y['base_color'], x_step)
         if bc_out:
-            node_tree.links.new(bc_out, bsdf.inputs["Base Color"])
+            _link_to_bsdf(node_tree, bc_out, bsdf, ["Base Color", "base_color"], "base_color")
 
         # ── Roughness ─────────────────────────────────────────────────────────────
         if _channel_used(expanded, 'use_roughness'):
@@ -1895,6 +1894,13 @@ def rebuild_node_tree(material):
             n_out = _build_channel(node_tree, expanded, 'normal', uv_map, start_x, ch_y['normal'], x_step)
             if n_out:
                 normal_out = n_out
+                # Apply normal_strength from the first normal-enabled layer
+                nm_node = n_out.node  # the ShaderNodeNormalMap created by _build_channel
+                if nm_node and nm_node.type == 'NORMAL_MAP':
+                    for ly in expanded:
+                        if getattr(ly, 'use_normal', False):
+                            nm_node.inputs["Strength"].default_value = ly.normal_strength
+                            break
 
         # ── Emission ──────────────────────────────────────────────────────────────
         if _channel_used(expanded, 'use_emission'):

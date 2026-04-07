@@ -64,28 +64,33 @@ def cancel_pending_rebuild():
 def _on_layer_update(self, context):
     """Called whenever a STRUCTURAL property changes. Triggers a debounced full rebuild."""
     global _pending_materials
-    # Guard: context may not have an active object (e.g. during file load)
-    if not context or not context.active_object:
-        return
-    mat = context.active_object.active_material
-    if not mat or not mat.tlm.auto_composite:
-        return
-    need_timer = not _pending_materials  # first material in this batch
-    _pending_materials.add(mat.name)
-    if need_timer:
-        bpy.app.timers.register(_do_deferred_rebuild, first_interval=0.05)
-
-
-def _make_hot_callback(prop_name):
-    """Create a callback that attempts hot update, falling back to full rebuild."""
-    def _cb(self, context):
+    try:
         if not context or not context.active_object:
             return
         mat = context.active_object.active_material
         if not mat or not mat.tlm.auto_composite:
             return
-        if not compositing.hot_update_property(mat, self, prop_name):
-            _on_layer_update(self, context)
+        need_timer = not _pending_materials  # first material in this batch
+        _pending_materials.add(mat.name)
+        if need_timer:
+            bpy.app.timers.register(_do_deferred_rebuild, first_interval=0.05)
+    except ReferenceError:
+        pass  # object or material was deleted mid-callback
+
+
+def _make_hot_callback(prop_name):
+    """Create a callback that attempts hot update, falling back to full rebuild."""
+    def _cb(self, context):
+        try:
+            if not context or not context.active_object:
+                return
+            mat = context.active_object.active_material
+            if not mat or not mat.tlm.auto_composite:
+                return
+            if not compositing.hot_update_property(mat, self, prop_name):
+                _on_layer_update(self, context)
+        except ReferenceError:
+            pass  # object or material was deleted mid-callback
     return _cb
 
 
@@ -115,11 +120,11 @@ BLEND_MODES = [
 ]
 
 LAYER_TYPES = [
-    ("PAINT",       "Paint",       "Regular paint layer with an image texture"),
-    ("FILL",        "Fill",        "Solid color fill layer"),
-    ("ADJUSTMENT",  "Adjustment",  "Modifier layer: Hue/Sat, Levels, etc."),
-    ("GROUP",       "Group",       "Folder that contains other layers"),
-    ("PROCEDURAL",  "Procedural",  "Shader-based procedural texture layer"),
+    ("PAINT",       "Paint",       "Regular paint layer with an image texture",  0),
+    ("FILL",        "Fill",        "Solid color fill layer",                     1),
+    ("ADJUSTMENT",  "Adjustment",  "Modifier layer: Hue/Sat, Levels, etc.",     2),
+    ("GROUP",       "Group",       "Folder that contains other layers",          3),
+    ("PROCEDURAL",  "Procedural",  "Shader-based procedural texture layer",     4),
 ]
 
 
@@ -170,6 +175,7 @@ class TLM_LayerItem(PropertyGroup):
         name="Image",
         description="Name of the bpy.data.images image for this layer",
         default="",
+        update=_on_layer_update,
     )
 
     # Fill layer: solid color
@@ -360,11 +366,11 @@ class TLM_LayerItem(PropertyGroup):
     adj_type: EnumProperty(
         name="Adjustment",
         items=[
-            ('HUE_SAT',        "Hue/Saturation",    "Adjust hue, saturation and value"),
-            ('BRIGHT_CONTRAST', "Brightness/Contrast","Adjust brightness and contrast"),
-            ('LEVELS',         "Levels",             "Remap input/output tonal range"),
-            ('COLOR_BALANCE',  "Color Balance",      "Lift / Gamma / Gain (cinematic grading)"),
-            ('CURVES',         "Curves",             "Parametric RGB curve (contrast, brightness, tone clipping)"),
+            ('HUE_SAT',        "Hue/Saturation",    "Adjust hue, saturation and value",             0),
+            ('BRIGHT_CONTRAST', "Brightness/Contrast","Adjust brightness and contrast",              1),
+            ('LEVELS',         "Levels",             "Remap input/output tonal range",               2),
+            ('COLOR_BALANCE',  "Color Balance",      "Lift / Gamma / Gain (cinematic grading)",      3),
+            ('CURVES',         "Curves",             "Parametric RGB curve (contrast, brightness, tone clipping)", 4),
         ],
         default='HUE_SAT',
         update=_on_layer_update,
@@ -474,14 +480,14 @@ class TLM_LayerItem(PropertyGroup):
     proc_type: EnumProperty(
         name="Type",
         items=[
-            ('NOISE',    "Noise",    "Perlin/FBM noise"),
-            ('VORONOI',  "Voronoi",  "Cell/Worley noise"),
-            ('WAVE',     "Wave",     "Sine wave bands or rings"),
-            ('GRADIENT', "Gradient", "Linear, radial, quadratic or spherical gradient"),
-            ('MUSGRAVE', "Musgrave", "Fractal noise (Multifractal, Ridged, etc.)"),
-            ('CHECKER',  "Checker",  "Alternating checkerboard pattern"),
-            ('MARBLE',   "Marble",   "Wave bands distorted by noise — marble/veined stone"),
-            ('CLOUDS',   "Clouds",   "Soft billowy noise — clouds, smoke, organic shapes"),
+            ('NOISE',    "Noise",    "Perlin/FBM noise",                                    0),
+            ('VORONOI',  "Voronoi",  "Cell/Worley noise",                                   1),
+            ('WAVE',     "Wave",     "Sine wave bands or rings",                             2),
+            ('GRADIENT', "Gradient", "Linear, radial, quadratic or spherical gradient",      3),
+            ('MUSGRAVE', "Musgrave", "Fractal noise (Multifractal, Ridged, etc.)",           4),
+            ('CHECKER',  "Checker",  "Alternating checkerboard pattern",                     5),
+            ('MARBLE',   "Marble",   "Wave bands distorted by noise — marble/veined stone", 6),
+            ('CLOUDS',   "Clouds",   "Soft billowy noise — clouds, smoke, organic shapes",  7),
         ],
         default='NOISE',
         update=_on_layer_update,
@@ -491,25 +497,25 @@ class TLM_LayerItem(PropertyGroup):
     proc_scale: FloatProperty(
         name="Scale", description="Overall scale of the procedural texture",
         default=5.0, min=0.001, max=1000.0,
-        update=_on_layer_update,
+        update=_make_hot_callback("proc_scale"),
     )
     proc_offset_x: FloatProperty(name="Offset X", description="Offset texture origin along X",
-        default=0.0, update=_on_layer_update)
+        default=0.0, update=_make_hot_callback("proc_offset_x"))
     proc_offset_y: FloatProperty(name="Offset Y", description="Offset texture origin along Y",
-        default=0.0, update=_on_layer_update)
+        default=0.0, update=_make_hot_callback("proc_offset_y"))
     proc_offset_z: FloatProperty(name="Offset Z", description="Offset texture origin along Z",
-        default=0.0, update=_on_layer_update)
+        default=0.0, update=_make_hot_callback("proc_offset_z"))
 
     # Colors (Color1 = dark/base, Color2 = bright/accent)
     proc_color1: bpy.props.FloatVectorProperty(
         name="Color 1", description="Dark/base color of the procedural gradient",
         subtype='COLOR', min=0.0, max=1.0, size=4,
-        default=(0.0, 0.0, 0.0, 1.0), update=_on_layer_update,
+        default=(0.0, 0.0, 0.0, 1.0), update=_make_hot_callback("proc_color1"),
     )
     proc_color2: bpy.props.FloatVectorProperty(
         name="Color 2", description="Bright/accent color of the procedural gradient",
         subtype='COLOR', min=0.0, max=1.0, size=4,
-        default=(1.0, 1.0, 1.0, 1.0), update=_on_layer_update,
+        default=(1.0, 1.0, 1.0, 1.0), update=_make_hot_callback("proc_color2"),
     )
 
     # Optional third color stop
@@ -521,46 +527,46 @@ class TLM_LayerItem(PropertyGroup):
     proc_color3: bpy.props.FloatVectorProperty(
         name="Color 3", description="Middle color of the procedural gradient (between Color1 and Color2)",
         subtype='COLOR', min=0.0, max=1.0, size=4,
-        default=(0.5, 0.5, 0.5, 1.0), update=_on_layer_update,
+        default=(0.5, 0.5, 0.5, 1.0), update=_make_hot_callback("proc_color3"),
     )
     proc_color3_position: FloatProperty(
         name="Color 3 Pos",
         description="Position of the third color stop (0 = at Color1, 1 = at Color2)",
         default=0.5, min=0.01, max=0.99, subtype='FACTOR',
-        update=_on_layer_update,
+        update=_make_hot_callback("proc_color3_position"),
     )
 
     # Noise / Musgrave
     proc_detail: FloatProperty(
         name="Detail", description="Number of noise octaves — more detail means finer grain",
         default=2.0, min=0.0, max=15.0,
-        update=_on_layer_update,
+        update=_make_hot_callback("proc_detail"),
     )
     proc_roughness_proc: FloatProperty(
         name="Roughness", description="Blending roughness between noise octaves",
         default=0.5, min=0.0, max=1.0,
-        update=_on_layer_update,
+        update=_make_hot_callback("proc_roughness_proc"),
     )
     proc_distortion: FloatProperty(
         name="Distortion", description="Amount of distortion applied to the texture",
         default=0.0, min=-10.0, max=10.0,
-        update=_on_layer_update,
+        update=_make_hot_callback("proc_distortion"),
     )
     proc_lacunarity: FloatProperty(
         name="Lacunarity", description="Gap between successive noise octaves",
         default=2.0, min=0.0, max=10.0,
-        update=_on_layer_update,
+        update=_make_hot_callback("proc_lacunarity"),
     )
 
     # Voronoi
     proc_voronoi_feature: EnumProperty(
         name="Feature",
         items=[
-            ('F1',           "F1",           "Distance to nearest point"),
-            ('F2',           "F2",           "Distance to second nearest"),
-            ('SMOOTH_F1',    "Smooth F1",    "Smooth minimum"),
-            ('DISTANCE_TO_EDGE', "Edge",     "Distance to cell edge"),
-            ('N_SPHERE_RADIUS', "Radius",    "N-sphere radius"),
+            ('F1',           "F1",           "Distance to nearest point",    0),
+            ('F2',           "F2",           "Distance to second nearest",   1),
+            ('SMOOTH_F1',    "Smooth F1",    "Smooth minimum",               2),
+            ('DISTANCE_TO_EDGE', "Edge",     "Distance to cell edge",        3),
+            ('N_SPHERE_RADIUS', "Radius",    "N-sphere radius",              4),
         ],
         default='F1',
         update=_on_layer_update,
@@ -568,10 +574,10 @@ class TLM_LayerItem(PropertyGroup):
     proc_voronoi_distance: EnumProperty(
         name="Distance",
         items=[
-            ('EUCLIDEAN', "Euclidean", "Standard straight-line distance"),
-            ('MANHATTAN', "Manhattan", "Grid-based taxi-cab distance"),
-            ('CHEBYCHEV', "Chebychev", "Maximum of axis distances"),
-            ('MINKOWSKI', "Minkowski", "Generalized distance metric"),
+            ('EUCLIDEAN', "Euclidean", "Standard straight-line distance",    0),
+            ('MANHATTAN', "Manhattan", "Grid-based taxi-cab distance",       1),
+            ('CHEBYCHEV', "Chebychev", "Maximum of axis distances",         2),
+            ('MINKOWSKI', "Minkowski", "Generalized distance metric",       3),
         ],
         default='EUCLIDEAN',
         update=_on_layer_update,
@@ -579,15 +585,15 @@ class TLM_LayerItem(PropertyGroup):
     proc_randomness: FloatProperty(
         name="Randomness", description="Randomness of Voronoi cell positions",
         default=1.0, min=0.0, max=1.0,
-        update=_on_layer_update,
+        update=_make_hot_callback("proc_randomness"),
     )
 
     # Wave
     proc_wave_type: EnumProperty(
         name="Wave Type",
         items=[
-            ('BANDS', "Bands", "Parallel bands"),
-            ('RINGS', "Rings", "Concentric rings"),
+            ('BANDS', "Bands", "Parallel bands",     0),
+            ('RINGS', "Rings", "Concentric rings",    1),
         ],
         default='BANDS',
         update=_on_layer_update,
@@ -595,9 +601,9 @@ class TLM_LayerItem(PropertyGroup):
     proc_wave_profile: EnumProperty(
         name="Profile",
         items=[
-            ('SIN',      "Sine",     "Smooth sine wave"),
-            ('SAW',      "Sawtooth", "Sharp sawtooth ramp"),
-            ('TRI',      "Triangle", "Triangular zigzag wave"),
+            ('SIN',      "Sine",     "Smooth sine wave",         0),
+            ('SAW',      "Sawtooth", "Sharp sawtooth ramp",      1),
+            ('TRI',      "Triangle", "Triangular zigzag wave",   2),
         ],
         default='SIN',
         update=_on_layer_update,
@@ -605,20 +611,20 @@ class TLM_LayerItem(PropertyGroup):
     proc_wave_detail_scale: FloatProperty(
         name="Detail Scale", description="Scale of the detail noise overlaid on the wave",
         default=1.0, min=0.0, max=10.0,
-        update=_on_layer_update,
+        update=_make_hot_callback("proc_wave_detail_scale"),
     )
 
     # Gradient
     proc_gradient_type: EnumProperty(
         name="Gradient Type",
         items=[
-            ('LINEAR',     "Linear",     "Straight linear gradient"),
-            ('QUADRATIC',  "Quadratic",  "Quadratic falloff gradient"),
-            ('EASING',     "Easing",     "Smooth ease-in/ease-out"),
-            ('DIAGONAL',   "Diagonal",   "Diagonal corner-to-corner"),
-            ('SPHERICAL',  "Spherical",  "Spherical radial falloff"),
-            ('QUADRATIC_SPHERE', "Quad Sphere", "Quadratic spherical falloff"),
-            ('RADIAL',     "Radial",     "Angular radial sweep"),
+            ('LINEAR',     "Linear",     "Straight linear gradient",             0),
+            ('QUADRATIC',  "Quadratic",  "Quadratic falloff gradient",           1),
+            ('EASING',     "Easing",     "Smooth ease-in/ease-out",             2),
+            ('DIAGONAL',   "Diagonal",   "Diagonal corner-to-corner",           3),
+            ('SPHERICAL',  "Spherical",  "Spherical radial falloff",            4),
+            ('QUADRATIC_SPHERE', "Quad Sphere", "Quadratic spherical falloff",  5),
+            ('RADIAL',     "Radial",     "Angular radial sweep",                6),
         ],
         default='LINEAR',
         update=_on_layer_update,
@@ -628,7 +634,7 @@ class TLM_LayerItem(PropertyGroup):
     proc_checker_scale: FloatProperty(
         name="Checker Scale", description="Size of the checker squares",
         default=5.0, min=0.001, max=1000.0,
-        update=_on_layer_update,
+        update=_make_hot_callback("proc_checker_scale"),
     )
 
     # Marble
@@ -636,14 +642,14 @@ class TLM_LayerItem(PropertyGroup):
         name="Turbulence",
         description="Amount of noise distortion applied to the wave bands",
         default=2.0, min=0.0, max=20.0,
-        update=_on_layer_update,
+        update=_make_hot_callback("proc_marble_distortion"),
     )
     proc_marble_wave_type: EnumProperty(
         name="Pattern",
         description="Marble band pattern",
         items=[
-            ('BANDS', "Bands", "Parallel marble veins"),
-            ('RINGS', "Rings", "Concentric marble rings"),
+            ('BANDS', "Bands", "Parallel marble veins",      0),
+            ('RINGS', "Rings", "Concentric marble rings",     1),
         ],
         default='BANDS',
         update=_on_layer_update,
@@ -653,9 +659,9 @@ class TLM_LayerItem(PropertyGroup):
         name="Coordinates",
         description="Texture coordinate space for procedural patterns",
         items=[
-            ('GENERATED', "Generated", "Normalized to object bounding box (0-1). Consistent across different objects"),
-            ('OBJECT',    "Object",    "World-space object coordinates. Pattern changes with object size/position"),
-            ('UV',        "UV",        "UV map coordinates. Follows UV unwrap, may show seams"),
+            ('GENERATED', "Generated", "Normalized to object bounding box (0-1). Consistent across different objects", 0),
+            ('OBJECT',    "Object",    "World-space object coordinates. Pattern changes with object size/position",    1),
+            ('UV',        "UV",        "UV map coordinates. Follows UV unwrap, may show seams",                        2),
         ],
         default='GENERATED',
         update=_on_layer_update,
@@ -666,7 +672,7 @@ class TLM_LayerItem(PropertyGroup):
         description="Controls how sharp the transition between Color1 and Color2 is. "
                     "Low = soft gradient, High = hard edge",
         default=0.5, min=0.0, max=1.0,
-        update=_on_layer_update,
+        update=_make_hot_callback("proc_contrast"),
     )
 
     # Vector coordinate distortion — inject Noise into texture coordinates
@@ -676,7 +682,7 @@ class TLM_LayerItem(PropertyGroup):
         description="Distort texture coordinates with Noise for organic patterns. "
                     "0 = no distortion, higher = more warped",
         default=0.0, min=0.0, max=2.0,
-        update=_on_layer_update,
+        update=_make_hot_callback("proc_vector_distortion"),
     )
 
     # Less Than threshold for emission mask — binary crack detection
@@ -701,14 +707,14 @@ class TLM_LayerItem(PropertyGroup):
         description="Index of refraction for the Fresnel effect. "
                     "Lower = wider edge effect, Higher = narrower edge",
         default=1.45, min=1.0, max=5.0,
-        update=_on_layer_update,
+        update=_make_hot_callback("fresnel_ior"),
     )
     fresnel_strength: FloatProperty(
         name="Fresnel Strength",
         description="How strongly the Fresnel mask affects this layer. "
                     "1.0 = full Fresnel, 0.0 = no effect",
         default=1.0, min=0.0, max=1.0, subtype='FACTOR',
-        update=_on_layer_update,
+        update=_make_hot_callback("fresnel_strength"),
     )
 
     @property
@@ -783,6 +789,12 @@ def register():
 
 
 def unregister():
+    # Cancel any pending rebuild timer
+    if bpy.app.timers.is_registered(_do_deferred_rebuild):
+        bpy.app.timers.unregister(_do_deferred_rebuild)
+    global _pending_materials
+    _pending_materials = set()
+
     del bpy.types.Material.tlm
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)

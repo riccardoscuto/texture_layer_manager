@@ -60,6 +60,12 @@ def register():
 
 
 def unregister():
+    # Cancel any pending invalidation timer
+    global _invalidate_pending
+    if _invalidate_pending and bpy.app.timers.is_registered(_do_deferred_invalidate):
+        bpy.app.timers.unregister(_do_deferred_invalidate)
+    _invalidate_pending = False
+
     bpy.msgbus.clear_by_owner(_msgbus_owner)
     for mod in reversed(modules):
         mod.unregister()

@@ -356,7 +356,19 @@ class TLM_OT_RemoveLayer(Operator):
         tlm = mat.tlm
         idx = tlm.active_layer_index
 
-        layer_name = tlm.layers[idx].name
+        if idx < 0 or idx >= len(tlm.layers):
+            self.report({'WARNING'}, "No layer selected")
+            return {'CANCELLED'}
+
+        layer = tlm.layers[idx]
+        layer_name = layer.name
+
+        # If removing a GROUP, clear group_name on orphaned children
+        if layer.layer_type == "GROUP":
+            for other in tlm.layers:
+                if other.group_name == layer_name:
+                    other.group_name = ""
+
         tlm.layers.remove(idx)
 
         # Clamp index
@@ -465,6 +477,7 @@ class TLM_OT_DuplicateLayer(Operator):
             orig = src.image
             dup = orig.copy()
             dup.name = new_layer.name
+            dup.use_fake_user = True
             new_layer.image_name = dup.name
             previews.invalidate(dup.name)
 
@@ -653,6 +666,7 @@ class TLM_OT_AddLayerMask(Operator):
         import numpy as np
         px = np.ones(res * res * 4, dtype=np.float32)
         mask_img.pixels.foreach_set(px)
+        mask_img.use_fake_user = True
 
         layer.mask_image_name = mask_img.name
         layer.use_mask = True
@@ -854,18 +868,23 @@ def _layer_to_dict(layer):
         # PBR channels
         d["use_roughness"]     = layer.use_roughness
         d["roughness_fill"]    = round(layer.roughness_fill, 4)
+        d["roughness_image_name"] = getattr(layer, 'roughness_image_name', "")
         d["use_metallic"]      = layer.use_metallic
         d["metallic_fill"]     = round(layer.metallic_fill, 4)
+        d["metallic_image_name"]  = getattr(layer, 'metallic_image_name', "")
         d["use_bump"]          = layer.use_bump
         d["bump_strength"]     = round(layer.bump_strength, 4)
         d["bump_distance"]     = round(layer.bump_distance, 4)
         d["use_normal"]        = getattr(layer, 'use_normal', False)
+        d["normal_image_name"]    = getattr(layer, 'normal_image_name', "")
         d["use_emission"]      = getattr(layer, 'use_emission', False)
         if layer.use_emission:
             d["emission_color"]    = list(layer.emission_color)
             d["emission_strength"] = round(layer.emission_strength, 4)
+        d["emission_image_name"]  = getattr(layer, 'emission_image_name', "")
         d["use_transmission"]  = getattr(layer, 'use_transmission', False)
         d["transmission_fill"] = round(getattr(layer, 'transmission_fill', 0.0), 4)
+        d["transmission_image_name"] = getattr(layer, 'transmission_image_name', "")
 
     return d
 
@@ -963,20 +982,25 @@ def _dict_to_layer(d, tlm):
         layer.triplanar_scale   = d.get("triplanar_scale", 1.0)
         layer.triplanar_sharpness = d.get("triplanar_sharpness", 1.0)
         # PBR channels
-        layer.use_roughness     = d.get("use_roughness", False)
-        layer.roughness_fill    = d.get("roughness_fill", 0.5)
-        layer.use_metallic      = d.get("use_metallic", False)
-        layer.metallic_fill     = d.get("metallic_fill", 0.0)
-        layer.use_bump          = d.get("use_bump", False)
-        layer.bump_strength     = d.get("bump_strength", 0.5)
-        layer.bump_distance     = d.get("bump_distance", 0.05)
-        layer.use_normal        = d.get("use_normal", False)
-        layer.use_emission      = d.get("use_emission", False)
+        layer.use_roughness        = d.get("use_roughness", False)
+        layer.roughness_fill       = d.get("roughness_fill", 0.5)
+        layer.roughness_image_name = d.get("roughness_image_name", "")
+        layer.use_metallic         = d.get("use_metallic", False)
+        layer.metallic_fill        = d.get("metallic_fill", 0.0)
+        layer.metallic_image_name  = d.get("metallic_image_name", "")
+        layer.use_bump             = d.get("use_bump", False)
+        layer.bump_strength        = d.get("bump_strength", 0.5)
+        layer.bump_distance        = d.get("bump_distance", 0.05)
+        layer.use_normal           = d.get("use_normal", False)
+        layer.normal_image_name    = d.get("normal_image_name", "")
+        layer.use_emission         = d.get("use_emission", False)
+        layer.emission_image_name  = d.get("emission_image_name", "")
         if layer.use_emission:
             layer.emission_color    = d.get("emission_color", [1,1,1,1])
             layer.emission_strength = d.get("emission_strength", 1.0)
-        layer.use_transmission  = d.get("use_transmission", False)
-        layer.transmission_fill = d.get("transmission_fill", 0.0)
+        layer.use_transmission        = d.get("use_transmission", False)
+        layer.transmission_fill       = d.get("transmission_fill", 0.0)
+        layer.transmission_image_name = d.get("transmission_image_name", "")
 
     return layer
 
@@ -1975,9 +1999,13 @@ class TLM_OT_ApplyPreset(Operator):
             preset_dir = _os.path.join(_os.path.dirname(__file__), "presets")
             preset_file = _os.path.join(preset_dir, f"{self.preset_name}.tlm")
             if _os.path.exists(preset_file):
-                with open(preset_file, 'r') as f:
-                    data = _json.load(f)
-                preset_layers = data.get("layers", [])
+                try:
+                    with open(preset_file, 'r') as f:
+                        data = _json.load(f)
+                    preset_layers = data.get("layers", [])
+                except (ValueError, OSError) as e:
+                    self.report({'ERROR'}, f"Invalid preset file: {e}")
+                    return {'CANCELLED'}
             else:
                 self.report({'ERROR'}, f"Preset '{self.preset_name}' not found")
                 return {'CANCELLED'}
@@ -2082,20 +2110,25 @@ class TLM_OT_ApplyPreset(Operator):
                 layer.triplanar_scale   = ld.get("triplanar_scale", 1.0)
                 layer.triplanar_sharpness = ld.get("triplanar_sharpness", 1.0)
                 # PBR channels
-                layer.use_roughness   = ld.get("use_roughness", False)
-                layer.roughness_fill  = ld.get("roughness_fill", 0.5)
-                layer.use_metallic    = ld.get("use_metallic", False)
-                layer.metallic_fill   = ld.get("metallic_fill", 0.0)
-                layer.use_bump        = ld.get("use_bump", False)
-                layer.bump_strength   = ld.get("bump_strength", 0.5)
-                layer.bump_distance   = ld.get("bump_distance", 0.05)
-                layer.use_normal      = ld.get("use_normal", False)
-                layer.use_emission    = ld.get("use_emission", False)
+                layer.use_roughness        = ld.get("use_roughness", False)
+                layer.roughness_fill       = ld.get("roughness_fill", 0.5)
+                layer.roughness_image_name = ld.get("roughness_image_name", "")
+                layer.use_metallic         = ld.get("use_metallic", False)
+                layer.metallic_fill        = ld.get("metallic_fill", 0.0)
+                layer.metallic_image_name  = ld.get("metallic_image_name", "")
+                layer.use_bump             = ld.get("use_bump", False)
+                layer.bump_strength        = ld.get("bump_strength", 0.5)
+                layer.bump_distance        = ld.get("bump_distance", 0.05)
+                layer.use_normal           = ld.get("use_normal", False)
+                layer.normal_image_name    = ld.get("normal_image_name", "")
+                layer.use_emission         = ld.get("use_emission", False)
+                layer.emission_image_name  = ld.get("emission_image_name", "")
                 if layer.use_emission:
                     layer.emission_color    = ld.get("emission_color", [1,1,1,1])
                     layer.emission_strength = ld.get("emission_strength", 1.0)
-                layer.use_transmission  = ld.get("use_transmission", False)
-                layer.transmission_fill = ld.get("transmission_fill", 0.0)
+                layer.use_transmission        = ld.get("use_transmission", False)
+                layer.transmission_fill       = ld.get("transmission_fill", 0.0)
+                layer.transmission_image_name = ld.get("transmission_image_name", "")
 
         tlm.active_layer_index = max(0, len(tlm.layers) - 1)
         if tlm.auto_composite:
@@ -2201,26 +2234,35 @@ class TLM_OT_SavePreset(Operator):
                 d["triplanar_scale"]   = getattr(layer, 'triplanar_scale', 1.0)
                 d["triplanar_sharpness"] = getattr(layer, 'triplanar_sharpness', 1.0)
                 # PBR channels
-                d["use_roughness"]  = layer.use_roughness
-                d["roughness_fill"] = layer.roughness_fill
-                d["use_metallic"]   = layer.use_metallic
-                d["metallic_fill"]  = layer.metallic_fill
-                d["use_bump"]       = layer.use_bump
-                d["bump_strength"]  = layer.bump_strength
-                d["bump_distance"]  = layer.bump_distance
-                d["use_normal"]     = getattr(layer, 'use_normal', False)
-                d["use_emission"]   = getattr(layer, 'use_emission', False)
+                d["use_roughness"]        = layer.use_roughness
+                d["roughness_fill"]       = layer.roughness_fill
+                d["roughness_image_name"] = getattr(layer, 'roughness_image_name', "")
+                d["use_metallic"]         = layer.use_metallic
+                d["metallic_fill"]        = layer.metallic_fill
+                d["metallic_image_name"]  = getattr(layer, 'metallic_image_name', "")
+                d["use_bump"]             = layer.use_bump
+                d["bump_strength"]        = layer.bump_strength
+                d["bump_distance"]        = layer.bump_distance
+                d["use_normal"]           = getattr(layer, 'use_normal', False)
+                d["normal_image_name"]    = getattr(layer, 'normal_image_name', "")
+                d["use_emission"]         = getattr(layer, 'use_emission', False)
+                d["emission_image_name"]  = getattr(layer, 'emission_image_name', "")
                 if getattr(layer, 'use_emission', False):
                     d["emission_color"]    = list(layer.emission_color)
                     d["emission_strength"] = layer.emission_strength
-                d["use_transmission"]  = getattr(layer, 'use_transmission', False)
-                d["transmission_fill"] = getattr(layer, 'transmission_fill', 0.0)
+                d["use_transmission"]        = getattr(layer, 'use_transmission', False)
+                d["transmission_fill"]       = getattr(layer, 'transmission_fill', 0.0)
+                d["transmission_image_name"] = getattr(layer, 'transmission_image_name', "")
             layers_data.append(d)
 
         data = {"preset_name": self.preset_name, "layers": layers_data}
         filepath = _os.path.join(preset_dir, f"{self.preset_name}.tlm")
-        with open(filepath, 'w') as f:
-            _json.dump(data, f, indent=2)
+        try:
+            with open(filepath, 'w') as f:
+                _json.dump(data, f, indent=2)
+        except OSError as e:
+            self.report({'ERROR'}, f"Failed to save preset: {e}")
+            return {'CANCELLED'}
 
         self.report({'INFO'}, f"Saved preset '{self.preset_name}'")
         return {'FINISHED'}
@@ -2288,12 +2330,19 @@ class TLM_OT_LayerFromClipboard(Operator):
             # Try clipboard paste (Blender 4.x)
             if hasattr(bpy.ops.image, 'clipboard_paste'):
                 # Set the temp image as active in the image editor
+                img_area = None
                 for area in context.screen.areas:
                     if area.type == 'IMAGE_EDITOR':
-                        area.spaces.active.image = temp_img
+                        img_area = area
                         break
-                bpy.ops.image.clipboard_paste(area=area)
-                pasted_img = area.spaces.active.image
+                if img_area is None:
+                    if temp_img:
+                        bpy.data.images.remove(temp_img)
+                    self.report({'ERROR'}, "Open an Image Editor area first")
+                    return {'CANCELLED'}
+                img_area.spaces.active.image = temp_img
+                bpy.ops.image.clipboard_paste(area=img_area)
+                pasted_img = img_area.spaces.active.image
             else:
                 # Fallback: just use the blank image and inform user
                 pasted_img = temp_img
