@@ -2640,6 +2640,18 @@ class TLM_OT_MergeVisible(Operator):
 
         vis_count = sum(1 for l in tlm.layers if l.visible)
 
+        # Collect PBR state from visible layers before removing them.
+        # For each PBR channel, keep the topmost (lowest index) visible
+        # layer's settings so the merged layer inherits them.
+        pbr_state = {}
+        for l in tlm.layers:
+            if not l.visible:
+                continue
+            for flag in ('use_roughness', 'use_metallic', 'use_normal',
+                         'use_emission', 'use_transmission', 'use_bump'):
+                if flag not in pbr_state and getattr(l, flag, False):
+                    pbr_state[flag] = l
+
         # Remove all visible layers (reverse to preserve indices)
         for i in reversed(range(len(tlm.layers))):
             if tlm.layers[i].visible:
@@ -2654,6 +2666,29 @@ class TLM_OT_MergeVisible(Operator):
         layer.blend_mode = "MIX"
         layer.visible = True
         img.use_fake_user = True
+
+        # Restore PBR channel settings from donor layers
+        for flag, donor in pbr_state.items():
+            setattr(layer, flag, True)
+            if flag == 'use_roughness':
+                layer.roughness_fill = donor.roughness_fill
+                layer.roughness_image_name = donor.roughness_image_name
+            elif flag == 'use_metallic':
+                layer.metallic_fill = donor.metallic_fill
+                layer.metallic_image_name = donor.metallic_image_name
+            elif flag == 'use_normal':
+                layer.normal_image_name = donor.normal_image_name
+                layer.normal_strength = donor.normal_strength
+            elif flag == 'use_emission':
+                layer.emission_image_name = donor.emission_image_name
+                layer.emission_color = donor.emission_color[:]
+                layer.emission_strength = donor.emission_strength
+            elif flag == 'use_transmission':
+                layer.transmission_fill = donor.transmission_fill
+                layer.transmission_image_name = donor.transmission_image_name
+            elif flag == 'use_bump':
+                layer.bump_strength = donor.bump_strength
+                layer.bump_distance = donor.bump_distance
 
         tlm.active_layer_index = len(tlm.layers) - 1
 
