@@ -120,6 +120,14 @@ class TLM_UL_LayerList(UIList):
         layers = getattr(data, propname)
         flags = [self.bitflag_filter_item] * len(layers)
         order = list(range(len(layers)))
+
+        # Built-in name search (shown via the funnel icon)
+        if self.filter_name:
+            search = self.filter_name.lower()
+            for i, layer in enumerate(layers):
+                if search not in layer.name.lower():
+                    flags[i] &= ~self.bitflag_filter_item
+
         collapsed = {l.name for l in layers if l.layer_type == "GROUP" and l.collapsed}
         for i, layer in enumerate(layers):
             if layer.group_name in collapsed:
@@ -161,10 +169,13 @@ def draw_tlm_main(layout, context):
     ops_row = layout.row(align=True)
     ops_row.operator("tlm.remove_layer",    text="", icon='TRASH')
     ops_row.separator()
+    ops_row.operator("tlm.move_layer_to_end", text="", icon='TRIA_UP_BAR').direction = "TOP"
     ops_row.operator("tlm.move_layer",      text="", icon='TRIA_UP').direction   = "UP"
     ops_row.operator("tlm.move_layer",      text="", icon='TRIA_DOWN').direction = "DOWN"
+    ops_row.operator("tlm.move_layer_to_end", text="", icon='TRIA_DOWN_BAR').direction = "BOTTOM"
     ops_row.separator()
     ops_row.operator("tlm.duplicate_layer", text="", icon='DUPLICATE')
+    ops_row.operator("tlm.merge_visible",   text="", icon='NODE_COMPOSITING')
 
     layout.template_list(
         "TLM_UL_layer_list", "",
@@ -209,7 +220,10 @@ def _draw_active_layer(layout, active, tlm, mat):
     if active.layer_type == "PROCEDURAL":
         _draw_procedural(col, active, tlm)
     elif active.layer_type == "GROUP":
-        col.prop(active, "opacity", slider=True)
+        gr = col.row(align=True)
+        gr.prop(active, "opacity", slider=True)
+        gr.operator("tlm.keyframe_opacity", text="", icon='KEYFRAME_HLT',
+                    emboss=False).action = 'INSERT'
         children = [l for l in tlm.layers if l.group_name == active.name]
         n_vis = sum(1 for l in children if l.visible)
         col.label(
@@ -227,6 +241,8 @@ def _draw_procedural(col, active, tlm):
     br = col.row(align=True)
     br.prop(active, "blend_mode", text="")
     br.prop(active, "opacity",    text="Opacity", slider=True)
+    br.operator("tlm.keyframe_opacity", text="", icon='KEYFRAME_HLT',
+                emboss=False).action = 'INSERT'
 
     col.separator(factor=0.5)
     col.prop(active, "proc_type")
@@ -367,6 +383,8 @@ def _draw_paint_fill(col, active, tlm):
     br = col.row(align=True)
     br.prop(active, "blend_mode", text="")
     br.prop(active, "opacity",    text="", slider=True)
+    br.operator("tlm.keyframe_opacity", text="", icon='KEYFRAME_HLT',
+                emboss=False).action = 'INSERT'
 
     if active.layer_type == "FILL":
         col.separator(factor=0.5)
@@ -520,6 +538,8 @@ def draw_tlm_settings(layout, context):
     layout.separator(factor=0.8)
     layout.label(text="Bake & Export", icon='RENDER_STILL')
     layout.operator("tlm.bake_pbr", text="Bake PBR Maps…", icon='EXPORT')
+    layout.operator("tlm.export_composite", text="Export Composite…", icon='IMAGE_DATA')
+    layout.operator("tlm.channel_pack", text="Channel Pack…", icon='NODE_COMPOSITING')
 
     layout.separator(factor=0.8)
     layout.label(text="Presets", icon='PRESET_NEW')

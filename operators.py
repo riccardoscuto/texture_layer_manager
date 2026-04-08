@@ -2605,6 +2605,368 @@ class TLM_OT_LayerFromClipboard(Operator):
 # via Python API. Users should use Blender's built-in N → Tool → Symmetry panel.
 
 
+# ─── Merge Visible ───────────────────────────────────────────────────────────
+
+class TLM_OT_MergeVisible(Operator):
+    """Merge all visible layers into a single paint layer (destructive)."""
+    bl_idname = "tlm.merge_visible"
+    bl_label = "Merge Visible Layers"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    output_name: StringProperty(default="Merged")
+
+    @classmethod
+    def poll(cls, context):
+        mat = _get_material(context)
+        if not mat:
+            return False
+        return (sum(1 for l in mat.tlm.layers if l.visible) >= 2
+                and context.active_object is not None)
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self)
+
+    def execute(self, context):
+        mat = _get_material(context)
+        tlm = mat.tlm
+        res = int(tlm.resolution)
+
+        try:
+            img = compositing.flatten_to_single_image(
+                mat, self.output_name, (res, res))
+        except Exception as e:
+            self.report({'ERROR'}, f"Merge failed: {e}")
+            return {'CANCELLED'}
+
+        vis_count = sum(1 for l in tlm.layers if l.visible)
+
+        # Remove all visible layers (reverse to preserve indices)
+        for i in reversed(range(len(tlm.layers))):
+            if tlm.layers[i].visible:
+                tlm.layers.remove(i)
+
+        # Add merged layer at the bottom
+        layer = tlm.layers.add()
+        layer.layer_type = "PAINT"
+        layer.name = self.output_name
+        layer.image_name = img.name
+        layer.opacity = 1.0
+        layer.blend_mode = "MIX"
+        layer.visible = True
+        img.use_fake_user = True
+
+        tlm.active_layer_index = len(tlm.layers) - 1
+
+        if tlm.auto_composite:
+            compositing.rebuild_node_tree(mat)
+
+        self.report({'INFO'},
+                    f"Merged {vis_count} layers into '{self.output_name}'")
+        return {'FINISHED'}
+
+    def draw(self, context):
+        self.layout.prop(self, "output_name")
+
+
+# ─── Keyframe Opacity ────────────────────────────────────────────────────────
+
+class TLM_OT_KeyframeOpacity(Operator):
+    """Insert or delete a keyframe on the active layer's opacity."""
+    bl_idname = "tlm.keyframe_opacity"
+    bl_label = "Keyframe Opacity"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    action: EnumProperty(
+        items=[
+            ('INSERT', "Insert", "Insert keyframe at current frame"),
+            ('DELETE', "Delete", "Delete keyframe at current frame"),
+        ],
+        default='INSERT',
+    )
+
+    @classmethod
+    def poll(cls, context):
+        mat = _get_material(context)
+        return mat is not None and mat.tlm.active_layer is not None
+
+    def execute(self, context):
+        mat = _get_material(context)
+        tlm = mat.tlm
+        idx = tlm.active_layer_index
+        frame = context.scene.frame_current
+        data_path = f'tlm.layers[{idx}].opacity'
+
+        try:
+            if self.action == 'INSERT':
+                mat.keyframe_insert(data_path=data_path, frame=frame)
+                self.report({'INFO'}, f"Keyframe inserted at frame {frame}")
+            else:
+                mat.keyframe_delete(data_path=data_path, frame=frame)
+                self.report({'INFO'}, f"Keyframe deleted at frame {frame}")
+        except Exception as e:
+            self.report({'WARNING'}, f"Keyframe failed: {e}")
+            return {'CANCELLED'}
+
+        return {'FINISHED'}
+
+
+# ─── Export Composite ────────────────────────────────────────────────────────
+
+class TLM_OT_ExportComposite(Operator):
+    """Export the flattened composite as an image file."""
+    bl_idname = "tlm.export_composite"
+    bl_label = "Export Composite"
+    bl_options = {'REGISTER'}
+
+    filepath: bpy.props.StringProperty(subtype='FILE_PATH',
+                                       default="composite.png")
+    filter_glob: bpy.props.StringProperty(
+        default="*.png;*.jpg;*.jpeg;*.tif;*.tiff;*.exr;*.bmp",
+        options={'HIDDEN'},
+    )
+
+    file_format: EnumProperty(
+        name="Format",
+        items=[
+            ('PNG',  "PNG",  "", 0),
+            ('JPEG', "JPEG", "", 1),
+            ('TIFF', "TIFF", "", 2),
+            ('OPEN_EXR', "EXR", "", 3),
+        ],
+        default='PNG',
+    )
+
+    @classmethod
+    def poll(cls, context):
+        mat = _get_material(context)
+        return (mat and len(mat.tlm.layers) > 0
+                and context.active_object is not None)
+
+    def invoke(self, context, event):
+        mat = _get_material(context)
+        self.filepath = f"{mat.name}_composite.png"
+        context.window_manager.fileselect_add(self)
+        return {'RUNNING_MODAL'}
+
+    def execute(self, context):
+        mat = _get_material(context)
+        res = int(mat.tlm.resolution)
+
+        try:
+            img = compositing.flatten_to_single_image(
+                mat, "TLM_export_tmp", (res, res))
+        except Exception as e:
+            self.report({'ERROR'}, f"Export failed: {e}")
+            return {'CANCELLED'}
+
+        filepath = bpy.path.abspath(self.filepath)
+        img.filepath_raw = filepath
+        img.file_format = self.file_format
+        try:
+            img.save()
+            self.report({'INFO'},
+                        f"Exported composite to {_os.path.basename(filepath)}")
+        except Exception as e:
+            self.report({'ERROR'}, f"Save failed: {e}")
+            return {'CANCELLED'}
+        finally:
+            bpy.data.images.remove(img)
+
+        return {'FINISHED'}
+
+
+# ─── Move Layer to Top / Bottom ──────────────────────────────────────────────
+
+class TLM_OT_MoveLayerToEnd(Operator):
+    """Move the active layer to the top or bottom of the stack."""
+    bl_idname = "tlm.move_layer_to_end"
+    bl_label = "Move Layer to End"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    direction: EnumProperty(
+        items=[("TOP", "Top", ""), ("BOTTOM", "Bottom", "")],
+        default="TOP",
+    )
+
+    @classmethod
+    def poll(cls, context):
+        mat = _get_material(context)
+        return mat is not None and len(mat.tlm.layers) > 1
+
+    def execute(self, context):
+        mat = _get_material(context)
+        tlm = mat.tlm
+        idx = tlm.active_layer_index
+
+        if self.direction == "TOP":
+            while idx > 0:
+                tlm.layers.move(idx, idx - 1)
+                idx -= 1
+            tlm.active_layer_index = 0
+        else:
+            last = len(tlm.layers) - 1
+            while idx < last:
+                tlm.layers.move(idx, idx + 1)
+                idx += 1
+            tlm.active_layer_index = last
+
+        if tlm.auto_composite:
+            compositing.rebuild_node_tree(mat)
+
+        return {'FINISHED'}
+
+
+# ─── Channel Packing ─────────────────────────────────────────────────────────
+
+_CH_SOURCE = [
+    ('R', "Red", "Red channel", 0),
+    ('G', "Green", "Green channel", 1),
+    ('B', "Blue", "Blue channel", 2),
+    ('A', "Alpha", "Alpha channel", 3),
+    ('LUM', "Luminance", "Greyscale luminance", 4),
+]
+
+
+class TLM_OT_ChannelPack(Operator):
+    """Pack separate images into RGBA channels of a single output texture."""
+    bl_idname = "tlm.channel_pack"
+    bl_label = "Channel Pack"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    output_name: StringProperty(name="Output Name", default="Packed")
+
+    r_image: StringProperty(name="R Image", default="")
+    g_image: StringProperty(name="G Image", default="")
+    b_image: StringProperty(name="B Image", default="")
+    a_image: StringProperty(name="A Image", default="")
+
+    r_source: EnumProperty(name="R From", items=_CH_SOURCE, default='R')
+    g_source: EnumProperty(name="G From", items=_CH_SOURCE, default='G')
+    b_source: EnumProperty(name="B From", items=_CH_SOURCE, default='B')
+    a_source: EnumProperty(name="A From", items=_CH_SOURCE, default='A')
+
+    invert_r: BoolProperty(name="Invert", default=False)
+    invert_g: BoolProperty(name="Invert", default=False)
+    invert_b: BoolProperty(name="Invert", default=False)
+    invert_a: BoolProperty(name="Invert", default=False)
+
+    resolution: EnumProperty(
+        name="Resolution",
+        items=[
+            ("512", "512", "", 0), ("1024", "1024", "", 1),
+            ("2048", "2048", "", 2), ("4096", "4096", "", 3),
+        ],
+        default="1024",
+    )
+
+    @classmethod
+    def poll(cls, context):
+        return len(bpy.data.images) > 0
+
+    def invoke(self, context, event):
+        mat = _get_material(context)
+        if mat:
+            self.resolution = mat.tlm.resolution
+        return context.window_manager.invoke_props_dialog(self, width=400)
+
+    def _read_channel(self, img_name, source_ch, res):
+        """Read a single channel from an image, resampled to output res."""
+        img = bpy.data.images.get(img_name)
+        if not img:
+            return None
+        w, h = img.size
+        if w == 0 or h == 0:
+            return None
+        px = np.zeros(w * h * 4, dtype=np.float32)
+        img.pixels.foreach_get(px)
+        px = px.reshape((h, w, 4))
+
+        ch_map = {'R': 0, 'G': 1, 'B': 2, 'A': 3}
+        if source_ch == 'LUM':
+            ch_data = (px[:, :, 0] * 0.2126
+                       + px[:, :, 1] * 0.7152
+                       + px[:, :, 2] * 0.0722)
+        else:
+            ch_data = px[:, :, ch_map[source_ch]]
+
+        # Resize if dimensions differ (nearest-neighbor)
+        if ch_data.shape[0] != res or ch_data.shape[1] != res:
+            from_h, from_w = ch_data.shape
+            y_idx = (np.arange(res) * from_h / res).astype(int)
+            x_idx = (np.arange(res) * from_w / res).astype(int)
+            ch_data = ch_data[np.ix_(y_idx, x_idx)]
+
+        return ch_data
+
+    def execute(self, context):
+        res = int(self.resolution)
+        out_px = np.zeros((res, res, 4), dtype=np.float32)
+        out_px[:, :, 3] = 1.0  # default alpha
+
+        channels = [
+            (self.r_image, self.r_source, self.invert_r, 0),
+            (self.g_image, self.g_source, self.invert_g, 1),
+            (self.b_image, self.b_source, self.invert_b, 2),
+            (self.a_image, self.a_source, self.invert_a, 3),
+        ]
+
+        filled = 0
+        for img_name, source_ch, invert, out_ch in channels:
+            if not img_name:
+                continue
+            ch_data = self._read_channel(img_name, source_ch, res)
+            if ch_data is None:
+                self.report({'WARNING'},
+                            f"Image '{img_name}' not found, skipping")
+                continue
+            if invert:
+                ch_data = 1.0 - ch_data
+            out_px[:, :, out_ch] = ch_data
+            filled += 1
+
+        if filled == 0:
+            self.report({'ERROR'}, "No valid source images")
+            return {'CANCELLED'}
+
+        # Create output image
+        name = self.output_name
+        if name in bpy.data.images:
+            bpy.data.images.remove(bpy.data.images[name])
+        out_img = bpy.data.images.new(name, width=res, height=res, alpha=True)
+        try:
+            out_img.colorspace_settings.name = "Non-Color"
+        except Exception:
+            pass
+
+        out_img.pixels.foreach_set(out_px.ravel())
+        out_img.update()
+        out_img.pack()
+
+        self.report({'INFO'},
+                    f"Packed {filled} channels into '{name}' ({res}x{res})")
+        return {'FINISHED'}
+
+    def draw(self, context):
+        layout = self.layout
+        layout.prop(self, "output_name")
+        layout.prop(self, "resolution")
+        layout.separator()
+
+        for label, img_attr, src_attr, inv_attr in [
+            ("Red",   "r_image", "r_source", "invert_r"),
+            ("Green", "g_image", "g_source", "invert_g"),
+            ("Blue",  "b_image", "b_source", "invert_b"),
+            ("Alpha", "a_image", "a_source", "invert_a"),
+        ]:
+            box = layout.box()
+            row = box.row(align=True)
+            row.label(text=f"{label}:")
+            row.prop_search(self, img_attr, bpy.data, "images", text="")
+            row2 = box.row(align=True)
+            row2.prop(self, src_attr, text="Channel")
+            row2.prop(self, inv_attr, toggle=True)
+
+
 # ─── Registration ─────────────────────────────────────────────────────────────
 
 classes = [
@@ -2638,6 +3000,11 @@ classes = [
     TLM_OT_SavePreset,
     TLM_OT_DeletePreset,
     TLM_OT_LayerFromClipboard,
+    TLM_OT_MergeVisible,
+    TLM_OT_KeyframeOpacity,
+    TLM_OT_ExportComposite,
+    TLM_OT_MoveLayerToEnd,
+    TLM_OT_ChannelPack,
 ]
 
 
