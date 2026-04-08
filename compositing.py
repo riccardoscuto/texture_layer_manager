@@ -2355,7 +2355,18 @@ def flatten_to_single_image(material, output_image_name, resolution=(1024, 1024)
     Routes the TLM chain through a temporary Emission shader so the bake
     captures raw colour without Principled BSDF influence (metallic would
     zero-out diffuse, fresnel/emission would be lost with DIFFUSE bake).
+    Temporarily switches to Cycles if needed (baking requires Cycles).
     """
+    scene = bpy.context.scene
+    orig_engine = scene.render.engine
+
+    # Baking requires Cycles — switch temporarily if needed
+    if orig_engine != 'CYCLES':
+        scene.render.engine = 'CYCLES'
+        # Use minimal samples for speed
+        orig_samples = scene.cycles.samples
+        scene.cycles.samples = 1
+
     rebuild_node_tree(material)
     node_tree = material.node_tree
 
@@ -2371,6 +2382,9 @@ def flatten_to_single_image(material, output_image_name, resolution=(1024, 1024)
                        if n.type == 'OUTPUT_MATERIAL'
                        and not n.name.startswith(TLM_PREFIX)), None)
     if not bsdf or not mat_output:
+        # Restore engine before raising
+        if orig_engine != 'CYCLES':
+            scene.render.engine = orig_engine
         raise RuntimeError("No Principled BSDF or Material Output found")
 
     # Save original Surface connection
@@ -2415,6 +2429,10 @@ def flatten_to_single_image(material, output_image_name, resolution=(1024, 1024)
         node_tree.nodes.remove(emit)
         for from_sock, to_sock in orig_links:
             node_tree.links.new(from_sock, to_sock)
+        # Restore render engine
+        if orig_engine != 'CYCLES':
+            scene.cycles.samples = orig_samples
+            scene.render.engine = orig_engine
 
     return out_img
 
