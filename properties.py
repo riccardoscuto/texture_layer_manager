@@ -147,6 +147,22 @@ class TLM_LayerItem(PropertyGroup):
         update=_on_layer_update,
     )
 
+    color_tag: EnumProperty(
+        name="Color Tag",
+        description="Color label for visual organization",
+        items=[
+            ('NONE',   "None",   "", 0),
+            ('RED',    "Red",    "", 1),
+            ('ORANGE', "Orange", "", 2),
+            ('YELLOW', "Yellow", "", 3),
+            ('GREEN',  "Green",  "", 4),
+            ('BLUE',   "Blue",   "", 5),
+            ('PURPLE', "Purple", "", 6),
+            ('PINK',   "Pink",   "", 7),
+        ],
+        default='NONE',
+    )
+
     locked: BoolProperty(
         name="Locked",
         description="Prevent painting on this layer",

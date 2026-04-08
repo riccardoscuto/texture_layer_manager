@@ -25,6 +25,13 @@ _preset_cache = []
 _preset_cache_time = 0.0
 _PRESET_CACHE_TTL = 2.0  # seconds
 
+_COLOR_TAG_ICON = {
+    'RED': 'SEQUENCE_COLOR_01', 'ORANGE': 'SEQUENCE_COLOR_02',
+    'YELLOW': 'SEQUENCE_COLOR_03', 'GREEN': 'SEQUENCE_COLOR_04',
+    'BLUE': 'SEQUENCE_COLOR_06', 'PURPLE': 'SEQUENCE_COLOR_07',
+    'PINK': 'SEQUENCE_COLOR_08',
+}
+
 _PBR_BADGE = {
     'use_roughness':    'RNDCURVE',
     'use_metallic':     'MATFLUID',
@@ -50,6 +57,10 @@ class TLM_UL_LayerList(UIList):
         is_child = layer.group_name != ""
         if is_child:
             row.separator(factor=2.5)
+
+        ct_icon = _COLOR_TAG_ICON.get(layer.color_tag)
+        if ct_icon:
+            row.label(text="", icon=ct_icon)
 
         if layer.layer_type == "GROUP":
             col_icon = 'TRIA_DOWN' if not layer.collapsed else 'TRIA_RIGHT'
@@ -191,6 +202,7 @@ def _draw_active_layer(layout, active, tlm, mat):
         icon='OUTLINER_OB_LIGHT' if solo_active else 'LIGHT',
         emboss=False,
     ).layer_index = tlm.active_layer_index
+    hrow.prop(active, "color_tag", text="", icon_only=True)
 
     col = box.column(align=True)
 
