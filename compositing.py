@@ -1785,9 +1785,11 @@ def rebuild_node_tree(material):
     root_layers = [l for l in all_layers if l.visible and not l.group_name]
 
     # Solo override — show only the solo'd layer, ignoring groups
+    # Use tlm.layers (not all_layers which is reversed) since solo_layer_index
+    # comes from the UIList which indexes into tlm.layers directly
     solo_idx = tlm.solo_layer_index
-    if 0 <= solo_idx < len(all_layers):
-        solo_layer = all_layers[solo_idx]
+    if 0 <= solo_idx < len(tlm.layers):
+        solo_layer = tlm.layers[solo_idx]
         if solo_layer.visible:
             root_layers = [solo_layer]
             group_children = {}
