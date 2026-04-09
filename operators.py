@@ -2605,104 +2605,6 @@ class TLM_OT_LayerFromClipboard(Operator):
 # via Python API. Users should use Blender's built-in N → Tool → Symmetry panel.
 
 
-# ─── Merge Visible ───────────────────────────────────────────────────────────
-
-class TLM_OT_MergeVisible(Operator):
-    """Merge all visible layers into a single paint layer (destructive)."""
-    bl_idname = "tlm.merge_visible"
-    bl_label = "Merge Visible Layers"
-    bl_options = {'REGISTER', 'UNDO'}
-
-    output_name: StringProperty(default="Merged")
-
-    @classmethod
-    def poll(cls, context):
-        mat = _get_material(context)
-        if not mat:
-            return False
-        return (sum(1 for l in mat.tlm.layers if l.visible) >= 2
-                and context.active_object is not None)
-
-    def invoke(self, context, event):
-        return context.window_manager.invoke_props_dialog(self)
-
-    def execute(self, context):
-        mat = _get_material(context)
-        tlm = mat.tlm
-        res = int(tlm.resolution)
-
-        try:
-            img = compositing.flatten_to_single_image(
-                mat, self.output_name, (res, res))
-        except Exception as e:
-            self.report({'ERROR'}, f"Merge failed: {e}")
-            return {'CANCELLED'}
-
-        vis_count = sum(1 for l in tlm.layers if l.visible)
-
-        # Collect PBR state from visible layers before removing them.
-        # For each PBR channel, keep the topmost (lowest index) visible
-        # layer's settings so the merged layer inherits them.
-        pbr_state = {}
-        for l in tlm.layers:
-            if not l.visible:
-                continue
-            for flag in ('use_roughness', 'use_metallic', 'use_normal',
-                         'use_emission', 'use_transmission', 'use_bump'):
-                if flag not in pbr_state and getattr(l, flag, False):
-                    pbr_state[flag] = l
-
-        # Remove all visible layers (reverse to preserve indices)
-        for i in reversed(range(len(tlm.layers))):
-            if tlm.layers[i].visible:
-                tlm.layers.remove(i)
-
-        # Add merged layer at the bottom
-        layer = tlm.layers.add()
-        layer.layer_type = "PAINT"
-        layer.name = self.output_name
-        layer.image_name = img.name
-        layer.opacity = 1.0
-        layer.blend_mode = "MIX"
-        layer.visible = True
-        img.use_fake_user = True
-
-        # Restore PBR channel settings from donor layers
-        for flag, donor in pbr_state.items():
-            setattr(layer, flag, True)
-            if flag == 'use_roughness':
-                layer.roughness_fill = donor.roughness_fill
-                layer.roughness_image_name = donor.roughness_image_name
-            elif flag == 'use_metallic':
-                layer.metallic_fill = donor.metallic_fill
-                layer.metallic_image_name = donor.metallic_image_name
-            elif flag == 'use_normal':
-                layer.normal_image_name = donor.normal_image_name
-                layer.normal_strength = donor.normal_strength
-            elif flag == 'use_emission':
-                layer.emission_image_name = donor.emission_image_name
-                layer.emission_color = donor.emission_color[:]
-                layer.emission_strength = donor.emission_strength
-            elif flag == 'use_transmission':
-                layer.transmission_fill = donor.transmission_fill
-                layer.transmission_image_name = donor.transmission_image_name
-            elif flag == 'use_bump':
-                layer.bump_strength = donor.bump_strength
-                layer.bump_distance = donor.bump_distance
-
-        tlm.active_layer_index = len(tlm.layers) - 1
-
-        if tlm.auto_composite:
-            compositing.rebuild_node_tree(mat)
-
-        self.report({'INFO'},
-                    f"Merged {vis_count} layers into '{self.output_name}'")
-        return {'FINISHED'}
-
-    def draw(self, context):
-        self.layout.prop(self, "output_name")
-
-
 # ─── Keyframe Opacity ────────────────────────────────────────────────────────
 
 class TLM_OT_KeyframeOpacity(Operator):
@@ -2741,71 +2643,6 @@ class TLM_OT_KeyframeOpacity(Operator):
         except Exception as e:
             self.report({'WARNING'}, f"Keyframe failed: {e}")
             return {'CANCELLED'}
-
-        return {'FINISHED'}
-
-
-# ─── Export Composite ────────────────────────────────────────────────────────
-
-class TLM_OT_ExportComposite(Operator):
-    """Export the flattened composite as an image file."""
-    bl_idname = "tlm.export_composite"
-    bl_label = "Export Composite"
-    bl_options = {'REGISTER'}
-
-    filepath: bpy.props.StringProperty(subtype='FILE_PATH',
-                                       default="composite.png")
-    filter_glob: bpy.props.StringProperty(
-        default="*.png;*.jpg;*.jpeg;*.tif;*.tiff;*.exr;*.bmp",
-        options={'HIDDEN'},
-    )
-
-    file_format: EnumProperty(
-        name="Format",
-        items=[
-            ('PNG',  "PNG",  "", 0),
-            ('JPEG', "JPEG", "", 1),
-            ('TIFF', "TIFF", "", 2),
-            ('OPEN_EXR', "EXR", "", 3),
-        ],
-        default='PNG',
-    )
-
-    @classmethod
-    def poll(cls, context):
-        mat = _get_material(context)
-        return (mat and len(mat.tlm.layers) > 0
-                and context.active_object is not None)
-
-    def invoke(self, context, event):
-        mat = _get_material(context)
-        self.filepath = f"{mat.name}_composite.png"
-        context.window_manager.fileselect_add(self)
-        return {'RUNNING_MODAL'}
-
-    def execute(self, context):
-        mat = _get_material(context)
-        res = int(mat.tlm.resolution)
-
-        try:
-            img = compositing.flatten_to_single_image(
-                mat, "TLM_export_tmp", (res, res))
-        except Exception as e:
-            self.report({'ERROR'}, f"Export failed: {e}")
-            return {'CANCELLED'}
-
-        filepath = bpy.path.abspath(self.filepath)
-        img.filepath_raw = filepath
-        img.file_format = self.file_format
-        try:
-            img.save()
-            self.report({'INFO'},
-                        f"Exported composite to {_os.path.basename(filepath)}")
-        except Exception as e:
-            self.report({'ERROR'}, f"Save failed: {e}")
-            return {'CANCELLED'}
-        finally:
-            bpy.data.images.remove(img)
 
         return {'FINISHED'}
 
@@ -3035,9 +2872,7 @@ classes = [
     TLM_OT_SavePreset,
     TLM_OT_DeletePreset,
     TLM_OT_LayerFromClipboard,
-    TLM_OT_MergeVisible,
     TLM_OT_KeyframeOpacity,
-    TLM_OT_ExportComposite,
     TLM_OT_MoveLayerToEnd,
     TLM_OT_ChannelPack,
 ]

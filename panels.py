@@ -175,7 +175,6 @@ def draw_tlm_main(layout, context):
     ops_row.operator("tlm.move_layer_to_end", text="", icon='TRIA_DOWN_BAR').direction = "BOTTOM"
     ops_row.separator()
     ops_row.operator("tlm.duplicate_layer", text="", icon='DUPLICATE')
-    ops_row.operator("tlm.merge_visible",   text="", icon='NODE_COMPOSITING')
 
     layout.template_list(
         "TLM_UL_layer_list", "",
@@ -538,7 +537,6 @@ def draw_tlm_settings(layout, context):
     layout.separator(factor=0.8)
     layout.label(text="Bake & Export", icon='RENDER_STILL')
     layout.operator("tlm.bake_pbr", text="Bake PBR Maps…", icon='EXPORT')
-    layout.operator("tlm.export_composite", text="Export Composite…", icon='IMAGE_DATA')
     layout.operator("tlm.channel_pack", text="Channel Pack…", icon='NODE_COMPOSITING')
 
     layout.separator(factor=0.8)
