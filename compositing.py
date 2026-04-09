@@ -2350,22 +2350,24 @@ def _find_bsdf(node_tree):
 # ── Flatten ───────────────────────────────────────────────────────────────────
 
 def flatten_to_single_image(material, output_image_name, resolution=(1024, 1024)):
-    """Bake the composited Base Color chain to an image via Emission shader.
+    """Bake the composited Base Color chain to an image via Diffuse BSDF.
 
-    Routes the TLM chain through a temporary Emission shader so the bake
+    Routes the TLM chain through a temporary Diffuse BSDF so the bake
     captures raw colour without Principled BSDF influence (metallic would
-    zero-out diffuse, fresnel/emission would be lost with DIFFUSE bake).
+    zero-out diffuse, fresnel would alter colors).  A plain Diffuse BSDF
+    has none of those complications and pass_filter={'COLOR'} strips lighting.
     Temporarily switches to Cycles if needed (baking requires Cycles).
     """
     scene = bpy.context.scene
     orig_engine = scene.render.engine
+    orig_samples = scene.cycles.samples
 
     # Baking requires Cycles — switch temporarily if needed
     if orig_engine != 'CYCLES':
         scene.render.engine = 'CYCLES'
-        # Use minimal samples for speed
-        orig_samples = scene.cycles.samples
-        scene.cycles.samples = 1
+
+    # Use minimal samples for speed
+    scene.cycles.samples = 1
 
     rebuild_node_tree(material)
     node_tree = material.node_tree
@@ -2382,9 +2384,9 @@ def flatten_to_single_image(material, output_image_name, resolution=(1024, 1024)
                        if n.type == 'OUTPUT_MATERIAL'
                        and not n.name.startswith(TLM_PREFIX)), None)
     if not bsdf or not mat_output:
-        # Restore engine before raising
         if orig_engine != 'CYCLES':
             scene.render.engine = orig_engine
+        scene.cycles.samples = orig_samples
         raise RuntimeError("No Principled BSDF or Material Output found")
 
     # Save original Surface connection
@@ -2398,18 +2400,17 @@ def flatten_to_single_image(material, output_image_name, resolution=(1024, 1024)
     if bc_socket and bc_socket.links:
         source_socket = bc_socket.links[0].from_socket
 
-    # Create temp Emission shader → Material Output
-    emit = node_tree.nodes.new("ShaderNodeEmission")
-    emit.name = f"{TLM_PREFIX}flatten_emit"
-    emit.location = (600, 200)
+    # Create temp Diffuse BSDF → Material Output
+    diffuse = node_tree.nodes.new("ShaderNodeBsdfDiffuse")
+    diffuse.name = f"{TLM_PREFIX}flatten_diffuse"
+    diffuse.location = (600, 200)
 
     if source_socket:
-        node_tree.links.new(source_socket, emit.inputs["Color"])
+        node_tree.links.new(source_socket, diffuse.inputs["Color"])
     else:
-        # No chain connected — use BSDF Base Color default value
-        emit.inputs["Color"].default_value = bc_socket.default_value
+        diffuse.inputs["Color"].default_value = bc_socket.default_value
 
-    node_tree.links.new(emit.outputs["Emission"], surface_input)
+    node_tree.links.new(diffuse.outputs["BSDF"], surface_input)
 
     # Bake target
     bake_node = node_tree.nodes.new("ShaderNodeTexImage")
@@ -2422,16 +2423,15 @@ def flatten_to_single_image(material, output_image_name, resolution=(1024, 1024)
     node_tree.nodes.active = bake_node
 
     try:
-        bpy.ops.object.bake(type='EMIT', save_mode='INTERNAL')
+        bpy.ops.object.bake(type='DIFFUSE', pass_filter={'COLOR'},
+                            save_mode='INTERNAL')
     finally:
-        # Restore original connection and clean up
         node_tree.nodes.remove(bake_node)
-        node_tree.nodes.remove(emit)
+        node_tree.nodes.remove(diffuse)
         for from_sock, to_sock in orig_links:
             node_tree.links.new(from_sock, to_sock)
-        # Restore render engine
+        scene.cycles.samples = orig_samples
         if orig_engine != 'CYCLES':
-            scene.cycles.samples = orig_samples
             scene.render.engine = orig_engine
 
     return out_img
