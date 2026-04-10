@@ -341,6 +341,12 @@ class TLM_LayerItem(PropertyGroup):
         update=_make_hot_callback("bump_distance"),
     )
 
+    # UI state — collapsible PBR section
+    show_pbr_channels: BoolProperty(
+        name="Show PBR Channels",
+        default=False,
+    )
+
     @property
     def roughness_image(self):
         return bpy.data.images.get(self.roughness_image_name)

@@ -436,7 +436,19 @@ def _draw_paint_fill(col, active, tlm):
 
 
 def _draw_pbr_channels(col, layer, tlm):
-    col.label(text="PBR Channels:", icon='NODE_MATERIAL')
+    # Collapsible header with active channel count badge
+    active_count = sum(1 for f in ('use_roughness', 'use_metallic', 'use_normal',
+                                    'use_emission', 'use_transmission', 'use_bump')
+                       if getattr(layer, f))
+    badge = f" ({active_count})" if active_count else ""
+    row = col.row(align=True)
+    row.prop(layer, "show_pbr_channels",
+             text=f"PBR Channels{badge}",
+             icon='TRIA_DOWN' if layer.show_pbr_channels else 'TRIA_RIGHT',
+             emboss=False)
+    if not layer.show_pbr_channels:
+        return
+
     pbox = col.box()
     pc = pbox.column(align=True)
     pc.scale_y = 0.9

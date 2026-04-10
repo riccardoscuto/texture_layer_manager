@@ -164,6 +164,14 @@ def _find_all_tagged(node_tree, layer_name, role):
             if n.get("tlm_layer") == layer_name and n.get("tlm_role") == role]
 
 
+def _material_from_node_tree(node_tree):
+    """Find the material that owns a given node tree."""
+    for mat in bpy.data.materials:
+        if mat.use_nodes and mat.node_tree == node_tree:
+            return mat
+    return None
+
+
 # ── Hot-update dispatch ──────────────────────────────────────────────────────
 
 # Mapping of proc property names to Blender shader node input names
@@ -240,10 +248,16 @@ def _hot_emission_color(node_tree, layer, prop_name):
 
 
 def _hot_emission_strength(node_tree, layer, prop_name):
-    node = _find_tagged(node_tree, "__global__", "emission_strength")
+    node = _find_tagged(node_tree, "__material__", "emission_strength")
     if not node:
         return False
-    node.outputs[0].default_value = layer.emission_strength
+    # Re-aggregate max emission strength across all visible layers
+    mat = _material_from_node_tree(node_tree)
+    if not mat:
+        return False
+    strengths = [l.emission_strength * l.opacity
+                 for l in mat.tlm.layers if l.use_emission and l.visible]
+    node.outputs[0].default_value = max(strengths) if strengths else 0.0
     return True
 
 
@@ -410,7 +424,7 @@ def _hot_adj_curves(node_tree, layer, prop_name):
 
 
 def _hot_bump(node_tree, layer, prop_name):
-    node = _find_tagged(node_tree, "__global__", "bump_final")
+    node = _find_tagged(node_tree, "__material__", "bump_final")
     if not node:
         return False
     node.inputs["Strength"].default_value = layer.bump_strength
@@ -1823,6 +1837,7 @@ def rebuild_node_tree(material):
     _saved_custom_links = _save_custom_links(node_tree)
     _clear_tlm_nodes(node_tree)
 
+    expanded = []  # initialized here so _validate_tags can reference it after try/except
     try:
         uv_map  = tlm.uv_map or "UVMap"
         start_x = -1200
@@ -1927,7 +1942,7 @@ def rebuild_node_tree(material):
                     val.name = f"{TLM_PREFIX}emission_strength"
                     val.outputs[0].default_value = max(strengths)
                     val.location = (end_x, ch_y['emission'])
-                    _tag(val, "__global__", "emission_strength")
+                    _tag(val, "__material__", "emission_strength")
                     _link_to_bsdf(node_tree, val.outputs[0], bsdf,
                                   ["Emission Strength", "emission_strength"], "emission_strength")
 
@@ -1995,6 +2010,8 @@ def rebuild_node_tree(material):
     # Ensure Blender re-evaluates the node tree after rebuild
     node_tree.update_tag()
     material.update_tag()
+
+    _validate_tags(node_tree, expanded)
 
 
 def _build_base_color(node_tree, root_layers, group_children, uv_map, start_x, y_base, x_step):
@@ -2317,7 +2334,7 @@ def _build_bump_channel(node_tree, layers, uv_map, start_x, y_base, x_step):
     bump_node = node_tree.nodes.new("ShaderNodeBump")
     bump_node.name = f"{TLM_PREFIX}bump_final"
     bump_node.label = "TLM Bump"
-    _tag(bump_node, "__global__", "bump_final")
+    _tag(bump_node, "__material__", "bump_final")
     last_x = positions[-1][0] if positions else start_x
     bump_node.location = (last_x + 300 + len(bump_inputs) * 200, y_base)
     bump_node.inputs["Strength"].default_value = strength
@@ -2435,6 +2452,30 @@ def flatten_to_single_image(material, output_image_name, resolution=(1024, 1024)
             scene.render.engine = orig_engine
 
     return out_img
+
+
+# ── Tag validation (debug mode) ───────────────────────────────────────────────
+
+_DEBUG_TAGS = False  # flip to True during development
+
+
+def _validate_tags(node_tree, layers):
+    """Post-rebuild check: warn about expected tags that are missing."""
+    if not _DEBUG_TAGS:
+        return
+    visible = [l for l in layers if l.visible and l.layer_type != "ADJUSTMENT"]
+    for i, layer in enumerate(visible):
+        if i == 0:
+            continue  # first visible layer has no mix node
+        if not _find_tagged(node_tree, layer.name, "mix_base_color"):
+            print(f"[TLM TAG WARNING] Missing ({layer.name}, mix_base_color)")
+    # Material-level tags (only warn if channels are actually in use)
+    has_emission = any(l.use_emission and l.visible for l in layers)
+    if has_emission and not _find_tagged(node_tree, "__material__", "emission_strength"):
+        print("[TLM TAG WARNING] Missing (__material__, emission_strength)")
+    has_bump = any(l.use_bump and l.visible for l in layers)
+    if has_bump and not _find_tagged(node_tree, "__material__", "bump_final"):
+        print("[TLM TAG WARNING] Missing (__material__, bump_final)")
 
 
 def register():
