@@ -71,6 +71,7 @@ class TLM_UL_LayerList(UIList):
             fallback = {
                 'PAINT': 'IMAGE_RGB_ALPHA', 'FILL': 'COLOR',
                 'ADJUSTMENT': 'MODIFIER', 'PROCEDURAL': 'TEXTURE',
+                'REFERENCE': 'LINKED',
             }.get(layer.layer_type, 'IMAGE_DATA')
             iid = 0
             try:
@@ -161,6 +162,7 @@ def draw_tlm_main(layout, context):
     add_row.operator("tlm.add_fill_layer",         text="Fill",  icon='COLOR')
     add_row.operator("tlm.add_adjustment_layer",   text="Adj",   icon='MODIFIER')
     add_row.operator("tlm.add_procedural_layer",   text="Proc",  icon='TEXTURE')
+    add_row.operator("tlm.add_reference_layer",    text="Ref",   icon='LINKED')
     add_row.operator("tlm.add_group",              text="",      icon='FILE_FOLDER')
     add_row.separator()
     add_row.operator("tlm.import_texture_as_layer", text="", icon='IMPORT')
@@ -193,13 +195,13 @@ def _draw_active_layer(layout, active, tlm, mat):
     ltype_icon = {
         'PAINT': 'IMAGE_RGB_ALPHA', 'FILL': 'COLOR',
         'ADJUSTMENT': 'MODIFIER', 'GROUP': 'FILE_FOLDER',
-        'PROCEDURAL': 'TEXTURE',
+        'PROCEDURAL': 'TEXTURE', 'REFERENCE': 'LINKED',
     }.get(active.layer_type, 'IMAGE_DATA')
 
     ltype_label = {
         'PAINT': "Paint Layer", 'FILL': "Fill Layer",
         'ADJUSTMENT': "Adjustment Layer", 'GROUP': "Group",
-        'PROCEDURAL': "Procedural Layer",
+        'PROCEDURAL': "Procedural Layer", 'REFERENCE': "Reference Layer",
     }.get(active.layer_type, "Layer")
 
     box = layout.box()
@@ -215,9 +217,16 @@ def _draw_active_layer(layout, active, tlm, mat):
     hrow.prop(active, "color_tag", text="", icon_only=True)
 
     col = box.column(align=True)
+    # Lock: disable the entire detail column when layer is locked.
+    # Header row (name/solo/color_tag/lock toggle) stays editable so the
+    # user can always unlock; this only greys out blend/opacity/channels/
+    # mask/branching/procedural params.
+    col.enabled = not active.locked
 
     if active.layer_type == "PROCEDURAL":
         _draw_procedural(col, active, tlm)
+    elif active.layer_type == "REFERENCE":
+        _draw_reference(col, active, tlm)
     elif active.layer_type == "GROUP":
         gr = col.row(align=True)
         gr.prop(active, "opacity", slider=True)
@@ -264,11 +273,16 @@ def _draw_procedural(col, active, tlm):
     if pt == 'NOISE':
         col.prop(active, "proc_detail",         slider=True)
         col.prop(active, "proc_roughness_proc", slider=True, text="Roughness")
+        col.prop(active, "proc_lacunarity",     slider=True)
         col.prop(active, "proc_distortion",     slider=True)
     elif pt == 'VORONOI':
         col.prop(active, "proc_voronoi_feature")
         col.prop(active, "proc_voronoi_distance")
         col.prop(active, "proc_randomness", slider=True)
+        vr = col.row(align=True)
+        vr.prop(active, "proc_voronoi_random_color", text="Random Per Cell", toggle=True, icon='SEQ_CHROMA_SCOPE')
+        if active.proc_voronoi_random_color:
+            vr.prop(active, "proc_voronoi_random_seed", text="Seed")
     elif pt == 'WAVE':
         wr = col.row(align=True)
         wr.prop(active, "proc_wave_type",    text="")
@@ -282,19 +296,12 @@ def _draw_procedural(col, active, tlm):
         col.prop(active, "proc_detail",         slider=True)
         col.prop(active, "proc_roughness_proc", slider=True, text="Roughness")
         col.prop(active, "proc_lacunarity",     slider=True)
-    elif pt == 'CHECKER':
-        col.prop(active, "proc_checker_scale")
     elif pt == 'MARBLE':
         col.prop(active, "proc_marble_wave_type", text="Pattern")
         col.prop(active, "proc_detail", slider=True)
         col.prop(active, "proc_roughness_proc", slider=True, text="Roughness")
         col.prop(active, "proc_distortion", slider=True, text="Wave Distortion")
         col.prop(active, "proc_marble_distortion", slider=True, text="Turbulence")
-    elif pt == 'CLOUDS':
-        col.prop(active, "proc_detail",         slider=True)
-        col.prop(active, "proc_roughness_proc", slider=True, text="Roughness")
-        col.prop(active, "proc_lacunarity",     slider=True)
-        col.prop(active, "proc_distortion",     slider=True)
 
 
     col.separator(factor=0.5)
@@ -304,7 +311,37 @@ def _draw_procedural(col, active, tlm):
     off_row.prop(active, "proc_offset_y", text="Y")
     off_row.prop(active, "proc_offset_z", text="Z")
 
+    col.prop(active, "proc_coord_preset", text="Preset")
     col.prop(active, "proc_coord_type", text="Coords")
+
+    # Show normalize toggle only for Object coordinates
+    if active.proc_coord_type == 'OBJECT':
+        col.prop(active, "proc_normalize_coords", text="Normalize Scale")
+
+    # ── Coordinate transform (polar / spherical / swirl / cylindrical) ──
+    col.prop(active, "proc_coord_transform", text="Transform")
+    if active.proc_coord_transform == 'SWIRL':
+        col.prop(active, "proc_swirl_amount", slider=True, text="Swirl")
+    if active.proc_coord_transform in {'POLAR', 'CYLINDRICAL'}:
+        col.label(text="Tip: use integer Scale for seamless wrap", icon='INFO')
+    elif active.proc_coord_transform == 'SPHERICAL':
+        col.label(text="Tip: pattern wraps X, poles compress", icon='INFO')
+
+    # Smart warnings for Generated coordinates
+    if active.proc_coord_type == 'GENERATED':
+        import bpy as _bpy
+        obj = _bpy.context.active_object
+        if obj:
+            s = obj.scale
+            tol = 0.02
+            if abs(s.x - 1.0) > tol or abs(s.y - 1.0) > tol or abs(s.z - 1.0) > tol:
+                col.label(text="Scale not applied \u2014 pattern may stretch", icon='ERROR')
+            dims = obj.dimensions
+            if dims.x > 0 and dims.y > 0 and dims.z > 0:
+                ratio = max(dims) / max(min(dims), 0.001)
+                if ratio > 1.3:
+                    col.label(text="Anisotropic shape \u2014 try Object coords", icon='INFO')
+
     col.prop(active, "proc_contrast", slider=True)
     col.prop(active, "proc_vector_distortion", slider=True, text="Vec Distort")
 
@@ -316,20 +353,186 @@ def _draw_procedural(col, active, tlm):
         fr.prop(active, "fresnel_strength", text="Str", slider=True)
 
     col.separator(factor=0.6)
-    mr = col.row(align=True)
-    mr.prop(active, "use_mask", text="Mask", icon='MOD_MASK', toggle=True)
-    if active.use_mask and active.mask_image_name:
-        mr.prop_search(active, "mask_image_name", bpy.data, "images",
-                       text="", icon='IMAGE_DATA')
-    elif active.use_mask:
-        mr.operator("tlm.add_layer_mask", text="New",   icon='ADD')
-    else:
-        mr.operator("tlm.add_layer_mask", text="Add",   icon='ADD')
-    mr.operator("tlm.add_smart_mask",     text="Smart", icon='SHADERFX')
+    _draw_mask_block(col, active)
+
     col.prop(active, "use_clipping_mask",
              text="Clipping Mask", icon='CLIPUV_DEHLT', toggle=True)
 
     col.separator(factor=0.6)
+    _draw_pbr_channels(col, active, tlm)
+
+    col.separator(factor=0.5)
+    _draw_group_assignment(col, active, tlm)
+
+
+_SMART_GEN_SOURCES = {'EDGE_WEAR', 'DIRT', 'CURVATURE_SMART'}
+# Sources that need an AO distance slider (raw AO + DIRT, which uses AO internally)
+_AO_DISTANCE_SOURCES = {'AO', 'DIRT'}
+
+
+def _draw_mask_slot(box, active, slot):
+    """Draw a single mask slot (A or B). slot is 'A' or 'B'.
+
+    Note: the source enum itself is drawn by the caller (next to the Mask toggle
+    for A, or at the top of the Mask B sub-box for B). This helper only draws
+    source-dependent parameters + the Invert toggle.
+    """
+    is_b = (slot == 'B')
+    src_prop  = 'mask_source_b'        if is_b else 'mask_source'
+    img_prop  = 'mask_image_name_b'    if is_b else 'mask_image_name'
+    ao_prop   = 'mask_ao_distance_b'   if is_b else 'mask_ao_distance'
+    inv_prop  = 'mask_invert_b'        if is_b else 'mask_invert'
+    label     = "Mask B"               if is_b else "Mask A"
+    icon      = 'SELECT_EXTEND'        if is_b else 'SELECT_SET'
+
+    box.label(text=label, icon=icon)
+    src = getattr(active, src_prop)
+    if src == 'IMAGE':
+        if getattr(active, img_prop):
+            box.prop_search(active, img_prop, bpy.data, "images",
+                            text="", icon='IMAGE_DATA')
+        else:
+            if not is_b:  # only A has the "New Image" operator
+                box.operator("tlm.add_layer_mask", text="New Image", icon='ADD')
+            else:
+                box.label(text="No image selected", icon='INFO')
+    # AO distance slider — raw AO uses it directly; DIRT smart generator
+    # uses it internally as the inverted AO source.
+    if src in _AO_DISTANCE_SOURCES:
+        box.prop(active, ao_prop, slider=True, text="AO Distance")
+    # POINTINESS, EDGE_WEAR, CURVATURE_SMART: no per-slot parameter.
+    # Shared smart-generator tuning shown once below in its own sub-box.
+    box.prop(active, inv_prop, text=f"Invert {slot}")
+
+
+def _draw_mask_block(col, active):
+    """Shared mask UI used by Procedural / Paint / Fill / Reference layers.
+
+    Includes: Mask A + optional Mask B + combine mode + Contrast +
+    Smart Generator controls (when source is EDGE_WEAR/DIRT/CURVATURE_SMART) +
+    Mask Refinement section (Levels + Softness + Blur).
+    """
+    mr = col.row(align=True)
+    mr.prop(active, "use_mask", text="Mask", icon='MOD_MASK', toggle=True)
+    if active.use_mask:
+        mr.prop(active, "mask_source", text="")
+    if not active.use_mask:
+        mr.operator("tlm.add_layer_mask", text="Add",   icon='ADD')
+    mr.operator("tlm.add_smart_mask",     text="Smart", icon='SHADERFX')
+
+    if not active.use_mask:
+        return
+
+    mbox = col.box().column(align=True)
+
+    # ── Mask A ──
+    _draw_mask_slot(mbox, active, 'A')
+
+    # ── Smart generator params (visible only when A or B uses a smart source) ──
+    uses_smart_a = active.mask_source in _SMART_GEN_SOURCES
+    uses_smart_b = active.use_mask_b and active.mask_source_b in _SMART_GEN_SOURCES
+    if uses_smart_a or uses_smart_b:
+        sgbox = mbox.box().column(align=True)
+        sgbox.scale_y = 0.9
+        sgbox.label(text="Smart Generator", icon='SHADERFX')
+        sgbox.prop(active, "mask_gen_intensity", slider=True, text="Intensity")
+        sgbox.prop(active, "mask_gen_sharpness", slider=True, text="Sharpness")
+        br = sgbox.row(align=True)
+        br.prop(active, "mask_gen_breakup",       slider=True, text="Breakup")
+        br.prop(active, "mask_gen_breakup_scale", slider=True, text="Scale")
+
+    # ── Mask B ──
+    mbox.separator(factor=0.5)
+    mbox.prop(active, "use_mask_b", text="Add Secondary Mask (B)",
+              icon='SELECT_EXTEND', toggle=True)
+    if active.use_mask_b:
+        bbox = mbox.box().column(align=True)
+        bbox.prop(active, "mask_source_b", text="Source")
+        _draw_mask_slot(bbox, active, 'B')
+        mbox.prop(active, "mask_combine", text="Combine")
+
+    # ── Contrast ──
+    mbox.prop(active, "mask_contrast", slider=True, text="Contrast")
+
+    # ── Image-only: Blur ──
+    # Blur taps the UV input, so it only makes sense when the primary source is IMAGE.
+    if active.mask_source == 'IMAGE':
+        mbox.prop(active, "mask_blur", slider=True, text="Blur")
+
+    # ── Mask Refinement section (Levels + Softness) ──
+    mbox.separator(factor=0.5)
+    rrow = mbox.row(align=True)
+    rrow.prop(active, "use_mask_levels", text="Levels",
+              icon='IPO_LINEAR', toggle=True)
+    rrow.prop(active, "mask_softness", slider=True, text="Softness")
+    if active.use_mask_levels:
+        lbox = mbox.box().column(align=True)
+        lbox.scale_y = 0.85
+        lbox.label(text="Input:", icon='ARROW_LEFTRIGHT')
+        ir = lbox.row(align=True)
+        ir.prop(active, "mask_levels_in_min", text="Black", slider=True)
+        ir.prop(active, "mask_levels_in_max", text="White", slider=True)
+        lbox.prop(active, "mask_levels_gamma", text="Gamma", slider=True)
+        lbox.separator(factor=0.3)
+        lbox.label(text="Output:", icon='ARROW_LEFTRIGHT')
+        o_r = lbox.row(align=True)
+        o_r.prop(active, "mask_levels_out_min", text="Black", slider=True)
+        o_r.prop(active, "mask_levels_out_max", text="White", slider=True)
+
+
+def _draw_reference(col, active, tlm):
+    """Reference layer UI — reuses another layer's pattern with its own blend/mask/channels."""
+    br = col.row(align=True)
+    br.prop(active, "blend_mode", text="")
+    br.prop(active, "opacity",    text="Opacity", slider=True)
+    br.operator("tlm.keyframe_opacity", text="", icon='KEYFRAME_HLT',
+                emboss=False).action = 'INSERT'
+
+    col.separator(factor=0.6)
+    col.label(text="Reference:", icon='LINKED')
+    col.prop_search(active, "reference_layer_name",
+                    tlm, "layers", text="", icon='LAYER_ACTIVE')
+
+    # Validation hints — user-facing feedback that matches the compositing
+    # guard rails so they can't accidentally build an invalid graph.
+    ref_name = active.reference_layer_name
+    if not ref_name:
+        col.label(text="Pick a source layer above", icon='INFO')
+    elif ref_name == active.name:
+        col.label(text="Cannot reference itself", icon='ERROR')
+    else:
+        ref = next((l for l in tlm.layers if l.name == ref_name), None)
+        if ref is None:
+            col.label(text="Referenced layer not found", icon='ERROR')
+        elif ref.layer_type == "REFERENCE":
+            col.label(text="Cannot reference another Reference", icon='ERROR')
+        elif ref.layer_type in {"ADJUSTMENT", "GROUP"}:
+            col.label(text="Source must be Paint, Fill or Procedural",
+                      icon='ERROR')
+        else:
+            col.label(text=f"→ {ref.layer_type.title()} pattern reused",
+                      icon='CHECKMARK')
+
+    col.separator(factor=0.6)
+    _draw_mask_block(col, active)
+
+    col.prop(active, "use_clipping_mask",
+             text="Clipping Mask", icon='CLIPUV_DEHLT', toggle=True)
+
+    col.separator(factor=0.6)
+    fr = col.row(align=True)
+    fr.prop(active, "use_fresnel_mask", text="Fresnel", icon='LIGHT_HEMI', toggle=True)
+    if active.use_fresnel_mask:
+        fr.prop(active, "fresnel_ior", text="IOR")
+        fr.prop(active, "fresnel_strength", text="Str", slider=True)
+
+    col.separator(factor=0.6)
+    # Note: Normal + Bump channels on a REFERENCE layer use this layer's own
+    # image/strength — they do NOT pick up from the referenced pattern.
+    # That's an intentional limitation of the Mix(VECTOR) normal pipeline.
+    if getattr(active, 'use_normal', False) or getattr(active, 'use_bump', False):
+        col.label(text="Normal/Bump use THIS layer's images, not the reference's",
+                  icon='INFO')
     _draw_pbr_channels(col, active, tlm)
 
     col.separator(factor=0.5)
@@ -398,16 +601,8 @@ def _draw_paint_fill(col, active, tlm):
             ir.label(text=f"{w}×{h}")
 
     col.separator(factor=0.6)
-    mr = col.row(align=True)
-    mr.prop(active, "use_mask", text="Mask", icon='MOD_MASK', toggle=True)
-    if active.use_mask and active.mask_image_name:
-        mr.prop_search(active, "mask_image_name", bpy.data, "images",
-                       text="", icon='IMAGE_DATA')
-    elif active.use_mask:
-        mr.operator("tlm.add_layer_mask", text="New",   icon='ADD')
-    else:
-        mr.operator("tlm.add_layer_mask", text="Add",   icon='ADD')
-    mr.operator("tlm.add_smart_mask",     text="Smart", icon='SHADERFX')
+    _draw_mask_block(col, active)
+
     col.prop(active, "use_clipping_mask",
              text="Clipping Mask", icon='CLIPUV_DEHLT', toggle=True)
 
@@ -495,15 +690,54 @@ def _draw_pbr_channels(col, layer, tlm):
             imp = ch_row.operator("tlm.import_texture_as_layer", text="", icon='FILEBROWSER', emboss=False)
             imp.channel   = ch_id
             imp.add_to_active = True
+            if ch_id == 'normal' and enabled:
+                pc.prop(layer, "normal_strength", slider=True)
+                nr = pc.row(align=True)
+                nr.prop(layer, "normal_tile_scale", text="Tile")
+                nr.prop(layer, "normal_rotation", text="Rot")
             if ch_id == 'emission' and enabled:
                 pc.prop(layer, "emission_strength", slider=True)
                 if layer.layer_type == "PROCEDURAL":
                     pc.prop(layer, "proc_emission_threshold", slider=True, text="Threshold")
+                    pc.prop(layer, "proc_emission_falloff", slider=True, text="Falloff")
                 if layer.blend_mode == "ADD":
                     pc.label(text="ADD + Emission: use only one", icon='ERROR')
         else:
             op = ch_row.operator("tlm.add_channel_image", text="", icon='ADD', emboss=False)
             op.channel = ch_id
+
+    # ── Branching: per-channel blend mode overrides ─────────────────────────
+    # Shows a collapsible section with 5 dropdowns (one per overridable channel).
+    # INHERIT = use the main blend_mode. Any other value = branching override.
+    # Only meaningful when at least one channel is enabled.
+    override_channels = [
+        ('base_color',  "Base Color"),
+        ('roughness',   "Roughness"),
+        ('metallic',    "Metallic"),
+        ('emission',    "Emission"),
+        ('transmission',"Transmission"),
+    ]
+    # Count active overrides to show a badge
+    active_overrides = sum(
+        1 for ch_id, _ in override_channels
+        if getattr(layer, f"blend_mode_{ch_id}", "INHERIT") != "INHERIT"
+    )
+    badge_ov = f" ({active_overrides})" if active_overrides else ""
+    pc.separator(factor=0.6)
+    orow = pc.row(align=True)
+    orow.prop(layer, "show_blend_overrides",
+              text=f"Branching{badge_ov}",
+              icon='TRIA_DOWN' if layer.show_blend_overrides else 'TRIA_RIGHT',
+              emboss=False)
+    if layer.show_blend_overrides:
+        obox = pc.box()
+        oc = obox.column(align=True)
+        oc.scale_y = 0.85
+        oc.label(text="Per-channel blend override:", icon='NODE_COMPOSITING')
+        for ch_id, ch_label in override_channels:
+            # Only show override row when the channel is enabled (or always for base_color)
+            if ch_id == 'base_color' or getattr(layer, f"use_{ch_id}", False):
+                oc.prop(layer, f"blend_mode_{ch_id}", text=ch_label)
 
 
 def _draw_group_assignment(col, active, tlm):

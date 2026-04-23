@@ -15,7 +15,11 @@ from . import compositing
 
 # ── Rebuild debounce ──────────────────────────────────────────────────────────
 # Prevents a full node-tree rebuild on every individual slider tick.
-# Multiple rapid changes within 0.05 s are batched into a single rebuild.
+# Multiple rapid changes within the debounce window are batched into a single rebuild.
+# 180ms is a balance: feels snappy to the eye, absorbs a slider drag
+# (~60Hz ticks from Blender) into ~5 rebuilds per 1-second drag instead of ~20.
+
+_REBUILD_DEBOUNCE_S = 0.18
 
 # Set of material names that need rebuilding — accumulates across rapid changes.
 _pending_materials: set = set()
@@ -73,9 +77,27 @@ def _on_layer_update(self, context):
         need_timer = not _pending_materials  # first material in this batch
         _pending_materials.add(mat.name)
         if need_timer:
-            bpy.app.timers.register(_do_deferred_rebuild, first_interval=0.05)
+            bpy.app.timers.register(_do_deferred_rebuild, first_interval=_REBUILD_DEBOUNCE_S)
     except ReferenceError:
         pass  # object or material was deleted mid-callback
+
+
+def _on_preset_change(self, context):
+    """Apply coordinate preset — sets coord_type, normalize, and distortion in one click."""
+    preset = self.proc_coord_preset
+    if preset == 'SPHERICAL':
+        self.proc_coord_type = 'OBJECT'
+        self.proc_normalize_coords = True
+        self.proc_vector_distortion = 0.15
+    elif preset == 'SURFACE':
+        self.proc_coord_type = 'GENERATED'
+        self.proc_normalize_coords = False
+    elif preset == 'UV_DRIVEN':
+        self.proc_coord_type = 'UV'
+        self.proc_normalize_coords = False
+    # 'CUSTOM' = no-op, user has full manual control
+    if preset != 'CUSTOM':
+        _on_layer_update(self, context)
 
 
 def _make_hot_callback(prop_name):
@@ -119,12 +141,20 @@ BLEND_MODES = [
     ("LUMINOSITY", "Luminosity", "Apply luminosity, keep hue and saturation", 19),
 ]
 
+# Per-channel blend override: same items as BLEND_MODES, plus 'INHERIT' at index 0.
+# INHERIT means "use the layer's main blend_mode".
+# Enables branching: one layer can MULTIPLY on base_color but OVERLAY on roughness.
+BLEND_MODES_OVERRIDE = [
+    ("INHERIT", "Inherit (Layer)", "Use the layer's main blend mode", 0),
+] + [(idt, nm, ds, i + 1) for (idt, nm, ds, i) in BLEND_MODES]
+
 LAYER_TYPES = [
     ("PAINT",       "Paint",       "Regular paint layer with an image texture",  0),
     ("FILL",        "Fill",        "Solid color fill layer",                     1),
     ("ADJUSTMENT",  "Adjustment",  "Modifier layer: Hue/Sat, Levels, etc.",     2),
     ("GROUP",       "Group",       "Folder that contains other layers",          3),
     ("PROCEDURAL",  "Procedural",  "Shader-based procedural texture layer",     4),
+    ("REFERENCE",   "Reference",   "Reuse another layer's output with independent blend/mask/channels", 5),
 ]
 
 
@@ -132,6 +162,16 @@ LAYER_TYPES = [
 
 class TLM_LayerItem(PropertyGroup):
     """Represents a single texture layer."""
+
+    # Override the implicit PropertyGroup `name` so renames trigger a rebuild.
+    # The rebuild re-labels the layer's NodeFrame in the shader editor, keeping
+    # the frame label in sync with the UI name. Debounced (180ms) like every
+    # other structural update.
+    name: StringProperty(
+        name="Name",
+        default="Layer",
+        update=_on_layer_update,
+    )
 
     layer_type: EnumProperty(
         name="Type",
@@ -165,7 +205,12 @@ class TLM_LayerItem(PropertyGroup):
 
     locked: BoolProperty(
         name="Locked",
-        description="Prevent painting on this layer",
+        description=(
+            "Prevent edits: grays out all layer parameters (blend, opacity, "
+            "channels, mask, procedural params, branching) and blocks remove / "
+            "move / paint-mode activation. Duplicate is still allowed. "
+            "Visibility and solo toggles remain usable"
+        ),
         default=False,
     )
 
@@ -184,6 +229,43 @@ class TLM_LayerItem(PropertyGroup):
         items=BLEND_MODES,
         default="MIX",
         update=_make_hot_callback("blend_mode"),
+    )
+
+    # ── Per-channel blend mode overrides (Branching) ─────────────────────
+    # Default INHERIT means "use the main blend_mode above". Setting any
+    # other value lets a single layer have DIFFERENT blending per channel.
+    # Example: a Voronoi layer that MULTIPLY-darkens base_color grooves
+    # while OVERLAY-blending roughness patches.
+    # Structural update (full rebuild) because each change rewires a mix node.
+    blend_mode_base_color: EnumProperty(
+        name="BaseColor Blend",
+        description="Override blend mode on base color channel only",
+        items=BLEND_MODES_OVERRIDE, default="INHERIT",
+        update=_on_layer_update,
+    )
+    blend_mode_roughness: EnumProperty(
+        name="Roughness Blend",
+        description="Override blend mode on roughness channel only",
+        items=BLEND_MODES_OVERRIDE, default="INHERIT",
+        update=_on_layer_update,
+    )
+    blend_mode_metallic: EnumProperty(
+        name="Metallic Blend",
+        description="Override blend mode on metallic channel only",
+        items=BLEND_MODES_OVERRIDE, default="INHERIT",
+        update=_on_layer_update,
+    )
+    blend_mode_emission: EnumProperty(
+        name="Emission Blend",
+        description="Override blend mode on emission channel only",
+        items=BLEND_MODES_OVERRIDE, default="INHERIT",
+        update=_on_layer_update,
+    )
+    blend_mode_transmission: EnumProperty(
+        name="Transmission Blend",
+        description="Override blend mode on transmission channel only",
+        items=BLEND_MODES_OVERRIDE, default="INHERIT",
+        update=_on_layer_update,
     )
 
     # Reference to the Blender Image datablock (by name, the Blender way)
@@ -205,7 +287,11 @@ class TLM_LayerItem(PropertyGroup):
         update=_make_hot_callback("fill_color"),
     )
 
-    # Optional mask
+    # ── Advanced combinable masks ────────────────────────────────────────
+    # Two composable mask slots (A and B) plus a combine operation.
+    # Each slot can pull from IMAGE, AO (ambient occlusion) or POINTINESS
+    # (geometry-derived curvature/edge detection).  This unlocks physical
+    # masking like "rust only on edges AND where dirt noise is heavy".
     use_mask: BoolProperty(
         name="Use Mask",
         description="Enable a paint mask to restrict where this layer is visible",
@@ -213,10 +299,190 @@ class TLM_LayerItem(PropertyGroup):
         update=_on_layer_update,
     )
 
+    mask_source: EnumProperty(
+        name="Mask A Source",
+        description="Where the primary mask value comes from",
+        items=[
+            ('IMAGE',      "Image",      "Use a painted image as mask",                    0),
+            ('AO',         "Ambient Occlusion", "Cavity mask from Ambient Occlusion — dark in recesses", 1),
+            ('POINTINESS', "Pointiness", "Geometry curvature — bright on convex edges, dark in concavities", 2),
+            # ── Smart generators: physics-based masks with noise breakup ──
+            ('EDGE_WEAR',       "Edge Wear (Smart)",       "Pointiness convex edges + noise breakup + sharpness — simulates worn-out edges", 3),
+            ('DIRT',            "Dirt (Smart)",            "Inverted AO × noise grunge — accumulates in cavities with organic variation",   4),
+            ('CURVATURE_SMART', "Curvature (Smart)",       "Bipolar pointiness (both convex + concave) with threshold — highlights all edges", 5),
+        ],
+        default='IMAGE',
+        update=_on_layer_update,
+    )
+
     mask_image_name: StringProperty(
         name="Mask Image",
         description="Image controlling where this layer is visible (white = visible)",
         default="",
+        update=_on_layer_update,
+    )
+
+    mask_invert: BoolProperty(
+        name="Invert Mask A",
+        description="Invert the primary mask (white↔black)",
+        default=False,
+        update=_on_layer_update,
+    )
+
+    mask_ao_distance: FloatProperty(
+        name="AO Distance A",
+        description="Maximum distance for AO ray in mask A. Larger = broader cavities",
+        default=0.5, min=0.01, max=10.0,
+        update=_make_hot_callback("mask_ao_distance"),
+    )
+
+    # ── Secondary mask (combines with primary) ──
+    use_mask_b: BoolProperty(
+        name="Use Secondary Mask",
+        description="Enable a second mask combined with the first (AND/OR/etc.)",
+        default=False,
+        update=_on_layer_update,
+    )
+
+    mask_source_b: EnumProperty(
+        name="Mask B Source",
+        description="Where the secondary mask value comes from",
+        items=[
+            ('IMAGE',      "Image",      "Use a painted image as mask",                    0),
+            ('AO',         "Ambient Occlusion", "Cavity mask from Ambient Occlusion",                   1),
+            ('POINTINESS', "Pointiness", "Geometry curvature — edges vs recesses",                     2),
+            ('EDGE_WEAR',       "Edge Wear (Smart)",       "Pointiness convex + noise breakup",                                  3),
+            ('DIRT',            "Dirt (Smart)",            "Inverted AO × noise grunge",                                         4),
+            ('CURVATURE_SMART', "Curvature (Smart)",       "Bipolar pointiness — both convex + concave edges",                   5),
+        ],
+        default='POINTINESS',
+        update=_on_layer_update,
+    )
+
+    mask_image_name_b: StringProperty(
+        name="Mask B Image",
+        description="Secondary image mask (only used when source is Image)",
+        default="",
+        update=_on_layer_update,
+    )
+
+    mask_invert_b: BoolProperty(
+        name="Invert Mask B",
+        description="Invert the secondary mask",
+        default=False,
+        update=_on_layer_update,
+    )
+
+    mask_ao_distance_b: FloatProperty(
+        name="AO Distance B",
+        description="Maximum distance for AO ray in mask B",
+        default=0.5, min=0.01, max=10.0,
+        update=_make_hot_callback("mask_ao_distance_b"),
+    )
+
+    mask_combine: EnumProperty(
+        name="Combine",
+        description="How to combine mask A with mask B",
+        items=[
+            ('MULTIPLY',  "AND (Multiply)", "Both masks must be bright → mask AND",         0),
+            ('MINIMUM',   "AND (Strict)",   "Take the darker of A and B → strict AND",      1),
+            ('MAXIMUM',   "OR (Lighten)",   "Take the brighter of A and B → mask OR",       2),
+            ('ADD',       "Add",            "Sum both masks (clamped) — brightens result",  3),
+            ('SUBTRACT',  "Subtract",       "A minus B — removes B regions from A",         4),
+            ('SCREEN',    "Screen",         "1-(1-A)(1-B) — softer OR, less clipping",      5),
+            ('DIFFERENCE',"Difference",     "|A-B| — mask XOR where they disagree",         6),
+        ],
+        default='MULTIPLY',
+        update=_on_layer_update,
+    )
+
+    mask_contrast: FloatProperty(
+        name="Mask Contrast",
+        description="Contrast applied after combining masks. 0.5 = no change, <0.5 softer, >0.5 harder",
+        default=0.5, min=0.0, max=1.0,
+        update=_make_hot_callback("mask_contrast"),
+    )
+
+    # ── Mask refinement: Levels + Softness ───────────────────────────────
+    # Levels (Photoshop-style): remap input range, apply gamma, remap output range
+    use_mask_levels: BoolProperty(
+        name="Mask Levels",
+        description="Apply Photoshop-style Levels (input range + gamma + output range) to the combined mask",
+        default=False,
+        update=_on_layer_update,
+    )
+    mask_levels_in_min: FloatProperty(
+        name="In Min",
+        description="Black point: input values at/below this become 0",
+        default=0.0, min=0.0, max=1.0,
+        update=_make_hot_callback("mask_levels_in_min"),
+    )
+    mask_levels_in_max: FloatProperty(
+        name="In Max",
+        description="White point: input values at/above this become 1",
+        default=1.0, min=0.0, max=1.0,
+        update=_make_hot_callback("mask_levels_in_max"),
+    )
+    mask_levels_gamma: FloatProperty(
+        name="Gamma",
+        description="Midpoint bias — <1 brightens midtones, >1 darkens them",
+        default=1.0, min=0.05, max=10.0,
+        update=_make_hot_callback("mask_levels_gamma"),
+    )
+    mask_levels_out_min: FloatProperty(
+        name="Out Min",
+        description="Output floor — mask will never be darker than this",
+        default=0.0, min=0.0, max=1.0,
+        update=_make_hot_callback("mask_levels_out_min"),
+    )
+    mask_levels_out_max: FloatProperty(
+        name="Out Max",
+        description="Output ceiling — mask will never be brighter than this",
+        default=1.0, min=0.0, max=1.0,
+        update=_make_hot_callback("mask_levels_out_max"),
+    )
+
+    # Softness: widen/shrink the transition zone around 0.5 via smoothstep
+    mask_softness: FloatProperty(
+        name="Mask Softness",
+        description="Smooth transition around the midpoint. 0 = sharp, 1 = very soft",
+        default=0.0, min=0.0, max=1.0,
+        update=_make_hot_callback("mask_softness"),
+    )
+
+    # Blur: pseudo-gaussian via multi-tap average of the mask input (UV-based sources only)
+    # 0 = no blur, higher values = larger tap radius (implemented as neighbor averaging)
+    mask_blur: FloatProperty(
+        name="Mask Blur",
+        description="Pseudo-blur of IMAGE-source masks. 0 = off, higher values = larger radius (has runtime cost)",
+        default=0.0, min=0.0, max=0.1,
+        update=_on_layer_update,
+    )
+
+    # ── Smart generator parameters (EDGE_WEAR / DIRT / CURVATURE_SMART) ──
+    # These are shared across the generator mask sources below.
+    mask_gen_intensity: FloatProperty(
+        name="Intensity",
+        description="Overall strength of the smart generator",
+        default=1.0, min=0.0, max=2.0,
+        update=_on_layer_update,
+    )
+    mask_gen_breakup: FloatProperty(
+        name="Breakup",
+        description="Organic noise variation applied to the generator — 0 = clean, 1 = very broken",
+        default=0.3, min=0.0, max=1.0,
+        update=_on_layer_update,
+    )
+    mask_gen_breakup_scale: FloatProperty(
+        name="Breakup Scale",
+        description="Scale of the breakup noise",
+        default=15.0, min=0.1, max=200.0,
+        update=_on_layer_update,
+    )
+    mask_gen_sharpness: FloatProperty(
+        name="Sharpness",
+        description="Edge/threshold sharpness of the generator",
+        default=0.5, min=0.0, max=1.0,
         update=_on_layer_update,
     )
 
@@ -250,6 +516,18 @@ class TLM_LayerItem(PropertyGroup):
     node_group_name: StringProperty(
         name="Internal Node Group",
         default="",
+    )
+
+    # ── Reference Layer: reuses another layer's pattern output ──────────────
+    # When layer_type == 'REFERENCE', this layer doesn't generate its own
+    # pattern — it fetches the color/alpha outputs of the referenced layer
+    # and blends them with this layer's OWN blend_mode, opacity, mask, and
+    # per-channel overrides. Enables "one Voronoi, many behaviors" workflows.
+    reference_layer_name: StringProperty(
+        name="Reference Layer",
+        description="Name of the layer whose pattern this reference reuses",
+        default="",
+        update=_on_layer_update,
     )
 
     # ── PBR Channels ─────────────────────────────────────────────────────────
@@ -289,7 +567,19 @@ class TLM_LayerItem(PropertyGroup):
     normal_strength: FloatProperty(
         name="Normal Strength", description="Strength of the normal map effect",
         default=1.0, min=0.0, max=5.0,
-        update=_on_layer_update,
+        update=_make_hot_callback("normal_strength"),
+    )
+    normal_tile_scale: FloatProperty(
+        name="Normal Tile",
+        description="Tiling scale for the normal map. Higher = more repetitions",
+        default=1.0, min=0.1, max=20.0,
+        update=_make_hot_callback("normal_tile_scale"),
+    )
+    normal_rotation: FloatProperty(
+        name="Normal Rotation",
+        description="Rotation of the normal map in degrees",
+        default=0.0, min=-360.0, max=360.0,
+        update=_make_hot_callback("normal_rotation"),
     )
 
     # Emission
@@ -344,6 +634,12 @@ class TLM_LayerItem(PropertyGroup):
     # UI state — collapsible PBR section
     show_pbr_channels: BoolProperty(
         name="Show PBR Channels",
+        default=False,
+    )
+    # UI state — collapsible Branching (per-channel blend overrides) section
+    show_blend_overrides: BoolProperty(
+        name="Show Branching",
+        description="Expand per-channel blend mode overrides",
         default=False,
     )
 
@@ -509,7 +805,6 @@ class TLM_LayerItem(PropertyGroup):
             ('MUSGRAVE', "Musgrave", "Fractal noise (Multifractal, Ridged, etc.)",           4),
             ('CHECKER',  "Checker",  "Alternating checkerboard pattern",                     5),
             ('MARBLE',   "Marble",   "Wave bands distorted by noise — marble/veined stone", 6),
-            ('CLOUDS',   "Clouds",   "Soft billowy noise — clouds, smoke, organic shapes",  7),
         ],
         default='NOISE',
         update=_on_layer_update,
@@ -610,6 +905,27 @@ class TLM_LayerItem(PropertyGroup):
         update=_make_hot_callback("proc_randomness"),
     )
 
+    # ── Voronoi random-per-cell (jawbreaker, greeble, mosaic) ──
+    # When enabled, each Voronoi cell gets a random value derived from the
+    # cell's Position output through a WhiteNoise texture.  The result feeds
+    # the same ColorRamp (color1→color2→optional color3), so each cell picks
+    # a discrete color from the ramp instead of the smooth distance gradient.
+    proc_voronoi_random_color: BoolProperty(
+        name="Random Per Cell",
+        description="Each Voronoi cell receives a random value (drives Color and Fac outputs). "
+                    "Use with 2- or 3-color ramp for jawbreaker / mosaic / greeble patterns",
+        default=False,
+        update=_on_layer_update,
+    )
+
+    proc_voronoi_random_seed: FloatProperty(
+        name="Random Seed",
+        description="Shift the per-cell randomization. Change this to get a different random layout "
+                    "for otherwise identical Voronoi settings",
+        default=0.0, min=0.0, max=100.0,
+        update=_on_layer_update,
+    )
+
     # Wave
     proc_wave_type: EnumProperty(
         name="Wave Type",
@@ -652,13 +968,6 @@ class TLM_LayerItem(PropertyGroup):
         update=_on_layer_update,
     )
 
-    # Checker
-    proc_checker_scale: FloatProperty(
-        name="Checker Scale", description="Size of the checker squares",
-        default=5.0, min=0.001, max=1000.0,
-        update=_make_hot_callback("proc_checker_scale"),
-    )
-
     # Marble
     proc_marble_distortion: FloatProperty(
         name="Turbulence",
@@ -681,11 +990,62 @@ class TLM_LayerItem(PropertyGroup):
         name="Coordinates",
         description="Texture coordinate space for procedural patterns",
         items=[
-            ('GENERATED', "Generated", "Normalized to object bounding box (0-1). Consistent across different objects", 0),
-            ('OBJECT',    "Object",    "World-space object coordinates. Pattern changes with object size/position",    1),
+            ('GENERATED', "Generated", "Normalized to object bounding box (0-1). Can distort on non-uniform objects", 0),
+            ('OBJECT',    "Object",    "Object-space coordinates. Consistent 3D patterns, works best with applied scale", 1),
             ('UV',        "UV",        "UV map coordinates. Follows UV unwrap, may show seams",                        2),
         ],
-        default='GENERATED',
+        default='OBJECT',
+        update=_on_layer_update,
+    )
+
+    proc_coord_preset: EnumProperty(
+        name="Coord Preset",
+        description="Quick coordinate setup for common use cases",
+        items=[
+            ('CUSTOM',    "Custom",    "Manual coordinate settings",                          0),
+            ('SPHERICAL', "Spherical", "Object coords + scale normalization + distortion",    1),
+            ('SURFACE',   "Surface",   "Generated coords, no normalization",                  2),
+            ('UV_DRIVEN', "UV",        "UV map coordinates",                                  3),
+        ],
+        default='CUSTOM',
+        update=_on_preset_change,
+    )
+
+    proc_normalize_coords: BoolProperty(
+        name="Normalize Object Coords",
+        description="Compensate object dimensions so patterns look consistent "
+                    "regardless of object size or proportions. Only applies to Object coords",
+        default=False,
+        update=_on_layer_update,
+    )
+
+    # ── Coordinate transform (polar / spherical / swirl / cylindrical) ──
+    # Converts the Cartesian coords into a transformed space BEFORE the
+    # Mapping node so that texture patterns wrap circularly, spherically,
+    # or spiral-twist.  This unlocks planet / lollipop / ring / cylinder
+    # patterns that are impossible with raw Noise/Voronoi/Wave.
+    proc_coord_transform: EnumProperty(
+        name="Coord Transform",
+        description="Spatial transformation applied to coordinates before texturing. "
+                    "NONE = raw Cartesian. POLAR = circular (XY → angle,radius). "
+                    "SPHERICAL = planet-like (XYZ → phi,theta). "
+                    "SWIRL = spiral twist. CYLINDRICAL = cylinder wrap (XY → angle, Z)",
+        items=[
+            ('NONE',        "None",        "No transform — raw XYZ",                             0),
+            ('POLAR',       "Polar",       "XY → angle/radius — circular / radial patterns",      1),
+            ('SPHERICAL',   "Spherical",   "XYZ → phi/theta — planet / spherical patterns",       2),
+            ('SWIRL',       "Swirl",       "Rotate XY around Z by radius — spiral patterns",      3),
+            ('CYLINDRICAL', "Cylindrical", "XY → angle, Z vertical — cylinder wrap patterns",     4),
+        ],
+        default='NONE',
+        update=_on_layer_update,
+    )
+
+    proc_swirl_amount: FloatProperty(
+        name="Swirl Amount",
+        description="Twist strength (radians per unit radius) for Swirl transform. "
+                    "Positive = clockwise, negative = counter-clockwise",
+        default=2.0, min=-20.0, max=20.0,
         update=_on_layer_update,
     )
 
@@ -707,12 +1067,19 @@ class TLM_LayerItem(PropertyGroup):
         update=_make_hot_callback("proc_vector_distortion"),
     )
 
-    # Less Than threshold for emission mask — binary crack detection
+    # Emission mask — smooth threshold with controllable falloff
     proc_emission_threshold: FloatProperty(
         name="Emission Threshold",
-        description="Distance threshold for emission mask. "
-                    "Values below this distance are lit. 0 = use Power sharpening instead",
+        description="Where the emission 'turns on'. Higher = wider glowing area. "
+                    "Works together with Falloff for smooth edges",
         default=0.0, min=0.0, max=1.0, subtype='FACTOR',
+        update=_on_layer_update,
+    )
+    proc_emission_falloff: FloatProperty(
+        name="Emission Falloff",
+        description="Softness of the emission edge transition. "
+                    "Low = sharp edge, High = gradual fade",
+        default=0.08, min=0.001, max=1.0, subtype='FACTOR',
         update=_on_layer_update,
     )
 

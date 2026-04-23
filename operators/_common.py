@@ -16,6 +16,128 @@ def _get_material(context):
     return None
 
 
+# ─── Bake safety ──────────────────────────────────────────────────────────────
+
+def _bake_preflight(context):
+    """Validate pre-conditions for any bake operation.
+
+    Returns (ok: bool, error_message: str).
+    Caller should report the error and cancel if not ok.
+    """
+    obj = context.active_object
+    if not obj:
+        return False, "No active object. Select a mesh first."
+    if obj.type != 'MESH':
+        return False, f"Active object '{obj.name}' is not a mesh."
+    mesh = obj.data
+    if not mesh.uv_layers or len(mesh.uv_layers) == 0:
+        return False, f"Mesh '{obj.name}' has no UV map. Unwrap it first (U → Smart UV Project)."
+    if len(mesh.polygons) == 0:
+        return False, f"Mesh '{obj.name}' has no faces to bake onto."
+    return True, ""
+
+
+class _BakeGuard:
+    """Context manager that makes a bake operation safe for the user.
+
+    On entry:
+      - Forces render engine to CYCLES (required by bpy.ops.object.bake).
+      - Snapshots node-tree selection + active node.
+
+    On exit:
+      - Restores render engine.
+      - Restores node selection + active node.
+      - Removes every image still sitting in the `register_orphan()` queue,
+        i.e. bake targets that were created but never `commit()`-ed.
+
+    Per-bake semantics (supports multiple bakes in one guard):
+        register_orphan(img)  # before the bake, in case it fails
+        bpy.ops.object.bake(...)
+        commit()              # bake succeeded — clears pending orphans
+
+    If the bake fails (either exception or early return without commit), the
+    __exit__ handler disposes of whatever is still queued.
+
+    Usage:
+        with _BakeGuard(context, node_tree) as guard:
+            img = bpy.data.images.new(...)
+            guard.register_orphan(img)
+            bpy.ops.object.bake(type='EMIT', save_mode='INTERNAL')
+            guard.commit()  # bake succeeded — keep image
+
+            img2 = bpy.data.images.new(...)
+            guard.register_orphan(img2)
+            bpy.ops.object.bake(type='EMIT', save_mode='INTERNAL')
+            # exception here → img2 gets cleaned on __exit__, img is kept
+            guard.commit()
+    """
+
+    def __init__(self, context, node_tree):
+        self.context = context
+        self.node_tree = node_tree
+        self._engine_backup = None
+        self._active_node_backup = None
+        self._node_selection_backup = {}
+        self._orphans = []
+
+    def __enter__(self):
+        scene = self.context.scene
+        self._engine_backup = scene.render.engine
+        if self._engine_backup != 'CYCLES':
+            try:
+                scene.render.engine = 'CYCLES'
+            except Exception:
+                # Cycles unavailable — extremely rare in Blender 5.0, let caller fail naturally
+                pass
+
+        if self.node_tree:
+            self._active_node_backup = self.node_tree.nodes.active
+            self._node_selection_backup = {n: n.select for n in self.node_tree.nodes}
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        # Clean up any orphan images still queued (un-committed)
+        for img in self._orphans:
+            if img is None:
+                continue
+            try:
+                if img.name in bpy.data.images:
+                    bpy.data.images.remove(img)
+            except Exception:
+                pass
+        self._orphans.clear()
+
+        # Restore node selection + active
+        if self.node_tree:
+            for node, sel in self._node_selection_backup.items():
+                try:
+                    node.select = sel
+                except Exception:
+                    pass  # node may have been removed during bake
+            try:
+                self.node_tree.nodes.active = self._active_node_backup
+            except Exception:
+                pass
+
+        # Restore render engine
+        try:
+            self.context.scene.render.engine = self._engine_backup
+        except Exception:
+            pass
+
+        return False  # never suppress exceptions
+
+    def register_orphan(self, img):
+        """Queue an image for removal unless commit() is called after bake."""
+        if img is not None:
+            self._orphans.append(img)
+
+    def commit(self):
+        """Call after a bake succeeds — clears the pending-orphan queue so
+        currently-registered images are kept."""
+        self._orphans.clear()
+
+
 def _ensure_nodes(mat):
     """Make sure the material uses nodes."""
     if not mat.use_nodes:
@@ -68,6 +190,11 @@ def _add_layer_common(context, layer_type):
         layer.name = f"Fill {len(tlm.layers)}"
     elif layer_type == "ADJUSTMENT":
         layer.name = "Hue/Sat"
+    elif layer_type == "PROCEDURAL":
+        # proc_type defaults to 'NOISE' via the PropertyGroup definition.
+        layer.name = "Noise"
+    elif layer_type == "REFERENCE":
+        layer.name = f"Reference {len(tlm.layers)}"
 
     # Move new layer to the correct position (Photoshop convention).
     # layers.add() appends at end; move it to the right spot.

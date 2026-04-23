@@ -2,7 +2,7 @@ import bpy
 from bpy.types import Operator
 from bpy.props import StringProperty, IntProperty, EnumProperty, BoolProperty
 
-from ._common import _get_material, _ensure_nodes, _add_layer_common, compositing, previews
+from ._common import _get_material, _add_layer_common, compositing, previews
 
 
 class TLM_OT_AddPaintLayer(Operator):
@@ -73,48 +73,62 @@ class TLM_OT_AddProceduralLayer(Operator):
         return _get_material(context) is not None
 
     def execute(self, context):
+        name = _add_layer_common(context, "PROCEDURAL")
+        if name is None:
+            self.report({'ERROR'}, "No active material")
+            return {'CANCELLED'}
+        self.report({'INFO'}, f"Added procedural layer '{name}'")
+        return {'FINISHED'}
+
+
+class TLM_OT_AddReferenceLayer(Operator):
+    """Add a Reference layer that reuses the pattern of another layer.
+
+    The reference layer fetches the color/alpha output of the chosen source layer,
+    then applies its OWN blend mode, opacity, mask, and per-channel overrides.
+    Enables 'one pattern, many behaviors' workflows (e.g. same Voronoi drives
+    both base color and roughness with different blends)."""
+    bl_idname = "tlm.add_reference_layer"
+    bl_label = "Add Reference Layer"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
         mat = _get_material(context)
-        _ensure_nodes(mat)
+        # Need at least one non-REFERENCE layer to reference
+        if mat is None:
+            return False
+        return any(l.layer_type != "REFERENCE" for l in mat.tlm.layers)
+
+    def execute(self, context):
+        mat = _get_material(context)
         tlm = mat.tlm
 
+        # Try to auto-select a sensible default reference target: the active layer
+        # if it's a valid pattern layer, else the first non-REFERENCE layer.
+        default_ref = ""
         active = tlm.active_layer
-        parent_group = ""
-        if active:
-            if active.layer_type == "GROUP":
-                has_children = any(l.group_name == active.name for l in tlm.layers)
-                if has_children:
-                    parent_group = ""
-                else:
-                    parent_group = active.name
-            elif active.group_name:
-                parent_group = active.group_name
-
-        layer = tlm.layers.add()
-        layer.layer_type  = "PROCEDURAL"
-        layer.name        = "Noise"
-        layer.opacity     = 1.0
-        layer.blend_mode  = "MIX"
-        layer.visible     = True
-        layer.group_name  = parent_group
-        layer.proc_type   = 'NOISE'
-
-        new_idx = len(tlm.layers) - 1
-        if len(tlm.layers) > 1:
-            if parent_group and active and active.layer_type == "GROUP":
-                target = tlm.active_layer_index + 1
-            else:
-                target = tlm.active_layer_index
+        if active and active.layer_type in {"PAINT", "FILL", "PROCEDURAL"}:
+            default_ref = active.name
         else:
-            target = 0
-        while new_idx > target:
-            tlm.layers.move(new_idx, new_idx - 1)
-            new_idx -= 1
-        tlm.active_layer_index = new_idx
+            for l in tlm.layers:
+                if l.layer_type in {"PAINT", "FILL", "PROCEDURAL"}:
+                    default_ref = l.name
+                    break
+
+        name = _add_layer_common(context, "REFERENCE")
+        if name is None:
+            self.report({'ERROR'}, "No active material")
+            return {'CANCELLED'}
+
+        # Set the reference after the layer exists
+        new_layer = tlm.layers[tlm.active_layer_index]
+        new_layer.reference_layer_name = default_ref
 
         if tlm.auto_composite:
             compositing.rebuild_node_tree(mat)
 
-        self.report({'INFO'}, f"Added procedural layer '{layer.name}'")
+        self.report({'INFO'}, f"Added reference layer '{name}' → '{default_ref or '<unset>'}'")
         return {'FINISHED'}
 
 
@@ -140,6 +154,10 @@ class TLM_OT_RemoveLayer(Operator):
 
         layer = tlm.layers[idx]
         layer_name = layer.name
+
+        if layer.locked:
+            self.report({'WARNING'}, f"Layer '{layer_name}' is locked. Unlock it to remove.")
+            return {'CANCELLED'}
 
         if layer.layer_type == "GROUP":
             for other in tlm.layers:
@@ -177,6 +195,13 @@ class TLM_OT_MoveLayer(Operator):
         tlm = mat.tlm
         idx = tlm.active_layer_index
 
+        if 0 <= idx < len(tlm.layers) and tlm.layers[idx].locked:
+            self.report(
+                {'WARNING'},
+                f"Layer '{tlm.layers[idx].name}' is locked. Unlock it to move.",
+            )
+            return {'CANCELLED'}
+
         if self.direction == "UP" and idx > 0:
             tlm.layers.move(idx, idx - 1)
             tlm.active_layer_index = idx - 1
@@ -211,35 +236,26 @@ class TLM_OT_DuplicateLayer(Operator):
             return {'CANCELLED'}
 
         new_layer = tlm.layers.add()
-        new_layer.name = src.name + " Copy"
-        new_layer.layer_type = src.layer_type
-        new_layer.opacity = src.opacity
-        new_layer.blend_mode = src.blend_mode
-        new_layer.visible = src.visible
-        new_layer.fill_color = src.fill_color[:]
-        new_layer.use_mask = src.use_mask
-        new_layer.use_clipping_mask = src.use_clipping_mask
-        new_layer.group_name = src.group_name
-        new_layer.use_triplanar = src.use_triplanar
-        new_layer.triplanar_scale = src.triplanar_scale
-        new_layer.triplanar_sharpness = src.triplanar_sharpness
 
-        new_layer.use_roughness = src.use_roughness
-        new_layer.roughness_fill = src.roughness_fill
-        new_layer.roughness_image_name = src.roughness_image_name
-        new_layer.use_metallic = src.use_metallic
-        new_layer.metallic_fill = src.metallic_fill
-        new_layer.metallic_image_name = src.metallic_image_name
-        new_layer.use_normal = src.use_normal
-        new_layer.normal_image_name = src.normal_image_name
-        new_layer.normal_strength = src.normal_strength
-        new_layer.use_emission = src.use_emission
-        new_layer.emission_image_name = src.emission_image_name
-        new_layer.emission_color = src.emission_color[:]
-        new_layer.emission_strength = src.emission_strength
-        new_layer.use_bump = src.use_bump
-        new_layer.bump_strength = src.bump_strength
-        new_layer.bump_distance = src.bump_distance
+        # Copy ALL registered properties automatically.
+        # This prevents missed properties when new ones are added.
+        skip = {'name', 'image_name'}  # handled separately below
+        for prop in src.bl_rna.properties:
+            if prop.identifier in ('rna_type',) or prop.identifier in skip:
+                continue
+            if prop.is_readonly:
+                continue
+            try:
+                val = getattr(src, prop.identifier)
+                # FloatVectorProperty / color arrays need slice copy
+                if hasattr(val, '__len__') and not isinstance(val, str):
+                    setattr(new_layer, prop.identifier, val[:])
+                else:
+                    setattr(new_layer, prop.identifier, val)
+            except (AttributeError, TypeError):
+                pass
+
+        new_layer.name = src.name + " Copy"
 
         if src.image:
             orig = src.image
@@ -250,7 +266,7 @@ class TLM_OT_DuplicateLayer(Operator):
             previews.invalidate(dup.name)
 
         new_idx = len(tlm.layers) - 1
-        target = tlm.active_layer_index + 1
+        target = tlm.active_layer_index
         while new_idx > target:
             tlm.layers.move(new_idx, new_idx - 1)
             new_idx -= 1
@@ -283,6 +299,13 @@ class TLM_OT_MoveLayerToEnd(Operator):
         tlm = mat.tlm
         idx = tlm.active_layer_index
 
+        if 0 <= idx < len(tlm.layers) and tlm.layers[idx].locked:
+            self.report(
+                {'WARNING'},
+                f"Layer '{tlm.layers[idx].name}' is locked. Unlock it to move.",
+            )
+            return {'CANCELLED'}
+
         if self.direction == "TOP":
             while idx > 0:
                 tlm.layers.move(idx, idx - 1)
@@ -306,6 +329,7 @@ classes = [
     TLM_OT_AddFillLayer,
     TLM_OT_AddAdjustmentLayer,
     TLM_OT_AddProceduralLayer,
+    TLM_OT_AddReferenceLayer,
     TLM_OT_RemoveLayer,
     TLM_OT_MoveLayer,
     TLM_OT_DuplicateLayer,

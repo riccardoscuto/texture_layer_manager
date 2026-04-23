@@ -104,6 +104,12 @@ def _layer_to_dict(layer):
         "group_name":        layer.group_name,
         "collapsed":         layer.collapsed,
         "use_clipping_mask": layer.use_clipping_mask,
+        # Branching — per-channel blend mode overrides
+        "blend_mode_base_color":   getattr(layer, 'blend_mode_base_color',   'INHERIT'),
+        "blend_mode_roughness":    getattr(layer, 'blend_mode_roughness',    'INHERIT'),
+        "blend_mode_metallic":     getattr(layer, 'blend_mode_metallic',     'INHERIT'),
+        "blend_mode_emission":     getattr(layer, 'blend_mode_emission',     'INHERIT'),
+        "blend_mode_transmission": getattr(layer, 'blend_mode_transmission', 'INHERIT'),
     }
 
     if layer.layer_type == "PAINT":
@@ -132,7 +138,6 @@ def _layer_to_dict(layer):
         d["proc_wave_profile"]     = layer.proc_wave_profile
         d["proc_wave_detail_scale"]= round(layer.proc_wave_detail_scale, 4)
         d["proc_gradient_type"]    = layer.proc_gradient_type
-        d["proc_checker_scale"]    = round(layer.proc_checker_scale, 4)
         d["proc_contrast"]         = round(layer.proc_contrast, 4)
         d["proc_vector_distortion"]= round(layer.proc_vector_distortion, 4)
         d["proc_coord_type"]       = layer.proc_coord_type
@@ -143,6 +148,17 @@ def _layer_to_dict(layer):
         if d["use_proc_color3"]:
             d["proc_color3"]          = list(layer.proc_color3)
             d["proc_color3_position"] = round(layer.proc_color3_position, 4)
+        # Feature A — Advanced coordinates (POLAR / SPHERICAL / SWIRL / CYLINDRICAL)
+        d["proc_coord_transform"]  = getattr(layer, 'proc_coord_transform', 'NONE')
+        d["proc_swirl_amount"]     = round(getattr(layer, 'proc_swirl_amount', 2.0), 4)
+        # Feature B — Voronoi random per cell
+        d["proc_voronoi_random_color"] = getattr(layer, 'proc_voronoi_random_color', False)
+        d["proc_voronoi_random_seed"]  = round(getattr(layer, 'proc_voronoi_random_seed', 0.0), 4)
+
+    elif layer.layer_type == "REFERENCE":
+        # Reference layers reuse another layer's pattern — only the source name
+        # is distinctive; everything else is in the common mask/PBR sections.
+        d["reference_layer_name"] = getattr(layer, 'reference_layer_name', "")
 
     elif layer.layer_type == "ADJUSTMENT":
         d["adj_type"]        = layer.adj_type
@@ -171,6 +187,32 @@ def _layer_to_dict(layer):
         d["fresnel_strength"]  = round(getattr(layer, 'fresnel_strength', 1.0), 4)
         d["use_mask"]          = layer.use_mask
         d["mask_image_name"]   = layer.mask_image_name
+        # Feature C — Advanced combinable masks
+        d["mask_source"]        = getattr(layer, 'mask_source', 'IMAGE')
+        d["mask_invert"]        = getattr(layer, 'mask_invert', False)
+        d["mask_ao_distance"]   = round(getattr(layer, 'mask_ao_distance', 0.5), 4)
+        d["use_mask_b"]         = getattr(layer, 'use_mask_b', False)
+        d["mask_source_b"]      = getattr(layer, 'mask_source_b', 'POINTINESS')
+        d["mask_image_name_b"]  = getattr(layer, 'mask_image_name_b', "")
+        d["mask_invert_b"]      = getattr(layer, 'mask_invert_b', False)
+        d["mask_ao_distance_b"] = round(getattr(layer, 'mask_ao_distance_b', 0.5), 4)
+        d["mask_combine"]       = getattr(layer, 'mask_combine', 'MULTIPLY')
+        d["mask_contrast"]      = round(getattr(layer, 'mask_contrast', 0.5), 4)
+        # Mask refinement — Levels (Photoshop style)
+        d["use_mask_levels"]     = getattr(layer, 'use_mask_levels', False)
+        d["mask_levels_in_min"]  = round(getattr(layer, 'mask_levels_in_min', 0.0), 4)
+        d["mask_levels_in_max"]  = round(getattr(layer, 'mask_levels_in_max', 1.0), 4)
+        d["mask_levels_gamma"]   = round(getattr(layer, 'mask_levels_gamma', 1.0), 4)
+        d["mask_levels_out_min"] = round(getattr(layer, 'mask_levels_out_min', 0.0), 4)
+        d["mask_levels_out_max"] = round(getattr(layer, 'mask_levels_out_max', 1.0), 4)
+        # Mask refinement — Softness + Blur
+        d["mask_softness"]       = round(getattr(layer, 'mask_softness', 0.0), 4)
+        d["mask_blur"]           = round(getattr(layer, 'mask_blur', 0.0), 4)
+        # Smart-generator parameters (shared across EDGE_WEAR/DIRT/CURVATURE_SMART)
+        d["mask_gen_intensity"]      = round(getattr(layer, 'mask_gen_intensity', 1.0), 4)
+        d["mask_gen_breakup"]        = round(getattr(layer, 'mask_gen_breakup', 0.3), 4)
+        d["mask_gen_breakup_scale"]  = round(getattr(layer, 'mask_gen_breakup_scale', 15.0), 4)
+        d["mask_gen_sharpness"]      = round(getattr(layer, 'mask_gen_sharpness', 0.5), 4)
         d["use_triplanar"]     = getattr(layer, 'use_triplanar', False)
         d["triplanar_scale"]   = round(getattr(layer, 'triplanar_scale', 1.0), 4)
         d["triplanar_sharpness"] = round(getattr(layer, 'triplanar_sharpness', 1.0), 4)
@@ -186,6 +228,9 @@ def _layer_to_dict(layer):
         d["bump_distance"]     = round(layer.bump_distance, 4)
         d["use_normal"]        = getattr(layer, 'use_normal', False)
         d["normal_image_name"]    = getattr(layer, 'normal_image_name', "")
+        d["normal_strength"]   = round(getattr(layer, 'normal_strength', 1.0), 4)
+        d["normal_tile_scale"] = round(getattr(layer, 'normal_tile_scale', 1.0), 4)
+        d["normal_rotation"]   = round(getattr(layer, 'normal_rotation', 0.0), 4)
         d["use_emission"]      = getattr(layer, 'use_emission', False)
         if layer.use_emission:
             d["emission_color"]    = list(layer.emission_color)
@@ -210,6 +255,12 @@ def _dict_to_layer(d, tlm):
     layer.group_name        = d.get("group_name", "")
     layer.collapsed         = d.get("collapsed", False)
     layer.use_clipping_mask = d.get("use_clipping_mask", False)
+    # Branching — per-channel blend mode overrides (INHERIT default = backward-compat)
+    layer.blend_mode_base_color   = d.get("blend_mode_base_color",   "INHERIT")
+    layer.blend_mode_roughness    = d.get("blend_mode_roughness",    "INHERIT")
+    layer.blend_mode_metallic     = d.get("blend_mode_metallic",     "INHERIT")
+    layer.blend_mode_emission     = d.get("blend_mode_emission",     "INHERIT")
+    layer.blend_mode_transmission = d.get("blend_mode_transmission", "INHERIT")
 
     if layer.layer_type == "PAINT":
         img_name = d.get("image_name", layer.name)
@@ -229,8 +280,18 @@ def _dict_to_layer(d, tlm):
         layer.fill_color = fc
 
     elif layer.layer_type == "PROCEDURAL":
-        layer.proc_type             = d.get("proc_type", "NOISE")
-        layer.proc_scale            = d.get("proc_scale", 5.0)
+        # Back-compat migrations for removed proc_types/props:
+        # • CLOUDS was merged into NOISE (identical underlying node).
+        # • proc_checker_scale was merged into the shared proc_scale.
+        _proc_type_raw = d.get("proc_type", "NOISE")
+        if _proc_type_raw == "CLOUDS":
+            _proc_type_raw = "NOISE"
+        layer.proc_type             = _proc_type_raw
+        # If the preset had a distinct checker scale, honor it on CHECKER layers.
+        if _proc_type_raw == "CHECKER" and "proc_checker_scale" in d:
+            layer.proc_scale        = d["proc_checker_scale"]
+        else:
+            layer.proc_scale        = d.get("proc_scale", 5.0)
         layer.proc_color1           = d.get("proc_color1", [0,0,0,1])
         layer.proc_color2           = d.get("proc_color2", [1,1,1,1])
         layer.proc_detail           = d.get("proc_detail", 2.0)
@@ -247,7 +308,6 @@ def _dict_to_layer(d, tlm):
         layer.proc_wave_profile     = d.get("proc_wave_profile", "SIN")
         layer.proc_wave_detail_scale= d.get("proc_wave_detail_scale", 1.0)
         layer.proc_gradient_type    = d.get("proc_gradient_type", "LINEAR")
-        layer.proc_checker_scale    = d.get("proc_checker_scale", 5.0)
         layer.proc_contrast         = d.get("proc_contrast", 0.5)
         layer.proc_vector_distortion= d.get("proc_vector_distortion", 0.0)
         layer.proc_coord_type       = d.get("proc_coord_type", "GENERATED")
@@ -258,6 +318,15 @@ def _dict_to_layer(d, tlm):
         if layer.use_proc_color3:
             layer.proc_color3          = d.get("proc_color3", [0.5, 0.5, 0.5, 1])
             layer.proc_color3_position = d.get("proc_color3_position", 0.5)
+        # Feature A — Advanced coordinates
+        layer.proc_coord_transform  = d.get("proc_coord_transform", "NONE")
+        layer.proc_swirl_amount     = d.get("proc_swirl_amount", 2.0)
+        # Feature B — Voronoi random per cell
+        layer.proc_voronoi_random_color = d.get("proc_voronoi_random_color", False)
+        layer.proc_voronoi_random_seed  = d.get("proc_voronoi_random_seed", 0.0)
+
+    elif layer.layer_type == "REFERENCE":
+        layer.reference_layer_name = d.get("reference_layer_name", "")
 
     elif layer.layer_type == "ADJUSTMENT":
         layer.adj_type       = d.get("adj_type", "HUE_SAT")
@@ -287,6 +356,32 @@ def _dict_to_layer(d, tlm):
         layer.fresnel_strength  = d.get("fresnel_strength", 1.0)
         layer.use_mask          = d.get("use_mask", False)
         layer.mask_image_name   = d.get("mask_image_name", "")
+        # Feature C — Advanced combinable masks
+        layer.mask_source        = d.get("mask_source", "IMAGE")
+        layer.mask_invert        = d.get("mask_invert", False)
+        layer.mask_ao_distance   = d.get("mask_ao_distance", 0.5)
+        layer.use_mask_b         = d.get("use_mask_b", False)
+        layer.mask_source_b      = d.get("mask_source_b", "POINTINESS")
+        layer.mask_image_name_b  = d.get("mask_image_name_b", "")
+        layer.mask_invert_b      = d.get("mask_invert_b", False)
+        layer.mask_ao_distance_b = d.get("mask_ao_distance_b", 0.5)
+        layer.mask_combine       = d.get("mask_combine", "MULTIPLY")
+        layer.mask_contrast      = d.get("mask_contrast", 0.5)
+        # Mask refinement — Levels
+        layer.use_mask_levels     = d.get("use_mask_levels", False)
+        layer.mask_levels_in_min  = d.get("mask_levels_in_min", 0.0)
+        layer.mask_levels_in_max  = d.get("mask_levels_in_max", 1.0)
+        layer.mask_levels_gamma   = d.get("mask_levels_gamma", 1.0)
+        layer.mask_levels_out_min = d.get("mask_levels_out_min", 0.0)
+        layer.mask_levels_out_max = d.get("mask_levels_out_max", 1.0)
+        # Mask refinement — Softness + Blur
+        layer.mask_softness       = d.get("mask_softness", 0.0)
+        layer.mask_blur           = d.get("mask_blur", 0.0)
+        # Smart generator parameters
+        layer.mask_gen_intensity     = d.get("mask_gen_intensity", 1.0)
+        layer.mask_gen_breakup       = d.get("mask_gen_breakup", 0.3)
+        layer.mask_gen_breakup_scale = d.get("mask_gen_breakup_scale", 15.0)
+        layer.mask_gen_sharpness     = d.get("mask_gen_sharpness", 0.5)
         layer.use_triplanar     = d.get("use_triplanar", False)
         layer.triplanar_scale   = d.get("triplanar_scale", 1.0)
         layer.triplanar_sharpness = d.get("triplanar_sharpness", 1.0)
@@ -302,6 +397,9 @@ def _dict_to_layer(d, tlm):
         layer.bump_distance        = d.get("bump_distance", 0.05)
         layer.use_normal           = d.get("use_normal", False)
         layer.normal_image_name    = d.get("normal_image_name", "")
+        layer.normal_strength      = d.get("normal_strength", 1.0)
+        layer.normal_tile_scale    = d.get("normal_tile_scale", 1.0)
+        layer.normal_rotation      = d.get("normal_rotation", 0.0)
         layer.use_emission         = d.get("use_emission", False)
         layer.emission_image_name  = d.get("emission_image_name", "")
         if layer.use_emission:
@@ -338,7 +436,7 @@ class TLM_OT_ExportJSON(Operator):
         tlm = mat.tlm
 
         data = {
-            "tlm_version": "0.3.16",
+            "tlm_version": "0.4.0",
             "material":    mat.name,
             "resolution":  tlm.resolution,
             "uv_map":      tlm.uv_map,

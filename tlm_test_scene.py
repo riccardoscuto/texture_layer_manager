@@ -500,7 +500,7 @@ def build_material_3(plane):
     layer = tlm.layers[tlm.active_layer_index]
     layer.name = "Checker Pattern"
     layer.proc_type = "CHECKER"
-    layer.proc_checker_scale = 4.0
+    layer.proc_scale = 4.0
     layer.proc_color1 = (0.1, 0.1, 0.1, 1.0)
     layer.proc_color2 = (0.9, 0.9, 0.9, 1.0)
     layer.blend_mode = "MULTIPLY"

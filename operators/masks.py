@@ -2,7 +2,7 @@
 
 import bpy
 from bpy.types import Operator
-from ._common import _get_material, compositing
+from ._common import _get_material, compositing, _BakeGuard, _bake_preflight
 
 
 class TLM_OT_AddLayerMask(Operator):
@@ -94,6 +94,14 @@ class TLM_OT_AddSmartMask(Operator):
         if not layer:
             return {'CANCELLED'}
 
+        # Pre-flight: UVs / mesh / active object. Smart masks use Cycles bake
+        # ('AO' / 'DIFFUSE') which requires all of these — fail fast with a
+        # useful message rather than a silent console error.
+        ok, err = _bake_preflight(context)
+        if not ok:
+            self.report({'ERROR'}, err)
+            return {'CANCELLED'}
+
         node_tree = mat.node_tree
         if not node_tree:
             mat.use_nodes = True
@@ -108,41 +116,52 @@ class TLM_OT_AddSmartMask(Operator):
         img_name = f"{layer.name}_SmartMask_{self.mask_type}"
         if img_name in bpy.data.images:
             bpy.data.images.remove(bpy.data.images[img_name])
-        img = bpy.data.images.new(img_name, width=res, height=res, alpha=False)
-        try:
-            img.colorspace_settings.name = "Non-Color"
-        except Exception:
-            pass
 
-        bake_node = node_tree.nodes.new("ShaderNodeTexImage")
-        bake_node.name = "TLM_smartmask_bake"
-        bake_node.image = img
-        bake_node.location = (800, -200)
-        for n in node_tree.nodes:
-            n.select = False
-        bake_node.select = True
-        node_tree.nodes.active = bake_node
+        bake_ok = False
+        # _BakeGuard forces CYCLES, restores node selection, and auto-removes
+        # the bake image on failure so bpy.data.images is left clean.
+        with _BakeGuard(context, node_tree) as guard:
+            img = bpy.data.images.new(img_name, width=res, height=res, alpha=False)
+            guard.register_orphan(img)
+            try:
+                img.colorspace_settings.name = "Non-Color"
+            except Exception:
+                pass
 
-        try:
-            if self.mask_type == 'AO':
-                bpy.ops.object.bake(type='AO', save_mode='INTERNAL')
-            else:
-                bpy.ops.object.bake(type='DIFFUSE', pass_filter={'COLOR'}, save_mode='INTERNAL')
-            img.pack()
-            layer.use_mask = True
-            layer.mask_image_name = img.name
-            self.report({'INFO'}, f"Smart mask '{self.mask_type}' applied to '{layer.name}'")
-        except Exception as e:
-            self.report({'WARNING'}, f"Bake failed: {e}. Nodes added but mask not baked.")
-        finally:
-            node_tree.nodes.remove(bake_node)
-            for n in [n for n in node_tree.nodes if n.name.startswith("TLM_sm_")]:
-                node_tree.nodes.remove(n)
+            bake_node = node_tree.nodes.new("ShaderNodeTexImage")
+            bake_node.name = "TLM_smartmask_bake"
+            bake_node.image = img
+            bake_node.location = (800, -200)
+            for n in node_tree.nodes:
+                n.select = False
+            bake_node.select = True
+            node_tree.nodes.active = bake_node
+
+            try:
+                if self.mask_type == 'AO':
+                    bpy.ops.object.bake(type='AO', save_mode='INTERNAL')
+                else:
+                    bpy.ops.object.bake(type='DIFFUSE', pass_filter={'COLOR'}, save_mode='INTERNAL')
+                img.pack()
+                layer.use_mask = True
+                layer.mask_image_name = img.name
+                bake_ok = True
+                guard.commit()  # bake succeeded — keep img
+                self.report({'INFO'}, f"Smart mask '{self.mask_type}' applied to '{layer.name}'")
+            except Exception as e:
+                self.report({'WARNING'}, f"Bake failed: {e}. Nodes added but mask not baked.")
+            finally:
+                # Always clean up the temp bake node + procedural smart-mask nodes,
+                # regardless of bake success.
+                if bake_node.name in node_tree.nodes:
+                    node_tree.nodes.remove(bake_node)
+                for n in [n for n in node_tree.nodes if n.name.startswith("TLM_sm_")]:
+                    node_tree.nodes.remove(n)
 
         if tlm.auto_composite:
             compositing.rebuild_node_tree(mat)
 
-        return {'FINISHED'}
+        return {'FINISHED'} if bake_ok else {'CANCELLED'}
 
     def _build_smart_mask_nodes(self, node_tree):
         """Build procedural smart mask nodes (not baked yet)."""
