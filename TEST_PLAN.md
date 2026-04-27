@@ -399,7 +399,7 @@ Un Reference riusa il pattern (color+alpha) di un altro layer ma applica proprio
 ### 8.1 Create group + move layer inside
 **Setup**: Add Group → crea layer Fill → Move to Group.
 **Expected**: Layer compare nested sotto il group. Indentazione visibile nella UIList.
-☐ Pass ☐ Fail — Note:
+☐ Pass ☐ Fail Nie gruppi, non funzionano le lampadine e l'occhio dei gruppi  Note:
 
 ### 8.2 Group collapse / expand
 **Setup**: Click triangolo sul group.
@@ -409,17 +409,17 @@ Un Reference riusa il pattern (color+alpha) di un altro layer ma applica proprio
 ### 8.3 Group opacity
 **Setup**: Group con 2 children colorati. Group opacity = 0.3.
 **Expected**: Tutto il gruppo semitrasparente rispetto al fondo.
-☐ Pass ☐ Fail — Note:
+☐ Pass ☐ Fail — Note: Non funziona 
 
 ### 8.4 Group blend mode
 **Setup**: Group blend = MULTIPLY.
 **Expected**: Tutto il gruppo moltiplica come un unico layer.
-☐ Pass ☐ Fail — Note:
+☐ Pass ☐ Fail — Note: non funziona 
 
 ### 8.5 Group mask
 **Setup**: Group con mask (immagine o smart).
 **Expected**: Mask si applica a tutto il gruppo.
-☐ Pass ☐ Fail — Note:
+☐ Pass ☐ Fail — Note: non presente l'opzione 
 
 ### 8.6 Remove from Group
 **Setup**: Layer dentro group → Remove from Group.
@@ -434,7 +434,7 @@ Un Reference riusa il pattern (color+alpha) di un altro layer ma applica proprio
 ### 8.8 Nested groups
 **Setup**: Group dentro Group (se supportato).
 **Expected**: Funziona o errore chiaro.
-☐ Pass ☐ Fail — Note:
+☐ Pass ☐ Fail — Note: Non funziona. Rimuovere 
 
 ---
 
@@ -450,7 +450,7 @@ Un Reference riusa il pattern (color+alpha) di un altro layer ma applica proprio
 ### 9.2 Dipingi sulla mask
 **Setup**: Seleziona layer → Texture Paint → dipingi nero sulla mask.
 **Expected**: Zone nere = layer invisibile. Update live.
-☐ Pass ☐ Fail — Note:
+☐ Pass ☐ Fail — Note:  non ho capito cosa devo fare 
 
 ### 9.3 Mask source = AO (live)
 **Setup**: Fill → mask_source = AO. Distance = 1.0.

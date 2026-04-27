@@ -108,6 +108,13 @@ class TLM_OT_SoloLayer(Operator):
             layer_name = tlm.layers[self.layer_index].name
             self.report({'INFO'}, f"Solo: '{layer_name}'")
 
+        # Also make this the active layer so the property panel below the
+        # layer list reflects the layer being soloed. Without this, soloing
+        # a layer while a different one is selected leaves the property
+        # editor showing stale data — confusing because the user looks at
+        # the panel expecting it to describe the soloed layer.
+        tlm.active_layer_index = self.layer_index
+
         if tlm.auto_composite:
             compositing.rebuild_node_tree(mat)
 

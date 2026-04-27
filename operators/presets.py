@@ -453,24 +453,38 @@ class TLM_OT_ApplyPreset(Operator):
                 try:
                     with open(preset_file, 'r') as f:
                         data = json.load(f)
+                    if not isinstance(data, dict):
+                        self.report({'ERROR'},
+                                    f"Invalid preset file: top-level must be an object")
+                        return {'CANCELLED'}
                     preset_layers = data.get("layers", [])
-                except (ValueError, OSError) as e:
+                except (ValueError, OSError, TypeError) as e:
                     self.report({'ERROR'}, f"Invalid preset file: {e}")
                     return {'CANCELLED'}
             else:
                 self.report({'ERROR'}, f"Preset '{self.preset_name}' not found")
                 return {'CANCELLED'}
 
+        # Schema validation: corrupted/hand-edited presets shouldn't crash Blender.
+        if not isinstance(preset_layers, list):
+            self.report({'ERROR'}, "Invalid preset format: 'layers' must be an array")
+            return {'CANCELLED'}
+
         if not self.merge:
             tlm.layers.clear()
 
-        for ld in preset_layers:
+        # Per-layer apply isolated in a closure so a single malformed entry
+        # can be rolled back without aborting the whole preset import.
+        def _apply_layer_dict(ld):
             layer = tlm.layers.add()
             layer.name       = ld.get("name", "Layer")
             layer.layer_type = ld.get("type", "FILL")
             layer.opacity    = ld.get("opacity", 1.0)
             layer.visible    = ld.get("visible", True)
-            layer.group_name = ld.get("group_name", "")
+            # GROUP layers are always root-level — discard any stray parent
+            # so a hand-edited preset can't produce a nested-group state.
+            _raw_group = ld.get("group_name", "")
+            layer.group_name = "" if layer.layer_type == "GROUP" else _raw_group
             layer.collapsed  = ld.get("collapsed", False)
             layer.use_clipping_mask = ld.get("use_clipping_mask", False)
             # Branching — per-channel blend mode overrides
@@ -630,11 +644,31 @@ class TLM_OT_ApplyPreset(Operator):
                 layer.transmission_fill       = ld.get("transmission_fill", 0.0)
                 layer.transmission_image_name = ld.get("transmission_image_name", "")
 
+        skipped = 0
+        for ld in preset_layers:
+            if not isinstance(ld, dict):
+                skipped += 1
+                continue
+            count_before = len(tlm.layers)
+            try:
+                _apply_layer_dict(ld)
+            except Exception as e:
+                # Roll back partial layer if the failure happened mid-way
+                while len(tlm.layers) > count_before:
+                    tlm.layers.remove(len(tlm.layers) - 1)
+                skipped += 1
+                print(f"[TLM] Skipped malformed preset layer: {e}")
+
         tlm.active_layer_index = max(0, len(tlm.layers) - 1)
         if tlm.auto_composite:
             compositing.rebuild_node_tree(mat)
 
-        self.report({'INFO'}, f"Applied preset '{self.preset_name}'")
+        if skipped:
+            self.report({'WARNING'},
+                        f"Applied preset '{self.preset_name}' "
+                        f"(skipped {skipped} malformed layers)")
+        else:
+            self.report({'INFO'}, f"Applied preset '{self.preset_name}'")
         return {'FINISHED'}
 
 

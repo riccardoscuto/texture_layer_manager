@@ -28,10 +28,18 @@ def get_layer_icon_id(layer):
 
 
 def get_fill_icon_id(layer):
-    """Return icon_id for a fill layer (solid color swatch).
+    """DEPRECATED — kept only for backwards compatibility with external tools.
 
-    Creates a tiny 4x4 image filled with the layer color and uses
-    Blender's native preview system to display it.
+    The TLM_UL_LayerList no longer calls this: FILL layers now use a native
+    ``layout.prop(..., "fill_color")`` widget which renders a small color
+    swatch without creating image datablocks. Creating ``.tlm_swatch_*``
+    images polluted the ``bpy.data, "images"`` dropdowns used to pick
+    textures (mask source, PBR channels, etc.).
+
+    The function still works (creates a 4x4 image and returns its icon_id),
+    but its results are no longer used internally. Will be removed in 1.0.
+
+    Returns icon_id for a fill layer (solid color swatch).
     """
     r, g, b, a = layer.fill_color
     key = f"{r:.2f},{g:.2f},{b:.2f},{a:.2f}"
@@ -88,15 +96,79 @@ def invalidate_all():
             bpy.data.images.remove(img)
 
 
+def cleanup_orphan_swatches():
+    """Remove all .tlm_swatch_* images from bpy.data.images.
+
+    Safe to call any time EXCEPT during register() / .blend load: bpy.data
+    is in 'restricted' mode there and accessing bpy.data.images raises
+    `_RestrictData` AttributeError. Use _deferred_swatch_cleanup() (timer)
+    or schedule via load_post handler instead.
+
+    These images are never linked into a node tree — they only existed as
+    preview sources for the old FILL icon path. .blend files saved before
+    the FILL widget migration may still contain them.
+    """
+    removed = 0
+    try:
+        images = list(bpy.data.images)
+    except AttributeError:
+        # bpy.data restricted (mid-register or mid-load) — caller should
+        # defer via timer.
+        return 0
+    for img in images:
+        if img.name.startswith(".tlm_swatch_"):
+            try:
+                bpy.data.images.remove(img)
+                removed += 1
+            except Exception:
+                pass
+    if removed:
+        print(f"[TLM] Removed {removed} orphan .tlm_swatch_* image(s)")
+    return removed
+
+
+def _deferred_swatch_cleanup():
+    """One-shot timer body — runs once Blender is past the restricted phase."""
+    try:
+        cleanup_orphan_swatches()
+    except Exception:
+        import traceback
+        traceback.print_exc()
+    return None  # returning None unregisters this timer
+
+
+@bpy.app.handlers.persistent
+def _on_load_post(*_args):
+    """Sweep .tlm_swatch_* images when a .blend file is loaded.
+
+    Files saved before the FILL widget migration carry stale swatches; this
+    handler keeps the dropdowns clean after every load. Decorated with
+    @persistent so it survives 'New File' clearing the handler list.
+    """
+    try:
+        cleanup_orphan_swatches()
+    except Exception:
+        pass
+
+
 def register():
     global _fill_cache
     _fill_cache = {}
+    # bpy.data is restricted during register() — schedule the sweep on a
+    # timer so it runs once Blender is past the restricted phase.
+    try:
+        bpy.app.timers.register(_deferred_swatch_cleanup, first_interval=0.5)
+    except Exception:
+        pass
+    if _on_load_post not in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.append(_on_load_post)
 
 
 def unregister():
     global _fill_cache
-    # Clean up swatch images
-    for img in list(bpy.data.images):
-        if img.name.startswith(".tlm_swatch_"):
-            bpy.data.images.remove(img)
+    if _on_load_post in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.remove(_on_load_post)
+    # Sweep once more on disable (best-effort — bpy.data may be restricted
+    # if Blender is mid-shutdown).
+    cleanup_orphan_swatches()
     _fill_cache = {}

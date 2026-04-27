@@ -252,7 +252,10 @@ def _dict_to_layer(d, tlm):
     layer.locked     = d.get("locked", False)
     layer.opacity    = d.get("opacity", 1.0)
     layer.blend_mode = d.get("blend_mode", "MIX")
-    layer.group_name        = d.get("group_name", "")
+    # GROUP layers are always root-level — discard any stray parent to
+    # block nested-group states from arriving via external files.
+    _raw_group = d.get("group_name", "")
+    layer.group_name = "" if layer.layer_type == "GROUP" else _raw_group
     layer.collapsed         = d.get("collapsed", False)
     layer.use_clipping_mask = d.get("use_clipping_mask", False)
     # Branching — per-channel blend mode overrides (INHERIT default = backward-compat)
@@ -494,13 +497,36 @@ class TLM_OT_ImportJSON(Operator):
             self.report({'ERROR'}, f"Import failed: {e}")
             return {'CANCELLED'}
 
+        # Schema validation: top-level must be a dict, "layers" must be a list.
+        # A malformed file (corrupted, hand-edited, future version) shouldn't
+        # crash Blender — fail soft with a user-visible error.
+        if not isinstance(data, dict):
+            self.report({'ERROR'}, "Invalid .tlm file: top-level must be an object")
+            return {'CANCELLED'}
+        layers_data = data.get("layers", [])
+        if not isinstance(layers_data, list):
+            self.report({'ERROR'}, "Invalid .tlm file: 'layers' must be an array")
+            return {'CANCELLED'}
+
         if not self.merge:
             # Clear existing layers
             tlm.layers.clear()
 
-        layers_data = data.get("layers", [])
+        imported = 0
+        skipped = 0
         for ld in layers_data:
-            _dict_to_layer(ld, tlm)
+            if not isinstance(ld, dict):
+                skipped += 1
+                continue
+            try:
+                _dict_to_layer(ld, tlm)
+                imported += 1
+            except Exception as e:
+                # Drop the half-built layer if _dict_to_layer added one before failing
+                if len(tlm.layers) > imported and not self.merge:
+                    tlm.layers.remove(len(tlm.layers) - 1)
+                skipped += 1
+                print(f"[TLM] Skipped malformed layer in {os.path.basename(filepath)}: {e}")
 
         # Restore settings if not merging
         if not self.merge:
@@ -512,7 +538,13 @@ class TLM_OT_ImportJSON(Operator):
         if tlm.auto_composite:
             compositing.rebuild_node_tree(mat)
 
-        self.report({'INFO'}, f"Imported {len(layers_data)} layers from {os.path.basename(filepath)}")
+        if skipped:
+            self.report({'WARNING'},
+                        f"Imported {imported} layers, skipped {skipped} malformed "
+                        f"from {os.path.basename(filepath)}")
+        else:
+            self.report({'INFO'},
+                        f"Imported {imported} layers from {os.path.basename(filepath)}")
         return {'FINISHED'}
 
 

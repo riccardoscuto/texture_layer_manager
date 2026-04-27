@@ -42,10 +42,20 @@ classes = (
 
 
 def register():
+    # Defensive: drop stale registrations before re-registering. See
+    # properties.register() for the rationale.
+    for cls in classes:
+        try:
+            bpy.utils.unregister_class(cls)
+        except (RuntimeError, ValueError):
+            pass
     for cls in classes:
         bpy.utils.register_class(cls)
 
 
 def unregister():
     for cls in reversed(classes):
-        bpy.utils.unregister_class(cls)
+        try:
+            bpy.utils.unregister_class(cls)
+        except (RuntimeError, ValueError):
+            pass

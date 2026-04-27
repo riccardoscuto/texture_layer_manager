@@ -42,6 +42,48 @@ _PBR_BADGE = {
 }
 
 
+def _is_at_compositor_bottom(active, tlm):
+    """True if ``active`` will be the first layer composited in its scope.
+
+    The compositor processes ``reversed(tlm.layers)`` (see compositing.py
+    _composite_layer_list and rebuild_node_tree). Within a scope — root
+    (``group_name == ""``) or the same non-empty ``group_name`` — the layer
+    with the highest tlm.layers index is the first to be composited. For
+    that layer ``prev_alpha`` is always None, so Clipping Mask silently
+    does nothing (see compositing.py _set_factor, clipping branch).
+
+    We use this to surface a UI warning next to the Clipping Mask toggle.
+    Invisible and ADJUSTMENT siblings are skipped because they don't
+    produce a ``prev_alpha`` either.
+    """
+    if active is None or tlm is None:
+        return False
+    try:
+        active_idx = list(tlm.layers).index(active)
+    except ValueError:
+        return False
+    scope = active.group_name
+    for i in range(active_idx + 1, len(tlm.layers)):
+        other = tlm.layers[i]
+        if not other.visible:
+            continue
+        if other.layer_type == "ADJUSTMENT":
+            continue
+        if other.group_name == scope:
+            return False
+    return True
+
+
+def _draw_clipping_mask(col, active, tlm):
+    """Draw the Clipping Mask toggle + a warning label if the layer is at
+    the compositor bottom (where the clip silently has no effect)."""
+    col.prop(active, "use_clipping_mask",
+             text="Clipping Mask", icon='CLIPUV_DEHLT', toggle=True)
+    if active.use_clipping_mask and _is_at_compositor_bottom(active, tlm):
+        col.label(text="No effect — nothing to clip against below",
+                  icon='ERROR')
+
+
 class TLM_UL_LayerList(UIList):
     bl_idname = "TLM_UL_layer_list"
 
@@ -67,9 +109,19 @@ class TLM_UL_LayerList(UIList):
             op = row.operator("tlm.toggle_group_collapse", text="", icon=col_icon, emboss=False)
             op.layer_index = index
             row.label(text="", icon='FILE_FOLDER')
+        elif layer.layer_type == "FILL":
+            # Native color widget — also serves as a quick-edit click target.
+            # Avoids creating .tlm_swatch_* image datablocks that would pollute
+            # the bpy.data.images dropdowns used to pick textures elsewhere.
+            # scale_x compresses to roughly the same visual width as the paint
+            # preview icon (16px). Blender enforces a minimum widget width so
+            # values below ~0.3 don't shrink further.
+            swatch = row.row(align=True)
+            swatch.scale_x = 0.35
+            swatch.prop(layer, "fill_color", text="")
         else:
             fallback = {
-                'PAINT': 'IMAGE_RGB_ALPHA', 'FILL': 'COLOR',
+                'PAINT': 'IMAGE_RGB_ALPHA',
                 'ADJUSTMENT': 'MODIFIER', 'PROCEDURAL': 'TEXTURE',
                 'REFERENCE': 'LINKED',
             }.get(layer.layer_type, 'IMAGE_DATA')
@@ -77,8 +129,6 @@ class TLM_UL_LayerList(UIList):
             try:
                 if layer.layer_type == "PAINT":
                     iid = previews.get_layer_icon_id(layer)
-                elif layer.layer_type == "FILL":
-                    iid = previews.get_fill_icon_id(layer)
             except Exception:
                 iid = 0
             if iid and iid > 0:
@@ -228,9 +278,12 @@ def _draw_active_layer(layout, active, tlm, mat):
     elif active.layer_type == "REFERENCE":
         _draw_reference(col, active, tlm)
     elif active.layer_type == "GROUP":
-        gr = col.row(align=True)
-        gr.prop(active, "opacity", slider=True)
-        gr.operator("tlm.keyframe_opacity", text="", icon='KEYFRAME_HLT',
+        # Blend mode + opacity row — group treats its composited output as a
+        # single layer, so these apply to the entire folder.
+        br = col.row(align=True)
+        br.prop(active, "blend_mode", text="")
+        br.prop(active, "opacity", text="Opacity", slider=True)
+        br.operator("tlm.keyframe_opacity", text="", icon='KEYFRAME_HLT',
                     emboss=False).action = 'INSERT'
         children = [l for l in tlm.layers if l.group_name == active.name]
         n_vis = sum(1 for l in children if l.visible)
@@ -238,6 +291,11 @@ def _draw_active_layer(layout, active, tlm, mat):
             text=f"{len(children)} layer{'s' if len(children) != 1 else ''}  ({n_vis} visible)",
             icon='LAYER_ACTIVE'
         )
+        # Mask section — masks the group's composited output so the mask
+        # applies uniformly to every child (same behavior as a Photoshop
+        # group mask).
+        col.separator(factor=0.4)
+        _draw_mask_block(col, active)
     elif active.layer_type == "ADJUSTMENT":
         _draw_adjustment(col, active, tlm)
     else:
@@ -355,8 +413,7 @@ def _draw_procedural(col, active, tlm):
     col.separator(factor=0.6)
     _draw_mask_block(col, active)
 
-    col.prop(active, "use_clipping_mask",
-             text="Clipping Mask", icon='CLIPUV_DEHLT', toggle=True)
+    _draw_clipping_mask(col, active, tlm)
 
     col.separator(factor=0.6)
     _draw_pbr_channels(col, active, tlm)
@@ -418,7 +475,7 @@ def _draw_mask_block(col, active):
         mr.prop(active, "mask_source", text="")
     if not active.use_mask:
         mr.operator("tlm.add_layer_mask", text="Add",   icon='ADD')
-    mr.operator("tlm.add_smart_mask",     text="Smart", icon='SHADERFX')
+    mr.operator("tlm.add_smart_mask",     text="Bake",  icon='SHADERFX')
 
     if not active.use_mask:
         return
@@ -516,8 +573,7 @@ def _draw_reference(col, active, tlm):
     col.separator(factor=0.6)
     _draw_mask_block(col, active)
 
-    col.prop(active, "use_clipping_mask",
-             text="Clipping Mask", icon='CLIPUV_DEHLT', toggle=True)
+    _draw_clipping_mask(col, active, tlm)
 
     col.separator(factor=0.6)
     fr = col.row(align=True)
@@ -603,8 +659,7 @@ def _draw_paint_fill(col, active, tlm):
     col.separator(factor=0.6)
     _draw_mask_block(col, active)
 
-    col.prop(active, "use_clipping_mask",
-             text="Clipping Mask", icon='CLIPUV_DEHLT', toggle=True)
+    _draw_clipping_mask(col, active, tlm)
 
     col.separator(factor=0.6)
     fr = col.row(align=True)
@@ -910,10 +965,20 @@ classes = [
 
 
 def register():
+    # Defensive: drop stale registrations before re-registering. See
+    # properties.register() for the rationale.
+    for cls in classes:
+        try:
+            bpy.utils.unregister_class(cls)
+        except (RuntimeError, ValueError):
+            pass
     for cls in classes:
         bpy.utils.register_class(cls)
 
 
 def unregister():
     for cls in reversed(classes):
-        bpy.utils.unregister_class(cls)
+        try:
+            bpy.utils.unregister_class(cls)
+        except (RuntimeError, ValueError):
+            pass

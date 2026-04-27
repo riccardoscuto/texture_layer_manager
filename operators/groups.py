@@ -65,6 +65,13 @@ class TLM_OT_MoveToGroup(Operator):
         if active is None:
             return {'CANCELLED'}
 
+        # Defensive: groups can never be nested. Poll already blocks this, but
+        # enforce here too so the invariant survives macros / Python-driven
+        # execution paths.
+        if active.layer_type == "GROUP":
+            self.report({'WARNING'}, "Nested groups are not allowed")
+            return {'CANCELLED'}
+
         target = next((l for l in tlm.layers if l.name == self.group_name and l.layer_type == "GROUP"), None)
         if target is None:
             self.report({'WARNING'}, f"Group '{self.group_name}' not found")

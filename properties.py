@@ -60,9 +60,22 @@ def cancel_pending_rebuild():
     directly, so the deferred timer doesn't fire a redundant second rebuild
     that clears and recreates all nodes (which can fail to trigger a UI
     redraw in the shader editor).
+
+    Empties the pending set AND unregisters the timer. The previous version
+    only emptied the set — the timer still fired and was a no-op, but until
+    it fired (~200ms) it could race with the explicit rebuild.
     """
     global _pending_materials
     _pending_materials = set()
+    # bpy.app.timers identifies a registered timer by the function object,
+    # so we can unregister _do_deferred_rebuild directly.
+    try:
+        if bpy.app.timers.is_registered(_do_deferred_rebuild):
+            bpy.app.timers.unregister(_do_deferred_rebuild)
+    except (RuntimeError, AttributeError):
+        # Timers API can be unavailable during register/unregister of the
+        # addon itself, or right after a .blend reload — fail silent.
+        pass
 
 
 def _on_layer_update(self, context):
@@ -273,7 +286,7 @@ class TLM_LayerItem(PropertyGroup):
         name="Image",
         description="Name of the bpy.data.images image for this layer",
         default="",
-        update=_on_layer_update,
+        update=_make_hot_callback("image_name"),
     )
 
     # Fill layer: solid color
@@ -306,10 +319,12 @@ class TLM_LayerItem(PropertyGroup):
             ('IMAGE',      "Image",      "Use a painted image as mask",                    0),
             ('AO',         "Ambient Occlusion", "Cavity mask from Ambient Occlusion — dark in recesses", 1),
             ('POINTINESS', "Pointiness", "Geometry curvature — bright on convex edges, dark in concavities", 2),
-            # ── Smart generators: physics-based masks with noise breakup ──
-            ('EDGE_WEAR',       "Edge Wear (Smart)",       "Pointiness convex edges + noise breakup + sharpness — simulates worn-out edges", 3),
-            ('DIRT',            "Dirt (Smart)",            "Inverted AO × noise grunge — accumulates in cavities with organic variation",   4),
-            ('CURVATURE_SMART', "Curvature (Smart)",       "Bipolar pointiness (both convex + concave) with threshold — highlights all edges", 5),
+            # ── Smart generators (LIVE): physics-based masks with noise breakup, ──
+            # ── evaluated every shader sample. For BAKED alternatives use the    ──
+            # ── "Bake Smart Mask" button below.                                  ──
+            ('EDGE_WEAR',       "Edge Wear (Live)",       "Pointiness convex edges + noise breakup + sharpness — simulates worn-out edges (real-time)", 3),
+            ('DIRT',            "Dirt (Live)",            "Inverted AO × noise grunge — accumulates in cavities with organic variation (real-time)",   4),
+            ('CURVATURE_SMART', "Curvature (Live)",       "Bipolar pointiness (both convex + concave) with threshold — highlights all edges (real-time)", 5),
         ],
         default='IMAGE',
         update=_on_layer_update,
@@ -539,7 +554,7 @@ class TLM_LayerItem(PropertyGroup):
         default=False, update=_on_layer_update)
     roughness_image_name: StringProperty(name="Roughness Image",
         description="Image texture for the roughness channel", default="",
-        update=_on_layer_update)
+        update=_make_hot_callback("roughness_image_name"))
     roughness_fill: FloatProperty(
         name="Roughness", description="Constant roughness value (0 = smooth, 1 = rough)",
         default=0.5, min=0.0, max=1.0, subtype='FACTOR',
@@ -551,7 +566,7 @@ class TLM_LayerItem(PropertyGroup):
         default=False, update=_on_layer_update)
     metallic_image_name: StringProperty(name="Metallic Image",
         description="Image texture for the metallic channel", default="",
-        update=_on_layer_update)
+        update=_make_hot_callback("metallic_image_name"))
     metallic_fill: FloatProperty(
         name="Metallic", description="Constant metallic value (0 = dielectric, 1 = metal)",
         default=0.0, min=0.0, max=1.0, subtype='FACTOR',
@@ -563,7 +578,7 @@ class TLM_LayerItem(PropertyGroup):
         default=False, update=_on_layer_update)
     normal_image_name: StringProperty(name="Normal Image",
         description="Normal map image for this layer", default="",
-        update=_on_layer_update)
+        update=_make_hot_callback("normal_image_name"))
     normal_strength: FloatProperty(
         name="Normal Strength", description="Strength of the normal map effect",
         default=1.0, min=0.0, max=5.0,
@@ -587,7 +602,7 @@ class TLM_LayerItem(PropertyGroup):
         default=False, update=_on_layer_update)
     emission_image_name: StringProperty(name="Emission Image",
         description="Image texture for the emission channel", default="",
-        update=_on_layer_update)
+        update=_make_hot_callback("emission_image_name"))
     emission_color: bpy.props.FloatVectorProperty(
         name="Emission Color", description="Emission color when no image is assigned",
         subtype='COLOR',
@@ -606,7 +621,7 @@ class TLM_LayerItem(PropertyGroup):
         default=False, update=_on_layer_update)
     transmission_image_name: StringProperty(name="Transmission Image",
         description="Image texture for the transmission channel", default="",
-        update=_on_layer_update)
+        update=_make_hot_callback("transmission_image_name"))
     transmission_fill: FloatProperty(
         name="Transmission", description="Constant transmission value (0 = opaque, 1 = fully transparent/glass)",
         default=0.0, min=0.0, max=1.0, subtype='FACTOR',
@@ -1179,8 +1194,22 @@ classes = [
 
 
 def register():
+    # Defensive: if a previous version of TLM was loaded and never properly
+    # unregistered (e.g. user did "Reload Scripts" without disabling first),
+    # the same class identifiers are still in the Blender registry. Drop them
+    # before registering the new modules so re-install/upgrade doesn't error.
+    for cls in classes:
+        try:
+            bpy.utils.unregister_class(cls)
+        except (RuntimeError, ValueError):
+            pass  # not registered — fine
     for cls in classes:
         bpy.utils.register_class(cls)
+    if hasattr(bpy.types.Material, 'tlm'):
+        try:
+            del bpy.types.Material.tlm
+        except (AttributeError, RuntimeError):
+            pass
     bpy.types.Material.tlm = bpy.props.PointerProperty(type=TLM_MaterialProperties)
 
 
@@ -1191,6 +1220,13 @@ def unregister():
     global _pending_materials
     _pending_materials = set()
 
-    del bpy.types.Material.tlm
+    if hasattr(bpy.types.Material, 'tlm'):
+        try:
+            del bpy.types.Material.tlm
+        except (AttributeError, RuntimeError):
+            pass
     for cls in reversed(classes):
-        bpy.utils.unregister_class(cls)
+        try:
+            bpy.utils.unregister_class(cls)
+        except (RuntimeError, ValueError):
+            pass

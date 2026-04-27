@@ -47,9 +47,16 @@ class TLM_OT_AddLayerMask(Operator):
 
 
 class TLM_OT_AddSmartMask(Operator):
-    """Add a geometry-based smart mask (AO or Curvature) to the active layer."""
+    """Bake a geometry-based mask (AO / Curvature / Facing / Height) to a static image.
+
+    This is the BAKE workflow: the procedural nodes are used once to bake a
+    texture, then discarded. The resulting image feeds the mask pipeline via
+    mask_source='IMAGE'. For real-time alternatives that update with geometry
+    changes, use the "Mask A Source" dropdown and pick one of the "(Live)"
+    entries (Edge Wear / Dirt / Curvature).
+    """
     bl_idname = "tlm.add_smart_mask"
-    bl_label = "Add Smart Mask"
+    bl_label = "Bake Smart Mask"
     bl_options = {'REGISTER', 'UNDO'}
 
     mask_type: bpy.props.EnumProperty(
@@ -144,10 +151,18 @@ class TLM_OT_AddSmartMask(Operator):
                     bpy.ops.object.bake(type='DIFFUSE', pass_filter={'COLOR'}, save_mode='INTERNAL')
                 img.pack()
                 layer.use_mask = True
+                # Force mask_source back to IMAGE: otherwise, if the user had
+                # set a LIVE source (AO / POINTINESS / EDGE_WEAR / …) on this
+                # layer before baking, the baked texture would be silently
+                # ignored by the mask pipeline.
+                layer.mask_source = 'IMAGE'
                 layer.mask_image_name = img.name
                 bake_ok = True
                 guard.commit()  # bake succeeded — keep img
-                self.report({'INFO'}, f"Smart mask '{self.mask_type}' applied to '{layer.name}'")
+                self.report(
+                    {'INFO'},
+                    f"Baked '{self.mask_type}' mask to image '{img.name}' on layer '{layer.name}'"
+                )
             except Exception as e:
                 self.report({'WARNING'}, f"Bake failed: {e}. Nodes added but mask not baked.")
             finally:

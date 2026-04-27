@@ -13,7 +13,7 @@ class TLM_OT_BakePBR(Operator):
     """Bake all active PBR channels to image files ready for Unity/Unreal/GLTF."""
     bl_idname = "tlm.bake_pbr"
     bl_label = "Bake & Export PBR"
-    bl_options = {'REGISTER'}
+    bl_options = {'REGISTER', 'UNDO'}
 
     directory: bpy.props.StringProperty(subtype='DIR_PATH')
 
