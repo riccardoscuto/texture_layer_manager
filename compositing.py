@@ -141,7 +141,24 @@ def _restore_custom_links(node_tree, saved_links):
 
 
 def _clear_tlm_nodes(node_tree):
-    to_remove = [n for n in node_tree.nodes if n.name.startswith(TLM_PREFIX)]
+    """Remove all TLM-managed nodes from the node tree.
+
+    Identifies TLM nodes by either:
+    1. Name starting with TLM_PREFIX (the primary mechanism), or
+    2. Custom property `tlm_layer` or `tlm_role` set (defensive: covers any
+       node that was tagged via _tag() but didn't get the prefix in its name).
+
+    Without the second check, math nodes inside helper pipelines (mask
+    combine, smart generator, coordinate transforms, ...) that lack a name
+    assignment leak across rebuilds, leaving orphan "Multiply" / "Math"
+    nodes in the shader editor.
+    """
+    to_remove = []
+    for n in node_tree.nodes:
+        if n.name.startswith(TLM_PREFIX):
+            to_remove.append(n)
+        elif n.get("tlm_layer") is not None or n.get("tlm_role") is not None:
+            to_remove.append(n)
     for n in to_remove:
         node_tree.nodes.remove(n)
 
@@ -1295,6 +1312,7 @@ def _build_smart_generator(node_tree, layer, gen_type, ao_distance, x, y, name_t
         # Invert AO — dirt accumulates in cavities which AO marks dark
         inv = node_tree.nodes.new("ShaderNodeMath")
         inv.operation = 'SUBTRACT'
+        inv.name = f"{TLM_PREFIX}gen_ao_inv_{name_tag}_{_next_id()}"
         inv.inputs[0].default_value = 1.0
         inv.use_clamp = True
         inv.location = (x_base + 200, y_base)
@@ -1323,15 +1341,18 @@ def _build_smart_generator(node_tree, layer, gen_type, ao_distance, x, y, name_t
         else:  # CURVATURE_SMART: bipolar edges
             sub = node_tree.nodes.new("ShaderNodeMath")
             sub.operation = 'SUBTRACT'
+            sub.name = f"{TLM_PREFIX}gen_curv_sub_{name_tag}_{_next_id()}"
             sub.location = (x_base + 200, y_base)
             node_tree.links.new(p, sub.inputs[0])
             sub.inputs[1].default_value = 0.5
             ab = node_tree.nodes.new("ShaderNodeMath")
             ab.operation = 'ABSOLUTE'
+            ab.name = f"{TLM_PREFIX}gen_curv_abs_{name_tag}_{_next_id()}"
             ab.location = (x_base + 320, y_base)
             node_tree.links.new(sub.outputs[0], ab.inputs[0])
             m2 = node_tree.nodes.new("ShaderNodeMath")
             m2.operation = 'MULTIPLY'
+            m2.name = f"{TLM_PREFIX}gen_curv_mul_{name_tag}_{_next_id()}"
             m2.use_clamp = True
             m2.location = (x_base + 440, y_base)
             node_tree.links.new(ab.outputs[0], m2.inputs[0])
@@ -1353,6 +1374,7 @@ def _build_smart_generator(node_tree, layer, gen_type, ao_distance, x, y, name_t
         # Use MULTIPLY_ADD:  noise * breakup + (1 - breakup)
         mod = node_tree.nodes.new("ShaderNodeMath")
         mod.operation = 'MULTIPLY_ADD'
+        mod.name = f"{TLM_PREFIX}gen_breakup_madd_{name_tag}_{_next_id()}"
         mod.location = (x_base + 620, y_base - 160)
         node_tree.links.new(noise.outputs["Fac"], mod.inputs[0])
         mod.inputs[1].default_value = breakup
@@ -1360,6 +1382,7 @@ def _build_smart_generator(node_tree, layer, gen_type, ao_distance, x, y, name_t
 
         mm = node_tree.nodes.new("ShaderNodeMath")
         mm.operation = 'MULTIPLY'
+        mm.name = f"{TLM_PREFIX}gen_breakup_mul_{name_tag}_{_next_id()}"
         mm.use_clamp = True
         mm.location = (x_base + 740, y_base)
         node_tree.links.new(base, mm.inputs[0])
@@ -1522,18 +1545,21 @@ def _apply_mask(node_tree, mix_node, layer, uv_map, x, y):
                 # screen = 1 - (1-a)*(1-b) — smoother OR
                 ia = node_tree.nodes.new("ShaderNodeMath")
                 ia.operation = 'SUBTRACT'
+                ia.name = f"{TLM_PREFIX}mask_screen_ia_{_next_id()}"
                 ia.inputs[0].default_value = 1.0
                 ia.location = (x - 120, y - 60)
                 node_tree.links.new(a, ia.inputs[1])
 
                 ib = node_tree.nodes.new("ShaderNodeMath")
                 ib.operation = 'SUBTRACT'
+                ib.name = f"{TLM_PREFIX}mask_screen_ib_{_next_id()}"
                 ib.inputs[0].default_value = 1.0
                 ib.location = (x - 120, y - 100)
                 node_tree.links.new(b, ib.inputs[1])
 
                 mul = node_tree.nodes.new("ShaderNodeMath")
                 mul.operation = 'MULTIPLY'
+                mul.name = f"{TLM_PREFIX}mask_screen_mul_{_next_id()}"
                 mul.location = (x - 60, y - 80)
                 node_tree.links.new(ia.outputs[0], mul.inputs[0])
                 node_tree.links.new(ib.outputs[0], mul.inputs[1])
@@ -1558,6 +1584,7 @@ def _apply_mask(node_tree, mix_node, layer, uv_map, x, y):
                 if mode == 'DIFFERENCE':
                     sub = node_tree.nodes.new("ShaderNodeMath")
                     sub.operation = 'SUBTRACT'
+                    sub.name = f"{TLM_PREFIX}mask_diff_sub_{_next_id()}"
                     sub.location = (x - 80, y - 80)
                     node_tree.links.new(a, sub.inputs[0])
                     node_tree.links.new(b, sub.inputs[1])
@@ -1811,6 +1838,7 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
                 if abs(fill_val - 1.0) > 1e-4:
                     fm = node_tree.nodes.new("ShaderNodeMath")
                     fm.operation = 'MULTIPLY'
+                    fm.name = f"{TLM_PREFIX}ref_fill_mul_{_next_id()}"
                     fm.use_clamp = True
                     fm.location = (x + 200, y - 20)
                     node_tree.links.new(sep.outputs["Red"], fm.inputs[0])
@@ -2388,18 +2416,21 @@ def _inject_coord_transform(node_tree, layer, coord_out, x, y, name_tag=""):
     def _radius_xy(ny=120):
         xs = node_tree.nodes.new("ShaderNodeMath")
         xs.operation = 'MULTIPLY'
+        xs.name = f"{TLM_PREFIX}ctx_radxy_xs_{name_tag}_{_next_id()}"
         xs.location = (x - 380, y - ny)
         node_tree.links.new(x_sock, xs.inputs[0])
         node_tree.links.new(x_sock, xs.inputs[1])
 
         ys = node_tree.nodes.new("ShaderNodeMath")
         ys.operation = 'MULTIPLY'
+        ys.name = f"{TLM_PREFIX}ctx_radxy_ys_{name_tag}_{_next_id()}"
         ys.location = (x - 380, y - ny - 40)
         node_tree.links.new(y_sock, ys.inputs[0])
         node_tree.links.new(y_sock, ys.inputs[1])
 
         ad = node_tree.nodes.new("ShaderNodeMath")
         ad.operation = 'ADD'
+        ad.name = f"{TLM_PREFIX}ctx_radxy_ad_{name_tag}_{_next_id()}"
         ad.location = (x - 320, y - ny - 20)
         node_tree.links.new(xs.outputs[0], ad.inputs[0])
         node_tree.links.new(ys.outputs[0], ad.inputs[1])
@@ -2439,6 +2470,7 @@ def _inject_coord_transform(node_tree, layer, coord_out, x, y, name_tag=""):
         # theta = acos(z / radius3d)
         zdr = node_tree.nodes.new("ShaderNodeMath")
         zdr.operation = 'DIVIDE'
+        zdr.name = f"{TLM_PREFIX}ctx_zdr_{name_tag}_{_next_id()}"
         zdr.location = (x - 300, y - 180)
         zdr.use_clamp = True  # prevent NaN from acos if z/r slightly out of [-1,1]
         node_tree.links.new(z_sock, zdr.inputs[0])
@@ -2446,6 +2478,7 @@ def _inject_coord_transform(node_tree, layer, coord_out, x, y, name_tag=""):
 
         acos = node_tree.nodes.new("ShaderNodeMath")
         acos.operation = 'ARCCOSINE'
+        acos.name = f"{TLM_PREFIX}ctx_acos_{name_tag}_{_next_id()}"
         acos.location = (x - 240, y - 180)
         node_tree.links.new(zdr.outputs[0], acos.inputs[0])
 
@@ -2481,22 +2514,26 @@ def _inject_coord_transform(node_tree, layer, coord_out, x, y, name_tag=""):
 
         cos_n = node_tree.nodes.new("ShaderNodeMath")
         cos_n.operation = 'COSINE'
+        cos_n.name = f"{TLM_PREFIX}ctx_swirl_cos_{name_tag}_{_next_id()}"
         cos_n.location = (x - 220, y - 30)
         node_tree.links.new(twist.outputs[0], cos_n.inputs[0])
 
         sin_n = node_tree.nodes.new("ShaderNodeMath")
         sin_n.operation = 'SINE'
+        sin_n.name = f"{TLM_PREFIX}ctx_swirl_sin_{name_tag}_{_next_id()}"
         sin_n.location = (x - 220, y - 70)
         node_tree.links.new(twist.outputs[0], sin_n.inputs[0])
 
         nx = node_tree.nodes.new("ShaderNodeMath")
         nx.operation = 'MULTIPLY'
+        nx.name = f"{TLM_PREFIX}ctx_swirl_nx_{name_tag}_{_next_id()}"
         nx.location = (x - 170, y - 30)
         node_tree.links.new(radius, nx.inputs[0])
         node_tree.links.new(cos_n.outputs[0], nx.inputs[1])
 
         ny_ = node_tree.nodes.new("ShaderNodeMath")
         ny_.operation = 'MULTIPLY'
+        ny_.name = f"{TLM_PREFIX}ctx_swirl_ny_{name_tag}_{_next_id()}"
         ny_.location = (x - 170, y - 70)
         node_tree.links.new(radius, ny_.inputs[0])
         node_tree.links.new(sin_n.outputs[0], ny_.inputs[1])
