@@ -198,7 +198,7 @@ def _layer_to_dict(layer):
         d["mask_ao_distance_b"] = round(getattr(layer, 'mask_ao_distance_b', 0.5), 4)
         d["mask_combine"]       = getattr(layer, 'mask_combine', 'MULTIPLY')
         d["mask_contrast"]      = round(getattr(layer, 'mask_contrast', 0.5), 4)
-        # Mask refinement — Levels (Photoshop style)
+        # Mask refinement — Levels (input range + gamma + output range)
         d["use_mask_levels"]     = getattr(layer, 'use_mask_levels', False)
         d["mask_levels_in_min"]  = round(getattr(layer, 'mask_levels_in_min', 0.0), 4)
         d["mask_levels_in_max"]  = round(getattr(layer, 'mask_levels_in_max', 1.0), 4)

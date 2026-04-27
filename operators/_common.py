@@ -196,8 +196,9 @@ def _add_layer_common(context, layer_type):
     elif layer_type == "REFERENCE":
         layer.name = f"Reference {len(tlm.layers)}"
 
-    # Move new layer to the correct position (Photoshop convention).
-    # layers.add() appends at end; move it to the right spot.
+    # Move new layer to the correct position: new layers appear ABOVE the
+    # active one in the UI (= composited LATER, i.e. on top). layers.add()
+    # appends at end; move it to the right spot.
     new_idx = len(tlm.layers) - 1
     if len(tlm.layers) > 1:
         if parent_group and active and active.layer_type == "GROUP":

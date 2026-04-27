@@ -237,22 +237,126 @@ Canali **opt-in** (con "+" nella sezione PBR Channels): **Roughness, Metallic, N
 
 ## 4. Branching (per-channel blend override)
 
-Permette a un singolo layer di avere blend diversi per canale.
-Proprietà: `blend_mode_base_color`, `blend_mode_roughness`, `blend_mode_metallic`, `blend_mode_normal`, `blend_mode_emission`, `blend_mode_transmission`. Default: INHERIT.
+Permette a un singolo layer di avere blend mode diversi per ciascun canale PBR.
 
-### 4.1 Branching base: MULTIPLY solo su base_color
-**Setup**: Fill nero sopra Fill bianco. Branching → Base Color = MULTIPLY, Roughness = INHERIT.
-**Expected**: Base color moltiplicata (nero). Roughness usa il main blend.
+**5 canali supportati** (vedi `compositing._effective_blend_mode`):
+`blend_mode_base_color`, `blend_mode_roughness`, `blend_mode_metallic`, `blend_mode_emission`, `blend_mode_transmission`.
+
+**Non supportati per branching**: Normal e Bump — usano math vettoriale dedicato (`_build_normal_channel`, `_build_bump_channel`) che ignora `blend_mode`. Rispettano `opacity` ma non override per channel.
+
+**Default**: tutti su `INHERIT` → fallback su `layer.blend_mode` (il blend principale).
+
+**Risoluzione**: `_effective_blend_mode(layer, channel_id)` ritorna `blend_mode_<channel>` se ≠ INHERIT, altrimenti `layer.blend_mode`.
+
+### 4.1 [Crit] INHERIT comportamento default
+**Setup**: 2 Fill (rosso sotto, blu sopra). Layer top: main `blend_mode = MIX`, tutti i branching = INHERIT. Abilita roughness, metallic, emission, transmission sul layer top con valori distinti dai default.
+**Expected**: Su tutti e 5 i canali il blend è MIX → in viewport vedi solo la layer top (che copre quella sotto). Lo Shader Editor mostra tutti i Mix node con `blend_type='MIX'`.
 ☐ Pass ☐ Fail — Note:
 
-### 4.2 Branching su layer procedurale
-**Setup**: Voronoi layer. Branching → Base Color = MIX, Roughness = OVERLAY.
-**Expected**: Voronoi driva roughness con contrasto aumentato, base color piatto.
+### 4.2 [Crit] Override singolo channel: base_color = MULTIPLY
+**Setup**: Fill nero sopra Fill bianco. Top main `blend_mode = MIX`. Branching: `blend_mode_base_color = MULTIPLY`, gli altri = INHERIT.
+**Expected**: Base color = nero (multiply blackens). Gli altri channel non influenzati. Apri Shader Editor → il Mix node del base_color ha `blend_type='MULTIPLY'`, quelli degli altri canali (se presenti) hanno `blend_type='MIX'`.
 ☐ Pass ☐ Fail — Note:
 
-### 4.3 INHERIT rispetta main blend
-**Setup**: Cambia main `blend_mode` da MIX a SCREEN con tutti i branching su INHERIT.
-**Expected**: Tutti i canali attivi usano SCREEN.
+### 4.3 Override singolo channel: roughness = OVERLAY
+**Setup**: 2 Fill, top con use_roughness=True (`roughness_fill = 0.3`). Main = MIX. Branching: `blend_mode_roughness = OVERLAY`.
+**Expected**: Base color del top copre interamente quella sotto (MIX). Roughness fonde via OVERLAY (verifica nei tooltip o Shader Editor: Mix node sul canale roughness ha `blend_type='OVERLAY'`).
+☐ Pass ☐ Fail — Note:
+
+### 4.4 Override singolo channel: metallic = ADD
+**Setup**: 2 Fill, top con use_metallic=True (`metallic_fill = 0.5`). Branching: `blend_mode_metallic = ADD`.
+**Expected**: Mix node metallic ha `blend_type='ADD'`. La layer sotto + 0.5 sul canale metallic (clamp a 1).
+☐ Pass ☐ Fail — Note:
+
+### 4.5 Override singolo channel: emission = SCREEN
+**Setup**: 2 Fill, top con use_emission=True. Branching: `blend_mode_emission = SCREEN`.
+**Expected**: Mix node emission ha `blend_type='SCREEN'`. Glow additivo sul canale emission.
+☐ Pass ☐ Fail — Note:
+
+### 4.6 Override singolo channel: transmission = MIX (no-op explicit)
+**Setup**: Top main = MULTIPLY, `blend_mode_transmission = MIX`.
+**Expected**: Transmission = MIX (l'override esplicito vince). Base color = MULTIPLY.
+**Verifica**: dimostra che `MIX esplicito` ≠ `INHERIT con main=MULTIPLY`.
+☐ Pass ☐ Fail — Note:
+
+### 4.7 [Crit] Override multipli: scenario realistico (rust patches)
+**Setup**: Fill marrone scuro sopra Fill metallo argento. Top abilita roughness (0.8 valore), metallic (0.0), emission (off). Branching:
+- `blend_mode_base_color = MIX` (sostituisce il colore)
+- `blend_mode_roughness = INHERIT` (main MIX → MIX, sostituisce)
+- `blend_mode_metallic = MULTIPLY` (smolla il metallic della layer sotto)
+**Expected**: Aree top = marrone opaco non-metallico. Aree sotto = ancora metallico. Confine netto.
+☐ Pass ☐ Fail — Note:
+
+### 4.8 INHERIT rispetta cambio main blend_mode
+**Setup**: 2 Fill. Top branching tutti su INHERIT. Cambia main `blend_mode` da MIX a SCREEN.
+**Expected**: Tutti i Mix node dei canali attivi cambiano da MIX a SCREEN. Cambia da SCREEN a MULTIPLY → tutti diventano MULTIPLY.
+**Hot path**: il main `blend_mode` è hot-update (`_hot_blend_mode`). Verifica nello Shader Editor che lo stesso Mix node sopravviva al cambio (no rebuild — controlla che il TLM_id non cambi).
+☐ Pass ☐ Fail — Note:
+
+### 4.9 [Reg] Branching NON influenza Normal
+**Setup**: 2 layer entrambi con normal map. Top branching `blend_mode_base_color = MULTIPLY`. Cambia anche `blend_mode_emission = SCREEN`.
+**Expected**: I normal blendano vettorialmente come al solito (vector mix in `_build_normal_channel`), invariati dal branching. Verifica visualmente che le scratch del normal del top siano composite con quelle sotto identicamente al caso INHERIT.
+☐ Pass ☐ Fail — Note:
+
+### 4.10 [Reg] Branching NON influenza Bump
+**Setup**: 2 layer entrambi con use_bump. Top branching come 4.9.
+**Expected**: I bump blendano via i Bump node concatenati. Branching non altera nulla.
+☐ Pass ☐ Fail — Note:
+
+### 4.11 Branching + Mask
+**Setup**: Top con mask AO live, branching `blend_mode_base_color = MULTIPLY`, `blend_mode_metallic = ADD`.
+**Expected**: La mask AO controlla DOVE entrambi gli override agiscono. Il Factor del Mix node è guidato dalla pipeline mask → opacity (non solo opacity).
+☐ Pass ☐ Fail — Note:
+
+### 4.12 Branching + Opacity
+**Setup**: Top branching `blend_mode_base_color = MULTIPLY`, opacity = 0.5.
+**Expected**: Il MULTIPLY è applicato al 50%. Verifica nel Shader Editor: `Factor = layer_alpha · 0.5` (cablato sulla A/B socket del Mix MULTIPLY).
+☐ Pass ☐ Fail — Note:
+
+### 4.13 Branching + first-layer modulator
+**Setup**: Una sola layer (Fill) con `blend_mode_base_color = MULTIPLY` e `mask_source = AO`. Niente layer sotto.
+**Expected**: Il branching MULTIPLY si applica contro un baseline grigio sintetizzato (vedi compositing.py:3473 — `needs_modulator` triggera il bg). La mask controlla l'apparizione.
+**Bug history**: prima del fix Bug #5 questo caso droppava silenziosamente sia mask che branching. Verifica che ora funzioni.
+☐ Pass ☐ Fail — Note:
+
+### 4.14 Branching su Procedural
+**Setup**: Voronoi layer sopra Fill rosso. use_roughness su top (`roughness_fill=0.5` o procedural-driven). Branching: `blend_mode_base_color = INHERIT`, `blend_mode_roughness = OVERLAY`.
+**Expected**: Il pattern Voronoi guida sia il colore (mix normale) sia la roughness (overlay con la layer sotto).
+☐ Pass ☐ Fail — Note:
+
+### 4.15 Branching su Reference
+**Setup**: Reference layer che punta a un Voronoi. Reference branching: `blend_mode_emission = ADD`.
+**Expected**: Il pattern Voronoi del reference è additivamente blendato sul canale emission. Base color usa il main blend.
+☐ Pass ☐ Fail — Note:
+
+### 4.16 [Reg] Adjustment ignora branching
+**Setup**: Adjustment layer (HUE_SAT). Anche se imposti `blend_mode_base_color = MULTIPLY`, l'adjustment non usa Mix node (modifica `current` in-place).
+**Expected**: Il branching su Adjustment è no-op silenzioso. Nessun comportamento anomalo.
+☐ Pass ☐ Fail — Note:
+
+### 4.17 Save/Load JSON preserva branching
+**Setup**: Layer con 3 override impostati (es. base_color=MULTIPLY, roughness=ADD, emission=SCREEN). Export JSON → New material → Import JSON.
+**Expected**: I 3 override sono ripristinati identici. Verifica anche `INHERIT` (default) sui channel non toccati.
+☐ Pass ☐ Fail — Note:
+
+### 4.18 Apply Preset preserva branching
+**Setup**: Salva layer corrente come Preset utente. Apply su nuovo materiale.
+**Expected**: Override conservati.
+☐ Pass ☐ Fail — Note:
+
+### 4.19 Duplicate Layer preserva branching
+**Setup**: Layer con override impostati. Duplicate Layer.
+**Expected**: La duplicata ha gli stessi override del sorgente.
+☐ Pass ☐ Fail — Note:
+
+### 4.20 Branching dropdown UI — INHERIT default visibile
+**Setup**: Apri pannello layer con tutti gli override su INHERIT (default).
+**Expected**: I 5 dropdown mostrano "Inherit (Layer)". Cambiare uno solo a un valore esplicito non modifica gli altri.
+☐ Pass ☐ Fail — Note:
+
+### 4.21 [Reg] Toggle channel off non rompe branching state
+**Setup**: Layer con `use_roughness=True` e `blend_mode_roughness=OVERLAY`. Disattiva use_roughness, riattivalo.
+**Expected**: L'override `OVERLAY` è preservato quando riattivi (rimane stored sulla property anche quando il channel è disabled).
 ☐ Pass ☐ Fail — Note:
 
 ---
@@ -337,7 +441,7 @@ Shared params: `proc_scale`, `proc_offset_x/y/z`, `proc_color1`, `proc_color2`, 
 
 ### 6.3 LEVELS
 **Setup**: Adjustment Levels. Regola input min/max, output min/max, gamma.
-**Expected**: Remapping tonale come in Photoshop.
+**Expected**: Remapping tonale (input → gamma → output range).
 ☐ Pass ☐ Fail — Note:
 
 ### 6.4 COLOR_BALANCE
@@ -709,7 +813,7 @@ Combina canali in RGBA per ottimizzare texture memory (es. Roughness in R, Metal
 **Expected**: Nuovo Paint layer con quella immagine.
 ☐ Pass ☐ Fail — Note:
 
-### 17.2 Import PBR Set (Substance-style)
+### 17.2 Import PBR Texture Set
 **Setup**: Cartella con BaseColor, Roughness, Metallic, Normal (naming convention) → Import PBR Set.
 **Expected**: Auto-riconoscimento dei canali, creazione layer configurato con tutti i canali.
 ☐ Pass ☐ Fail — Note:

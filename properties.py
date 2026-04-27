@@ -419,10 +419,10 @@ class TLM_LayerItem(PropertyGroup):
     )
 
     # ── Mask refinement: Levels + Softness ───────────────────────────────
-    # Levels (Photoshop-style): remap input range, apply gamma, remap output range
+    # Levels: remap input range, apply gamma, remap output range
     use_mask_levels: BoolProperty(
         name="Mask Levels",
-        description="Apply Photoshop-style Levels (input range + gamma + output range) to the combined mask",
+        description="Remap the combined mask: input range, gamma, output range",
         default=False,
         update=_on_layer_update,
     )
@@ -504,7 +504,7 @@ class TLM_LayerItem(PropertyGroup):
     # Clipping mask — clip this layer to the alpha of the layer directly below
     use_clipping_mask: BoolProperty(
         name="Clipping Mask",
-        description="Clip this layer to the alpha of the layer below (like Photoshop)",
+        description="Show this layer only where the layer directly below has alpha (alpha-clipped to the layer underneath)",
         default=False,
         update=_on_layer_update,
     )
@@ -656,6 +656,12 @@ class TLM_LayerItem(PropertyGroup):
         name="Show Branching",
         description="Expand per-channel blend mode overrides",
         default=False,
+    )
+    # UI state — collapsible Mask section (only shown when use_mask=True)
+    show_mask_section: BoolProperty(
+        name="Show Mask Details",
+        description="Expand the mask configuration (sources, refinement, etc.)",
+        default=True,
     )
 
     @property

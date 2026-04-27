@@ -1595,7 +1595,7 @@ def _apply_mask(node_tree, mix_node, layer, uv_map, x, y):
         _tag(pwr, layer.name, "mask_contrast")
         combined = pwr.outputs[0]
 
-    # ── Levels (Photoshop-style): in range → gamma → out range ───────────
+    # ── Levels: in range → gamma → out range (industry-standard tonal remap) ─
     if getattr(layer, 'use_mask_levels', False):
         in_min  = getattr(layer, 'mask_levels_in_min', 0.0)
         in_max  = getattr(layer, 'mask_levels_in_max', 1.0)
@@ -1624,7 +1624,7 @@ def _apply_mask(node_tree, mix_node, layer, uv_map, x, y):
             lv_g.name = f"{TLM_PREFIX}mask_lv_gamma_{_next_id()}"
             _tag(lv_g, layer.name, "mask_lv_gamma")
             node_tree.links.new(combined, lv_g.inputs[0])
-            # Photoshop convention: gamma<1 brightens midtones, so exp = 1/gamma
+            # Convention: gamma<1 brightens midtones, so exp = 1/gamma
             lv_g.inputs[1].default_value = 1.0 / gamma
             combined = lv_g.outputs[0]
 

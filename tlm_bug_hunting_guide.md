@@ -46,7 +46,7 @@
 ### Test 2.1 — Due Fill Layer
 1. Assicurati che "Fill 1" sia rosso (dal test precedente)
 2. Clicca **Fill** per aggiungere un secondo layer
-3. "Fill 2" appare nella lista SOPRA "Fill 1" (nuovo layer si inserisce sopra il layer attivo, come Photoshop)
+3. "Fill 2" appare nella lista SOPRA "Fill 1" (nuovo layer si inserisce sopra il layer attivo, convenzione standard)
 4. Seleziona "Fill 2" nella lista, cambia il suo colore a blu (R=0, G=0, B=1)
 5. **Verifica viewport**: il cubo è blu (Fill 2 è sopra e copre Fill 1)
 6. **Verifica Shader Editor**: due nodi RGB collegati a un nodo Mix → Principled BSDF
@@ -194,7 +194,7 @@
 7. **Verifica**: contrasto aumentato
 
 ### Test 5.3 — Levels
-I Levels funzionano come in Photoshop: rimappano l'intervallo tonale dell'immagine.
+I Levels rimappano l'intervallo tonale dell'immagine (input → gamma → output).
 - **Input Black** (`adj_in_min`): tutti i valori sotto questo diventano nero → alza per scurire le ombre
 - **Input White** (`adj_in_max`): tutti i valori sopra questo diventano bianco → abbassa per schiarire le luci
 - **Gamma** (`adj_levels_gamma`): corregge i mezzitoni (>1 schiarisce, <1 scurisce)

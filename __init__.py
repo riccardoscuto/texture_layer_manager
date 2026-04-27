@@ -4,7 +4,7 @@ bl_info = {
     "version": (0, 3, 26),
     "blender": (4, 0, 0),
     "location": "Properties > Material > Texture Layers",
-    "description": "Non-destructive layer system for texture painting, similar to Photoshop/Substance",
+    "description": "Non-destructive layer-based texture authoring with PBR channels, smart masks, and procedurals",
     "category": "Material",
 }
 

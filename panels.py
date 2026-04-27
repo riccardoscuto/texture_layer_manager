@@ -258,12 +258,9 @@ def _draw_active_layer(layout, active, tlm, mat):
     hrow = box.row(align=True)
     hrow.label(text=ltype_label, icon=ltype_icon)
     hrow.prop(active, "name", text="", emboss=True)
-    solo_active = (tlm.solo_layer_index == tlm.active_layer_index)
-    hrow.operator(
-        "tlm.solo_layer", text="",
-        icon='OUTLINER_OB_LIGHT' if solo_active else 'LIGHT',
-        emboss=False,
-    ).layer_index = tlm.active_layer_index
+    # Solo button removed from here — lives in the UIList row, and after the
+    # solo-also-selects fix the active layer == soloed layer when toggled
+    # from the list. Showing it here too was redundant.
     hrow.prop(active, "color_tag", text="", icon_only=True)
 
     col = box.column(align=True)
@@ -292,8 +289,8 @@ def _draw_active_layer(layout, active, tlm, mat):
             icon='LAYER_ACTIVE'
         )
         # Mask section — masks the group's composited output so the mask
-        # applies uniformly to every child (same behavior as a Photoshop
-        # group mask).
+        # applies uniformly to every child (group mask: one mask shared by
+        # the whole folder, applied after children compositing).
         col.separator(factor=0.4)
         _draw_mask_block(col, active)
     elif active.layer_type == "ADJUSTMENT":
@@ -468,19 +465,39 @@ def _draw_mask_block(col, active):
     Includes: Mask A + optional Mask B + combine mode + Contrast +
     Smart Generator controls (when source is EDGE_WEAR/DIRT/CURVATURE_SMART) +
     Mask Refinement section (Levels + Softness + Blur).
-    """
-    mr = col.row(align=True)
-    mr.prop(active, "use_mask", text="Mask", icon='MOD_MASK', toggle=True)
-    if active.use_mask:
-        mr.prop(active, "mask_source", text="")
-    if not active.use_mask:
-        mr.operator("tlm.add_layer_mask", text="Add",   icon='ADD')
-    mr.operator("tlm.add_smart_mask",     text="Bake",  icon='SHADERFX')
 
+    UX:
+    - When use_mask=False: compact row with only the two add-paths
+      ("Add Mask" creates a paintable image; "Bake Smart" runs the smart-mask
+      bake operator). The toggle itself is implicit — both ops set use_mask=True.
+    - When use_mask=True: collapsible header (show_mask_section) + details box.
+      The mask source dropdown lives at the top of the details box.
+    """
     if not active.use_mask:
+        # Mask is off — show only the two ways to enable it.
+        mr = col.row(align=True)
+        mr.label(text="", icon='MOD_MASK')
+        mr.operator("tlm.add_layer_mask", text="Add Mask", icon='ADD')
+        mr.operator("tlm.add_smart_mask", text="Bake Smart Mask", icon='SHADERFX')
+        return
+
+    # Mask is on — collapsible header with quick-disable toggle.
+    header = col.row(align=True)
+    header.prop(
+        active, "show_mask_section",
+        text=f"Mask  ·  {active.mask_source.replace('_', ' ').title()}",
+        icon='TRIA_DOWN' if active.show_mask_section else 'TRIA_RIGHT',
+        emboss=False,
+    )
+    header.prop(active, "use_mask", text="", icon='MOD_MASK', toggle=True)
+
+    if not active.show_mask_section:
         return
 
     mbox = col.box().column(align=True)
+
+    # Source dropdown lives at the top of the details box.
+    mbox.prop(active, "mask_source", text="Source")
 
     # ── Mask A ──
     _draw_mask_slot(mbox, active, 'A')
