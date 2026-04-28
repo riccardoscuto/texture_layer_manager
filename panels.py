@@ -42,6 +42,16 @@ _PBR_BADGE = {
     'use_bump':         'MOD_DISPLACE',
 }
 
+# Output channel → icon shown next to the layer name in the UIList.
+# Mirrors the routing decision so the user can scan the stack and see
+# which layer drives which BSDF input at a glance.
+_OUTPUT_BADGE = {
+    'BASE_COLOR': 'COLOR',
+    'ROUGHNESS':  'RNDCURVE',
+    'METALLIC':   'MATFLUID',
+    'ALPHA':      'IMAGE_ALPHA',
+}
+
 
 def _is_at_compositor_bottom(active, tlm):
     """True if ``active`` will be the first layer composited in its scope.
@@ -747,9 +757,12 @@ def _draw_paint_fill(col, active, tlm):
 
 
 def _draw_pbr_channels(col, layer, tlm):
-    # Collapsible header with active channel count badge
-    active_count = sum(1 for f in ('use_roughness', 'use_metallic', 'use_normal',
-                                    'use_emission', 'use_transmission', 'use_alpha',
+    # Collapsible header with active channel count badge.
+    # Counts every additional channel toggled on (these stack ON TOP of
+    # the main output_channel target).
+    active_count = sum(1 for f in ('use_roughness', 'use_metallic',
+                                    'use_normal', 'use_emission',
+                                    'use_transmission', 'use_alpha',
                                     'use_bump')
                        if getattr(layer, f))
     badge = f" ({active_count})" if active_count else ""
@@ -771,19 +784,24 @@ def _draw_pbr_channels(col, layer, tlm):
         bumpr.prop(layer, "bump_strength", text="Str", slider=True)
         bumpr.prop(layer, "bump_distance", text="Dist", slider=True)
 
+    # PBR Channels list — toggles here are ADDITIONAL channels beyond the
+    # main "Output" target chosen at the top of the panel. Cumulative
+    # semantics: a layer routed to ROUGHNESS with use_metallic=True drives
+    # both. base_color is omitted because it has no toggle (only reachable
+    # as a routing target).
     channels = [
-        ('roughness', 'use_roughness', 'roughness_image_name', 'roughness_fill',
-         None,            "Roughness", 'RNDCURVE'),
-        ('metallic',  'use_metallic',  'metallic_image_name',  'metallic_fill',
-         None,            "Metallic",  'MATFLUID'),
-        ('normal',    'use_normal',    'normal_image_name',    None,
-         None,            "Normal",    'NORMALS_FACE'),
-        ('emission',  'use_emission',  'emission_image_name',  None,
-         'emission_color',"Emission",  'LIGHT'),
-        ('transmission','use_transmission','transmission_image_name','transmission_fill',
-         None,            "Transmission",'MATSPHERE'),
-        ('alpha',     'use_alpha',     'alpha_image_name',     'alpha_fill',
-         None,            "Alpha",     'IMAGE_ALPHA'),
+        ('roughness',    'use_roughness',    'roughness_image_name',    'roughness_fill',
+         None,             "Roughness",    'RNDCURVE'),
+        ('metallic',     'use_metallic',     'metallic_image_name',     'metallic_fill',
+         None,             "Metallic",     'MATFLUID'),
+        ('normal',       'use_normal',       'normal_image_name',       None,
+         None,             "Normal",       'NORMALS_FACE'),
+        ('emission',     'use_emission',     'emission_image_name',     None,
+         'emission_color', "Emission",     'LIGHT'),
+        ('transmission', 'use_transmission', 'transmission_image_name', 'transmission_fill',
+         None,             "Transmission", 'MATSPHERE'),
+        ('alpha',        'use_alpha',        'alpha_image_name',        'alpha_fill',
+         None,             "Alpha",        'IMAGE_ALPHA'),
     ]
 
     for ch_id, flag, img_attr, fill_attr, color_attr, label, icon in channels:

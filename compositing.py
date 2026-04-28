@@ -4137,36 +4137,58 @@ def _build_bump_channel(node_tree, layers, uv_map, start_x, y_base, x_step,
 
 
 
-_OUTPUT_CHANNEL_TO_FLAG = {
-    'BASE_COLOR':   None,            # base color is always the implicit channel
-    'ROUGHNESS':    'use_roughness',
-    'METALLIC':     'use_metallic',
-    'ALPHA':        'use_alpha',
+_OUTPUT_CHANNEL_TO_TARGET = {
+    'BASE_COLOR': 'base_color',
+    'ROUGHNESS':  'roughness',
+    'METALLIC':   'metallic',
+    'ALPHA':      'alpha',
+}
+
+# Per-channel "use_<channel>" property name. Used by both routable
+# (roughness/metallic/alpha) and non-routable (normal/emission/transmission/
+# bump) channels — see _layer_contributes_to for the OR-logic.
+_CHANNEL_USE_FLAG = {
+    'roughness':    'use_roughness',
+    'metallic':     'use_metallic',
+    'alpha':        'use_alpha',
+    'normal':       'use_normal',
+    'emission':     'use_emission',
+    'transmission': 'use_transmission',
+    'bump':         'use_bump',
 }
 
 
 def _layer_contributes_to(layer, channel_id):
-    """Resolve whether `layer` contributes to `channel_id`, honoring output_channel.
+    """Resolve whether `layer` contributes to `channel_id`.
 
-    output_channel == 'AUTO': legacy behavior — use the use_<channel> toggles.
-    output_channel == '<NAME>': layer contributes ONLY to the chosen channel,
-    regardless of toggles. Channels not listed in _OUTPUT_CHANNEL_TO_FLAG (
-    normal / emission / transmission / bump) follow the toggles either way —
-    the dropdown only routes to BASE_COLOR / ROUGHNESS / METALLIC / ALPHA.
+    Cumulative semantics (OR-logic):
+    - output_channel = main routing target. Always contributes to that
+      one channel (BASE_COLOR / ROUGHNESS / METALLIC / ALPHA).
+    - use_<channel> toggles = additional channels. A layer routed to
+      ROUGHNESS with use_metallic=True drives BOTH roughness AND metallic.
+      A layer routed to BASE_COLOR with use_normal=True drives base color
+      AND normal map.
+
+    base_color has no use_base_color flag — it's reachable only as a
+    routing target (the most common case anyway).
+
+    Legacy 'AUTO' (older .blend files) maps to 'BASE_COLOR'.
     """
-    out_ch = getattr(layer, 'output_channel', 'AUTO')
+    out_ch = getattr(layer, 'output_channel', 'BASE_COLOR')
     if out_ch == 'AUTO':
-        if channel_id == 'base_color':
-            return True
-        flag = {'roughness': 'use_roughness', 'metallic': 'use_metallic',
-                'normal': 'use_normal', 'emission': 'use_emission',
-                'transmission': 'use_transmission', 'alpha': 'use_alpha',
-                'bump': 'use_bump'}.get(channel_id)
-        return bool(flag) and getattr(layer, flag, False)
-    # Explicit routing: only the chosen channel gets this layer.
-    target = {'BASE_COLOR': 'base_color', 'ROUGHNESS': 'roughness',
-              'METALLIC': 'metallic', 'ALPHA': 'alpha'}.get(out_ch)
-    return target == channel_id
+        out_ch = 'BASE_COLOR'
+
+    # Main routing target — always contributes here.
+    target = _OUTPUT_CHANNEL_TO_TARGET.get(out_ch, 'base_color')
+    if target == channel_id:
+        return True
+
+    # Additional channel via use_<channel> toggle (cumulative).
+    flag = _CHANNEL_USE_FLAG.get(channel_id)
+    if flag is not None:
+        return getattr(layer, flag, False)
+
+    return False
 
 
 def _channel_used(layers, flag_attr):

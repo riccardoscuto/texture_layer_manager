@@ -288,21 +288,24 @@ class TLM_LayerItem(PropertyGroup):
     )
 
     # ── Output channel routing ──────────────────────────────────────────────
-    # Quick-select: route this layer to ONE specific BSDF input, bypassing
-    # the use_<channel> toggles. AUTO (default) = use the toggles as before.
-    # Lets users drop a procedural Checker / Voronoi at any layer position
-    # and aim it at Roughness / Metallic / Alpha without configuring 6 flags.
+    # Each layer is pinned to ONE BSDF input among the 4 routable channels.
+    # The non-routable channels (Normal / Emission / Transmission / Bump) are
+    # multi-channel-friendly and continue to use their use_<channel> toggles
+    # — they can coexist with any output_channel value.
+    # Removed the legacy 'AUTO' entry: it was confusing for new users (output
+    # said "Auto" while the layer was actually routed to base color via an
+    # implicit toggle path). .blend files saved with output_channel='AUTO'
+    # silently fall back to 'BASE_COLOR' on load (see _layer_contributes_to).
     output_channel: EnumProperty(
         name="Output Channel",
-        description="Where this layer's output goes on the Principled BSDF",
+        description="Which Principled BSDF input this layer contributes to",
         items=[
-            ('AUTO',          "Auto",          "Use the per-channel use_X toggles below (default behavior)"),
-            ('BASE_COLOR',    "Base Color",    "Send this layer ONLY to Base Color (ignore other use_X toggles)"),
-            ('ROUGHNESS',     "Roughness",     "Send this layer ONLY to Roughness"),
-            ('METALLIC',      "Metallic",      "Send this layer ONLY to Metallic"),
-            ('ALPHA',         "Alpha",         "Send this layer ONLY to Alpha (surface opacity)"),
+            ('BASE_COLOR',    "Base Color",    "Send this layer to Base Color"),
+            ('ROUGHNESS',     "Roughness",     "Send this layer to Roughness"),
+            ('METALLIC',      "Metallic",      "Send this layer to Metallic"),
+            ('ALPHA',         "Alpha",         "Send this layer to Alpha (surface opacity)"),
         ],
-        default='AUTO',
+        default='BASE_COLOR',
         update=_on_layer_update,
     )
 
