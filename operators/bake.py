@@ -50,6 +50,16 @@ class TLM_OT_BakePBR(Operator):
         default='PNG',
     )
 
+    # Per-channel selection (only used when preset='CUSTOM').
+    # All defaults True to preserve backward-compatible behavior.
+    bake_base_color:   bpy.props.BoolProperty(name="Base Color",   default=True)
+    bake_roughness:    bpy.props.BoolProperty(name="Roughness",    default=True)
+    bake_metallic:     bpy.props.BoolProperty(name="Metallic",     default=True)
+    bake_normal:       bpy.props.BoolProperty(name="Normal",       default=True)
+    bake_emission:     bpy.props.BoolProperty(name="Emission",     default=False)
+    bake_transmission: bpy.props.BoolProperty(name="Transmission", default=False)
+    bake_alpha:        bpy.props.BoolProperty(name="Alpha",        default=False)
+
     @classmethod
     def poll(cls, context):
         return _get_material(context) is not None
@@ -57,6 +67,26 @@ class TLM_OT_BakePBR(Operator):
     def invoke(self, context, event):
         context.window_manager.fileselect_add(self)
         return {'RUNNING_MODAL'}
+
+    def draw(self, context):
+        """Sidebar shown by the file browser dialog. Surfaces the per-channel
+        checkboxes when preset='CUSTOM' so the user can pick exactly which
+        maps to export."""
+        layout = self.layout
+        layout.prop(self, "preset")
+        layout.prop(self, "resolution")
+        layout.prop(self, "file_format")
+        if self.preset == 'CUSTOM':
+            layout.separator()
+            box = layout.box()
+            box.label(text="PBR Channels:", icon='NODE_COMPOSITING')
+            box.prop(self, "bake_base_color")
+            box.prop(self, "bake_roughness")
+            box.prop(self, "bake_metallic")
+            box.prop(self, "bake_normal")
+            box.prop(self, "bake_emission")
+            box.prop(self, "bake_transmission")
+            box.prop(self, "bake_alpha")
 
     def execute(self, context):
         mat = _get_material(context)
@@ -346,11 +376,23 @@ class TLM_OT_BakePBR(Operator):
                 _pack_gltf_mr(metal_img, rough_img)
 
             elif self.preset == 'CUSTOM':
-                _bake_channel("BaseColor", "Base Color",  "sRGB")
-                _bake_channel("Roughness", "Roughness",   "Non-Color")
-                _bake_channel("Metallic",  "Metallic",    "Non-Color")
-                _bake_channel("Normal",    "Normal",      "Non-Color")
-                _bake_channel("Emission",  "Emission Color", "sRGB")
+                # Each channel honors its own checkbox. Use these to export
+                # specific PBR maps (e.g. Base Color + Alpha only for cutout
+                # decals; Roughness + Metallic only for material refinement).
+                if self.bake_base_color:
+                    _bake_channel("BaseColor",    "Base Color",     "sRGB")
+                if self.bake_roughness:
+                    _bake_channel("Roughness",    "Roughness",      "Non-Color")
+                if self.bake_metallic:
+                    _bake_channel("Metallic",     "Metallic",       "Non-Color")
+                if self.bake_normal:
+                    _bake_channel("Normal",       "Normal",         "Non-Color")
+                if self.bake_emission:
+                    _bake_channel("Emission",     "Emission Color", "sRGB")
+                if self.bake_transmission:
+                    _bake_channel("Transmission", "Transmission Weight", "Non-Color")
+                if self.bake_alpha:
+                    _bake_channel("Alpha",        "Alpha",          "Non-Color")
 
         # End of _BakeGuard context — engine and selection restored here.
 

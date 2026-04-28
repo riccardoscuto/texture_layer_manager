@@ -280,6 +280,31 @@ class TLM_LayerItem(PropertyGroup):
         items=BLEND_MODES_OVERRIDE, default="INHERIT",
         update=_on_layer_update,
     )
+    blend_mode_alpha: EnumProperty(
+        name="Alpha Blend",
+        description="Override blend mode on alpha channel only",
+        items=BLEND_MODES_OVERRIDE, default="INHERIT",
+        update=_on_layer_update,
+    )
+
+    # ── Output channel routing ──────────────────────────────────────────────
+    # Quick-select: route this layer to ONE specific BSDF input, bypassing
+    # the use_<channel> toggles. AUTO (default) = use the toggles as before.
+    # Lets users drop a procedural Checker / Voronoi at any layer position
+    # and aim it at Roughness / Metallic / Alpha without configuring 6 flags.
+    output_channel: EnumProperty(
+        name="Output Channel",
+        description="Where this layer's output goes on the Principled BSDF",
+        items=[
+            ('AUTO',          "Auto",          "Use the per-channel use_X toggles below (default behavior)"),
+            ('BASE_COLOR',    "Base Color",    "Send this layer ONLY to Base Color (ignore other use_X toggles)"),
+            ('ROUGHNESS',     "Roughness",     "Send this layer ONLY to Roughness"),
+            ('METALLIC',      "Metallic",      "Send this layer ONLY to Metallic"),
+            ('ALPHA',         "Alpha",         "Send this layer ONLY to Alpha (surface opacity)"),
+        ],
+        default='AUTO',
+        update=_on_layer_update,
+    )
 
     # Reference to the Blender Image datablock (by name, the Blender way)
     image_name: StringProperty(
@@ -533,6 +558,60 @@ class TLM_LayerItem(PropertyGroup):
         default="",
     )
 
+    # ── Image Texture mapping (paint + PBR image layers) ────────────────────
+    # Applied to ShaderNodeTexImage's Vector input via a ShaderNodeMapping
+    # node. Default values (loc=0, rot=0, scale=1) trigger no Mapping node,
+    # keeping the node graph minimal for layers that don't need transforms.
+    paint_extension: EnumProperty(
+        name="Extension",
+        description="How the image is sampled outside its [0,1] UV range",
+        items=[
+            ('CLIP',   "Clip",   "Clamp to image edge — no repetition (decals, badges)"),
+            ('REPEAT', "Repeat", "Tile the image (seamless textures)"),
+            ('EXTEND', "Extend", "Stretch the edge pixels outward"),
+            ('MIRROR', "Mirror", "Mirror at the boundary (no visible seam)"),
+        ],
+        default='CLIP',
+        update=_on_layer_update,
+    )
+
+    paint_location_x: FloatProperty(
+        name="Location X", default=0.0,
+        update=_make_hot_callback("paint_location_x"),
+    )
+    paint_location_y: FloatProperty(
+        name="Location Y", default=0.0,
+        update=_make_hot_callback("paint_location_y"),
+    )
+    paint_location_z: FloatProperty(
+        name="Location Z", default=0.0,
+        update=_make_hot_callback("paint_location_z"),
+    )
+    paint_rotation_x: FloatProperty(
+        name="Rotation X", default=0.0, subtype='ANGLE',
+        update=_make_hot_callback("paint_rotation_x"),
+    )
+    paint_rotation_y: FloatProperty(
+        name="Rotation Y", default=0.0, subtype='ANGLE',
+        update=_make_hot_callback("paint_rotation_y"),
+    )
+    paint_rotation_z: FloatProperty(
+        name="Rotation Z", default=0.0, subtype='ANGLE',
+        update=_make_hot_callback("paint_rotation_z"),
+    )
+    paint_scale_x: FloatProperty(
+        name="Scale X", default=1.0, soft_min=0.01, soft_max=20.0,
+        update=_make_hot_callback("paint_scale_x"),
+    )
+    paint_scale_y: FloatProperty(
+        name="Scale Y", default=1.0, soft_min=0.01, soft_max=20.0,
+        update=_make_hot_callback("paint_scale_y"),
+    )
+    paint_scale_z: FloatProperty(
+        name="Scale Z", default=1.0, soft_min=0.01, soft_max=20.0,
+        update=_make_hot_callback("paint_scale_z"),
+    )
+
     # ── Reference Layer: reuses another layer's pattern output ──────────────
     # When layer_type == 'REFERENCE', this layer doesn't generate its own
     # pattern — it fetches the color/alpha outputs of the referenced layer
@@ -628,6 +707,20 @@ class TLM_LayerItem(PropertyGroup):
         update=_make_hot_callback("transmission_fill"),
     )
 
+    # Alpha (BSDF Alpha input — controls overall surface opacity)
+    use_alpha: BoolProperty(name="Alpha",
+        description="Enable alpha channel for this layer (drives BSDF Alpha for surface opacity / cutout)",
+        default=False, update=_on_layer_update)
+    alpha_image_name: StringProperty(name="Alpha Image",
+        description="Image texture for the alpha channel (R channel of the image is used)",
+        default="",
+        update=_make_hot_callback("alpha_image_name"))
+    alpha_fill: FloatProperty(
+        name="Alpha", description="Constant alpha value (0 = fully transparent, 1 = fully opaque)",
+        default=1.0, min=0.0, max=1.0, subtype='FACTOR',
+        update=_make_hot_callback("alpha_fill"),
+    )
+
     # Bump — derived from the layer's own Fac signal (Proc) or image (Paint)
     use_bump: BoolProperty(
         name="Bump",
@@ -663,6 +756,12 @@ class TLM_LayerItem(PropertyGroup):
         description="Expand the mask configuration (sources, refinement, etc.)",
         default=True,
     )
+    # UI state — collapsible Image Mapping section
+    show_paint_mapping: BoolProperty(
+        name="Show Image Mapping",
+        description="Expand Extension + Location/Rotation/Scale for image textures",
+        default=False,
+    )
 
     @property
     def roughness_image(self):
@@ -683,6 +782,10 @@ class TLM_LayerItem(PropertyGroup):
     @property
     def transmission_image(self):
         return bpy.data.images.get(self.transmission_image_name)
+
+    @property
+    def alpha_image(self):
+        return bpy.data.images.get(self.alpha_image_name)
 
     # ── Group / folder properties ─────────────────────────────────────────────
 

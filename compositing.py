@@ -49,6 +49,7 @@ CHANNELS = [
     ("normal",     "use_normal",    "normal_image_name",   "Normal",       True,  False),
     ("emission",   "use_emission",  "emission_image_name", "Emission Color",False, False),
     ("transmission","use_transmission","transmission_image_name","Transmission Weight",False, True),
+    ("alpha",      "use_alpha",     "alpha_image_name",    "Alpha",        False, True),
 ]
 
 
@@ -402,6 +403,7 @@ def _hot_scalar_fill(node_tree, layer, prop_name):
         "roughness_fill": "roughness",
         "metallic_fill": "metallic",
         "transmission_fill": "transmission",
+        "alpha_fill": "alpha",
     }
     ch = channel_map.get(prop_name)
     if not ch:
@@ -483,6 +485,10 @@ def _hot_proc_color(node_tree, layer, prop_name):
     for cr in nodes:
         elems = cr.color_ramp.elements
         contrast = getattr(layer, 'proc_contrast', 0.5)
+        # Contrast is hidden in the UI for GRADIENT — force default so a
+        # leftover value from a previous proc_type doesn't bite the ramp.
+        if layer.proc_type == 'GRADIENT':
+            contrast = 0.5
         half = contrast * 0.49
         elems[0].position = half
         elems[0].color = layer.proc_color1
@@ -653,6 +659,45 @@ def _hot_normal_mapping(node_tree, layer, prop_name):
     return True
 
 
+def _hot_paint_mapping(node_tree, layer, prop_name):
+    """Update per-layer Paint Mapping node (Location/Rotation/Scale × XYZ).
+
+    The Mapping node exists ONLY when at least one of the 9 values differs
+    from default (loc=0, rot=0, scale=1). Crossing the threshold changes
+    topology → fallback rebuild.
+    """
+    loc = (
+        getattr(layer, 'paint_location_x', 0.0),
+        getattr(layer, 'paint_location_y', 0.0),
+        getattr(layer, 'paint_location_z', 0.0),
+    )
+    rot = (
+        getattr(layer, 'paint_rotation_x', 0.0),
+        getattr(layer, 'paint_rotation_y', 0.0),
+        getattr(layer, 'paint_rotation_z', 0.0),
+    )
+    scl = (
+        getattr(layer, 'paint_scale_x', 1.0),
+        getattr(layer, 'paint_scale_y', 1.0),
+        getattr(layer, 'paint_scale_z', 1.0),
+    )
+    needs = (
+        any(abs(v) > 1e-6 for v in loc)
+        or any(abs(v) > 1e-6 for v in rot)
+        or any(abs(v - 1.0) > 1e-6 for v in scl)
+    )
+    nodes = _find_all_tagged(node_tree, layer.name, "paint_mapping")
+    if needs != bool(nodes):
+        return False  # topology change — fallback rebuild
+    if not nodes:
+        return True
+    for n in nodes:
+        n.inputs["Location"].default_value = loc
+        n.inputs["Rotation"].default_value = rot
+        n.inputs["Scale"].default_value    = scl
+    return True
+
+
 def _hot_mask_ao_distance(node_tree, layer, prop_name):
     """Update Ambient Occlusion Distance on mask slot A or B."""
     slot = "b" if prop_name.endswith("_b") else "a"
@@ -798,6 +843,7 @@ _IMAGE_HOT_MAP = {
     "transmission_image_name": ("pbr_tex_transmission", "Non-Color"),
     "emission_image_name":     ("pbr_tex_emission",     "sRGB"),
     "normal_image_name":       ("normal_tex",           "Non-Color"),
+    "alpha_image_name":        ("pbr_tex_alpha",        "Non-Color"),
 }
 
 
@@ -888,6 +934,15 @@ _HOT_DISPATCH = {
     "normal_strength": _hot_normal_strength,
     "normal_tile_scale": _hot_normal_mapping,
     "normal_rotation": _hot_normal_mapping,
+    "paint_location_x": _hot_paint_mapping,
+    "paint_location_y": _hot_paint_mapping,
+    "paint_location_z": _hot_paint_mapping,
+    "paint_rotation_x": _hot_paint_mapping,
+    "paint_rotation_y": _hot_paint_mapping,
+    "paint_rotation_z": _hot_paint_mapping,
+    "paint_scale_x":    _hot_paint_mapping,
+    "paint_scale_y":    _hot_paint_mapping,
+    "paint_scale_z":    _hot_paint_mapping,
     "mask_ao_distance": _hot_mask_ao_distance,
     "mask_ao_distance_b": _hot_mask_ao_distance,
     "mask_contrast": _hot_mask_contrast,
@@ -905,6 +960,8 @@ _HOT_DISPATCH = {
     "transmission_image_name": _hot_image_swap,
     "emission_image_name":     _hot_image_swap,
     "normal_image_name":       _hot_image_swap,
+    "alpha_image_name":        _hot_image_swap,
+    "alpha_fill":              _hot_scalar_fill,
 }
 
 
@@ -956,11 +1013,54 @@ def _new_img_tex(node_tree, image, uv_map, x, y, colorspace="sRGB", layer=None, 
             node.image.colorspace_settings.name = "Non-Color"
         except Exception:
             pass
+    # Wrap mode (CLIP / REPEAT / EXTEND / MIRROR). Default 'CLIP' on the
+    # property side keeps decals from accidentally tiling.
+    if layer is not None:
+        try:
+            node.extension = getattr(layer, 'paint_extension', 'CLIP')
+        except Exception:
+            pass
     uv = node_tree.nodes.new("ShaderNodeUVMap")
     uv.name = f"{TLM_PREFIX}uv_{_next_id()}"
     uv.uv_map = uv_map
     uv.location = (x - 220, y)
-    node_tree.links.new(uv.outputs["UV"], node.inputs["Vector"])
+
+    # Optional Mapping node — inserted only if Location/Rotation/Scale differ
+    # from defaults, so simple paint layers stay graph-light.
+    vec_out = uv.outputs["UV"]
+    if layer is not None:
+        loc = (
+            getattr(layer, 'paint_location_x', 0.0),
+            getattr(layer, 'paint_location_y', 0.0),
+            getattr(layer, 'paint_location_z', 0.0),
+        )
+        rot = (
+            getattr(layer, 'paint_rotation_x', 0.0),
+            getattr(layer, 'paint_rotation_y', 0.0),
+            getattr(layer, 'paint_rotation_z', 0.0),
+        )
+        scl = (
+            getattr(layer, 'paint_scale_x', 1.0),
+            getattr(layer, 'paint_scale_y', 1.0),
+            getattr(layer, 'paint_scale_z', 1.0),
+        )
+        nontrivial = (
+            any(abs(v) > 1e-6 for v in loc)
+            or any(abs(v) > 1e-6 for v in rot)
+            or any(abs(v - 1.0) > 1e-6 for v in scl)
+        )
+        if nontrivial:
+            mapping = node_tree.nodes.new("ShaderNodeMapping")
+            mapping.name = f"{TLM_PREFIX}paint_map_{_next_id()}"
+            mapping.location = (x - 60, y)
+            mapping.inputs["Location"].default_value = loc
+            mapping.inputs["Rotation"].default_value = rot
+            mapping.inputs["Scale"].default_value    = scl
+            _tag(mapping, layer.name, "paint_mapping")
+            node_tree.links.new(uv.outputs["UV"], mapping.inputs["Vector"])
+            vec_out = mapping.outputs["Vector"]
+
+    node_tree.links.new(vec_out, node.inputs["Vector"])
     if tag_role and layer is not None:
         _tag(node, layer.name, tag_role)
     return node
@@ -1746,7 +1846,7 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
     channel_id: 'base_color' | 'roughness' | 'metallic' | 'emission' | 'transmission'
     NOTE: 'normal' is handled by _build_normal_channel() instead.
     """
-    is_scalar = channel_id in ('roughness', 'metallic', 'transmission')
+    is_scalar = channel_id in ('roughness', 'metallic', 'transmission', 'alpha')
     is_emission = channel_id == 'emission'
 
     # Map channel_id → attribute names on TLM_LayerItem
@@ -1757,6 +1857,7 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
         'normal':       'normal_image_name',
         'emission':     'emission_image_name',
         'transmission': 'transmission_image_name',
+        'alpha':        'alpha_image_name',
     }[channel_id]
 
     flag_attr = {
@@ -1766,6 +1867,7 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
         'normal':       'use_normal',
         'emission':     'use_emission',
         'transmission': 'use_transmission',
+        'alpha':        'use_alpha',
     }[channel_id]
 
     current = None
@@ -1833,6 +1935,7 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
                     'roughness':    'roughness_fill',
                     'metallic':     'metallic_fill',
                     'transmission': 'transmission_fill',
+                    'alpha':        'alpha_fill',
                 }[channel_id]
                 fill_val = getattr(layer, fill_attr_name, 1.0)
                 if abs(fill_val - 1.0) > 1e-4:
@@ -1908,7 +2011,12 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
                 prev_alpha = layer_alpha
             continue
 
-        # Skip layers that don't contribute to this channel
+        # Skip layers that don't contribute to this channel.
+        # output_channel routing: a layer with output_channel='ROUGHNESS' is
+        # skipped on every other channel including base_color (so it doesn't
+        # leak through the legacy "PAINT image always paints base color" path).
+        if not _layer_contributes_to(layer, channel_id):
+            continue
         if flag_attr and not getattr(layer, flag_attr, False):
             # Still update prev_alpha from base color image
             if channel_id == 'base_color' and layer.layer_type == "PAINT" and layer.image:
@@ -2020,6 +2128,7 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
                 else:
                     fill_val = (layer.roughness_fill if channel_id == 'roughness'
                                else layer.transmission_fill if channel_id == 'transmission'
+                               else layer.alpha_fill if channel_id == 'alpha'
                                else layer.metallic_fill)
                     print(f"[TLM] FILL {channel_id}: no image, using fill value {fill_val} for layer '{layer.name}'")
                     vn = _new_value(node_tree, fill_val, x, y, layer_name=layer.name, channel=channel_id)
@@ -2117,6 +2226,7 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
                     continue
                 fill_val = (layer.roughness_fill if channel_id == 'roughness'
                            else layer.transmission_fill if channel_id == 'transmission'
+                           else layer.alpha_fill if channel_id == 'alpha'
                            else layer.metallic_fill)
                 scale = node_tree.nodes.new("ShaderNodeMath")
                 scale.operation = 'MULTIPLY'
@@ -2852,6 +2962,10 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
         _tag(cr, layer.name, "proc_cr")
 
         contrast = getattr(layer, 'proc_contrast', 0.5)
+        # Contrast hidden in UI for GRADIENT — force default to avoid
+        # a residual non-default leaking into the ramp.
+        if layer.proc_type == 'GRADIENT':
+            contrast = 0.5
         half = contrast * 0.49
         cr.color_ramp.elements[0].position = half
         cr.color_ramp.elements[0].color = layer.proc_color1
@@ -3121,7 +3235,9 @@ def rebuild_node_tree(material):
                 img.use_fake_user = True
         # Also protect PBR channel images (roughness, metallic, normal, emission)
         for attr in ('roughness_image_name', 'metallic_image_name',
-                     'normal_image_name', 'emission_image_name'):
+                     'normal_image_name', 'emission_image_name',
+                     'transmission_image_name', 'alpha_image_name',
+                     'mask_image_name', 'mask_image_name_b'):
             iname = getattr(layer, attr, "")
             if iname:
                 pimg = _bpy.data.images.get(iname)
@@ -3235,7 +3351,8 @@ def rebuild_node_tree(material):
             'normal':    -800,
             'emission':     -1200,
             'transmission': -1600,
-            'bump':         -2000,
+            'alpha':        -2000,
+            'bump':         -2400,
         }
 
         # ── Base Color — built from root_layers to preserve GROUP alpha for clipping mask ─
@@ -3308,6 +3425,16 @@ def rebuild_node_tree(material):
                 node_tree.links.new(t_out, passthrough.inputs[0])
                 _link_to_bsdf(node_tree, passthrough.outputs["Value"], bsdf,
                               ["Transmission Weight", "Transmission", "transmission"], "transmission")
+
+        # ── Alpha ────────────────────────────────────────────────────────────────
+        # Drives the BSDF Alpha input (surface opacity / cutout). Distinct from
+        # transmission (which is volumetric). Useful for foliage cards, decals,
+        # masks projected on a surface, etc.
+        if _channel_used(expanded, 'use_alpha'):
+            a_out = _build_channel(node_tree, expanded, 'alpha', uv_map, start_x, ch_y.get('alpha', 0), x_step)
+            if a_out:
+                _link_to_bsdf(node_tree, a_out, bsdf,
+                              ["Alpha", "alpha"], "alpha")
 
         # ── Bump ──────────────────────────────────────────────────────────────────
         # Pass incoming_normal=normal_out so each per-layer Bump perturbs the
@@ -3939,9 +4066,56 @@ def _build_bump_channel(node_tree, layers, uv_map, start_x, y_base, x_step,
 
 
 
+_OUTPUT_CHANNEL_TO_FLAG = {
+    'BASE_COLOR':   None,            # base color is always the implicit channel
+    'ROUGHNESS':    'use_roughness',
+    'METALLIC':     'use_metallic',
+    'ALPHA':        'use_alpha',
+}
+
+
+def _layer_contributes_to(layer, channel_id):
+    """Resolve whether `layer` contributes to `channel_id`, honoring output_channel.
+
+    output_channel == 'AUTO': legacy behavior — use the use_<channel> toggles.
+    output_channel == '<NAME>': layer contributes ONLY to the chosen channel,
+    regardless of toggles. Channels not listed in _OUTPUT_CHANNEL_TO_FLAG (
+    normal / emission / transmission / bump) follow the toggles either way —
+    the dropdown only routes to BASE_COLOR / ROUGHNESS / METALLIC / ALPHA.
+    """
+    out_ch = getattr(layer, 'output_channel', 'AUTO')
+    if out_ch == 'AUTO':
+        if channel_id == 'base_color':
+            return True
+        flag = {'roughness': 'use_roughness', 'metallic': 'use_metallic',
+                'normal': 'use_normal', 'emission': 'use_emission',
+                'transmission': 'use_transmission', 'alpha': 'use_alpha',
+                'bump': 'use_bump'}.get(channel_id)
+        return bool(flag) and getattr(layer, flag, False)
+    # Explicit routing: only the chosen channel gets this layer.
+    target = {'BASE_COLOR': 'base_color', 'ROUGHNESS': 'roughness',
+              'METALLIC': 'metallic', 'ALPHA': 'alpha'}.get(out_ch)
+    return target == channel_id
+
+
 def _channel_used(layers, flag_attr):
-    """Check if any layer in the list has a channel enabled."""
-    return any(getattr(l, flag_attr, False) for l in layers)
+    """Check if any layer enables the channel.
+
+    With output_channel routing, a layer with `use_metallic=False` but
+    `output_channel='METALLIC'` still drives metallic. Resolve via
+    _layer_contributes_to so the build-or-skip decision matches reality.
+    """
+    flag_to_channel = {
+        'use_roughness': 'roughness', 'use_metallic': 'metallic',
+        'use_normal': 'normal', 'use_emission': 'emission',
+        'use_transmission': 'transmission', 'use_alpha': 'alpha',
+        'use_bump': 'bump',
+    }
+    channel_id = flag_to_channel.get(flag_attr)
+    if channel_id is None:
+        # Unknown flag — fall back to legacy direct attribute check.
+        return any(getattr(l, flag_attr, False) for l in layers)
+    return any(_layer_contributes_to(l, channel_id) for l in layers)
 
 
 def _find_bsdf(node_tree):

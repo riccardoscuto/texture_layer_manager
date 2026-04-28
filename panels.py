@@ -38,6 +38,7 @@ _PBR_BADGE = {
     'use_normal':       'NORMALS_FACE',
     'use_emission':     'LIGHT',
     'use_transmission': 'MATSPHERE',
+    'use_alpha':        'IMAGE_ALPHA',
     'use_bump':         'MOD_DISPLACE',
 }
 
@@ -306,6 +307,8 @@ def _draw_procedural(col, active, tlm):
     br.prop(active, "opacity",    text="Opacity", slider=True)
     br.operator("tlm.keyframe_opacity", text="", icon='KEYFRAME_HLT',
                 emboss=False).action = 'INSERT'
+    oc = col.row(align=True)
+    oc.prop(active, "output_channel", text="Output", icon='NODE_COMPOSITING')
 
     col.separator(factor=0.5)
     col.prop(active, "proc_type")
@@ -397,7 +400,12 @@ def _draw_procedural(col, active, tlm):
                 if ratio > 1.3:
                     col.label(text="Anisotropic shape \u2014 try Object coords", icon='INFO')
 
-    col.prop(active, "proc_contrast", slider=True)
+    # Contrast controls the ColorRamp stop positions. CHECKER outputs Color
+    # directly (no ColorRamp) so the slider would be a no-op; GRADIENT already
+    # gives a clean linear ramp where contrast adds little value and confuses
+    # users. Hide for both.
+    if active.proc_type not in ('CHECKER', 'GRADIENT'):
+        col.prop(active, "proc_contrast", slider=True)
     col.prop(active, "proc_vector_distortion", slider=True, text="Vec Distort")
 
     col.separator(factor=0.6)
@@ -660,6 +668,12 @@ def _draw_paint_fill(col, active, tlm):
     br.prop(active, "opacity",    text="", slider=True)
     br.operator("tlm.keyframe_opacity", text="", icon='KEYFRAME_HLT',
                 emboss=False).action = 'INSERT'
+    # Output channel routing — quick-select target BSDF input.
+    # AUTO (default) preserves the legacy behavior driven by use_<channel>
+    # toggles. Any other value bypasses them and sends this layer to a
+    # single channel (Base Color / Roughness / Metallic / Alpha).
+    oc = col.row(align=True)
+    oc.prop(active, "output_channel", text="Output", icon='NODE_COMPOSITING')
 
     if active.layer_type == "FILL":
         col.separator(factor=0.5)
@@ -695,6 +709,36 @@ def _draw_paint_fill(col, active, tlm):
         tsr.prop(active, "triplanar_scale",     text="Scale")
         tsr.prop(active, "triplanar_sharpness", text="Sharp", slider=True)
 
+    # ── Image Mapping (paint + PBR image layers) ────────────────────────────
+    # Collapsible: Extension + Location/Rotation/Scale (per-axis), only
+    # relevant for layers that produce image textures (PAINT) or use PBR
+    # channel images (FILL / Procedural with channel images).
+    col.separator(factor=0.6)
+    mr = col.row(align=True)
+    mr.prop(active, "show_paint_mapping",
+            text="Image Mapping",
+            icon='TRIA_DOWN' if active.show_paint_mapping else 'TRIA_RIGHT',
+            emboss=False)
+    if active.show_paint_mapping:
+        mbox = col.box().column(align=True)
+        mbox.scale_y = 0.9
+        mbox.prop(active, "paint_extension", text="Extension")
+        mbox.label(text="Location:")
+        lr = mbox.row(align=True)
+        lr.prop(active, "paint_location_x", text="X")
+        lr.prop(active, "paint_location_y", text="Y")
+        lr.prop(active, "paint_location_z", text="Z")
+        mbox.label(text="Rotation:")
+        rr = mbox.row(align=True)
+        rr.prop(active, "paint_rotation_x", text="X")
+        rr.prop(active, "paint_rotation_y", text="Y")
+        rr.prop(active, "paint_rotation_z", text="Z")
+        mbox.label(text="Scale:")
+        sr = mbox.row(align=True)
+        sr.prop(active, "paint_scale_x", text="X")
+        sr.prop(active, "paint_scale_y", text="Y")
+        sr.prop(active, "paint_scale_z", text="Z")
+
     col.separator(factor=0.6)
     _draw_pbr_channels(col, active, tlm)
 
@@ -705,7 +749,8 @@ def _draw_paint_fill(col, active, tlm):
 def _draw_pbr_channels(col, layer, tlm):
     # Collapsible header with active channel count badge
     active_count = sum(1 for f in ('use_roughness', 'use_metallic', 'use_normal',
-                                    'use_emission', 'use_transmission', 'use_bump')
+                                    'use_emission', 'use_transmission', 'use_alpha',
+                                    'use_bump')
                        if getattr(layer, f))
     badge = f" ({active_count})" if active_count else ""
     row = col.row(align=True)
@@ -737,6 +782,8 @@ def _draw_pbr_channels(col, layer, tlm):
          'emission_color',"Emission",  'LIGHT'),
         ('transmission','use_transmission','transmission_image_name','transmission_fill',
          None,            "Transmission",'MATSPHERE'),
+        ('alpha',     'use_alpha',     'alpha_image_name',     'alpha_fill',
+         None,            "Alpha",     'IMAGE_ALPHA'),
     ]
 
     for ch_id, flag, img_attr, fill_attr, color_attr, label, icon in channels:
@@ -855,7 +902,14 @@ def draw_tlm_settings(layout, context):
     layout.separator(factor=0.8)
     layout.label(text="Bake & Export", icon='RENDER_STILL')
     layout.operator("tlm.bake_pbr", text="Bake PBR Maps…", icon='EXPORT')
-    layout.operator("tlm.channel_pack", text="Channel Pack…", icon='NODE_COMPOSITING')
+    # "PBR Channels…" — shortcut to TLM_OT_BakePBR with preset='CUSTOM' which
+    # exposes per-channel checkboxes (Base Color / Roughness / Metallic /
+    # Normal / Emission / Transmission / Alpha). Replaces the old Channel
+    # Pack button (still callable via F3 -> tlm.channel_pack as a separate
+    # RGBA-packing utility).
+    op = layout.operator("tlm.bake_pbr", text="PBR Channels…",
+                         icon='NODE_COMPOSITING')
+    op.preset = 'CUSTOM'
 
     layout.separator(factor=0.8)
     layout.label(text="Presets", icon='PRESET_NEW')
