@@ -1008,11 +1008,17 @@ def _new_img_tex(node_tree, image, uv_map, x, y, colorspace="sRGB", layer=None, 
     node.name = f"{TLM_PREFIX}img_{image.name}_{_next_id()}"
     node.image = image
     node.location = (x, y)
-    if colorspace == "Non-Color":
-        try:
-            node.image.colorspace_settings.name = "Non-Color"
-        except Exception:
-            pass
+    # Always force the colorspace explicitly — previously we only set it
+    # when caller asked for "Non-Color", which meant once an image had
+    # been used in a routed-to-scalar pass, its colorspace stayed at
+    # "Non-Color" forever. Switching that PAINT layer back to AUTO (Base
+    # Color) then displayed the image dark / un-gamma-corrected.
+    # Setting it on every rebuild keeps the image consistent with how
+    # this current layer actually uses it.
+    try:
+        node.image.colorspace_settings.name = colorspace
+    except Exception:
+        pass
     # Wrap mode (CLIP / REPEAT / EXTEND / MIRROR). Default 'CLIP' on the
     # property side keeps decals from accidentally tiling.
     if layer is not None:
