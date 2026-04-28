@@ -1889,8 +1889,8 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
         # fill values, and branching overrides — only the raw PATTERN
         # is borrowed from the referenced layer.
         if layer.layer_type == "REFERENCE":
-            if flag_attr and not getattr(layer, flag_attr, False):
-                continue
+            # contribution gate (use_<channel> vs output_channel routing) is
+            # already enforced by _layer_contributes_to at the top of the loop.
             ref_name = getattr(layer, 'reference_layer_name', '')
             ref_layer = next((l for l in layers if l.name == ref_name and l != layer), None)
             if ref_layer is None or ref_layer.layer_type == "REFERENCE":
@@ -2147,7 +2147,9 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
                     continue
                 layer_out   = p_color
                 layer_alpha = p_alpha
-            elif is_emission and getattr(layer, 'use_emission', False):
+            elif is_emission:
+                # _layer_contributes_to (checked above) already gates this:
+                # AUTO requires use_emission, output_channel routing bypasses it.
                 # Build Fac mask from procedural pattern, then use emission_color
                 # as the glow color. The Fac controls WHERE it glows, not what color.
                 fac_out = _build_proc_fac_node(
@@ -2209,9 +2211,11 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
                 node_tree.links.new(mask_out, _factor_socket(emis_mix))
                 layer_out = _result_socket(emis_mix)
                 layer_alpha = None
-            elif is_scalar and getattr(layer, flag_attr, False):
-                # Drive roughness/metallic from the procedural Fac output.
-                # The fill value acts as a multiplier so the user can dial in intensity.
+            elif is_scalar:
+                # Drive roughness/metallic/transmission/alpha from the
+                # procedural Fac output. The fill value is a multiplier
+                # (intensity dial). _layer_contributes_to upstream already
+                # gates AUTO vs output_channel routing.
                 fac_out = _build_proc_fac_node(node_tree, layer, f"scalar_{channel_id}_{i}", x, y, uv_map)
                 if fac_out is None:
                     continue
@@ -3887,7 +3891,7 @@ def _build_normal_channel(node_tree, layers, uv_map, x0, y_base, x_step):
 
         if layer.layer_type == "ADJUSTMENT":
             continue
-        if not getattr(layer, 'use_normal', False):
+        if not _layer_contributes_to(layer, 'normal'):
             continue
 
         img_name = getattr(layer, 'normal_image_name', "")
@@ -3986,7 +3990,7 @@ def _build_bump_channel(node_tree, layers, uv_map, start_x, y_base, x_step,
     for i, layer in enumerate(layers):
         if layer.layer_type == "ADJUSTMENT":
             continue
-        if not getattr(layer, 'use_bump', False):
+        if not _layer_contributes_to(layer, 'bump'):
             continue
 
         x, y = positions[i]
