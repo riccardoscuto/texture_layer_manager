@@ -180,15 +180,21 @@ def _add_layer_common(context, layer_type):
         layer.name = f"Layer {len(tlm.layers)}"
         res = int(tlm.resolution)
         img = bpy.data.images.new(layer.name, width=res, height=res, alpha=True, float_buffer=False)
-        import numpy as np
-        # Initialize as WHITE-TRANSPARENT (RGB=1, A=0) instead of np.zeros
-        # (which gave RGBA=0,0,0,0 and rendered the UIList thumbnail
-        # solid black — confused users into thinking the new layer was
-        # going to render dark). With white RGB the thumbnail looks
-        # neutral, and alpha=0 still keeps the layer fully transparent
-        # until the user paints over it.
-        px = np.tile([1.0, 1.0, 1.0, 0.0], res * res).astype(np.float32)
-        img.pixels.foreach_set(px)
+        # Initialize as WHITE-TRANSPARENT (RGB=1, A=0) so:
+        # - the UIList thumbnail looks neutral (not solid black)
+        # - the layer renders as fully transparent until the user paints
+        # foreach_set + update() is the official Blender 5.0 path; without
+        # update() the buffer stays at Blender's default (black opaque
+        # 0,0,0,1) and any rebuild reading layer.image.pixels sees garbage.
+        try:
+            import numpy as np
+            px = np.tile([1.0, 1.0, 1.0, 0.0], res * res).astype(np.float32)
+            img.pixels.foreach_set(px)
+        except Exception:
+            # Slow fallback for environments where numpy isn't available
+            # or foreach_set rejects the array — uses Python list assignment.
+            img.pixels[:] = [1.0, 1.0, 1.0, 0.0] * (res * res)
+        img.update()
         img.use_fake_user = True  # prevent GC when layer is hidden
         layer.image_name = img.name
         previews.invalidate(img.name)
