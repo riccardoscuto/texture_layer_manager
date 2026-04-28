@@ -2302,7 +2302,12 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
             # even without explicit modulators. For every other channel, only
             # create a mix when a modulator (mask / fresnel / opacity<1) would
             # otherwise be silently dropped. (Bugs #3, #4, #5 consolidation.)
-            needs_modulator_mix = _layer_has_first_layer_modulator(layer)
+            # Color channels also need a mix whenever a layer_alpha is present
+            # — otherwise a PAINT layer that's mostly transparent renders its
+            # raw RGB on the alpha=0 pixels (e.g. black for an empty canvas).
+            needs_modulator_mix = _layer_has_first_layer_modulator(layer) or (
+                not is_scalar and not is_emission and layer_alpha is not None
+            )
             if is_emission:
                 black = _new_fill(node_tree, (0.0, 0.0, 0.0, 1.0),
                                   x - 100, y - 80)
@@ -3683,18 +3688,25 @@ def _build_base_color(node_tree, root_layers, group_children, uv_map, start_x, y
             #     below to blend with), so we skip the mix for efficiency.
             #   - use_mask: ALWAYS meaningful — a mask constrains where the
             #     layer is visible, revealing the "background" underneath.
-            #     Without a mix, the mask is silently dropped and none of
-            #     its nodes (Image Texture, AO, etc.) appear in the graph.
+            #   - layer_alpha: a PAINT layer with transparent areas (alpha<1)
+            #     also needs a background to show through, otherwise alpha=0
+            #     pixels render whatever raw RGB the image carries (often
+            #     black for a freshly-created paint canvas) and the user
+            #     sees a black cube instead of an empty layer.
             # For GROUPs we additionally apply opacity/blend_mode against
             # the synthesized background so the group as a whole fades.
             has_mask = getattr(layer, 'use_mask', False)
+            has_fresnel = getattr(layer, 'use_fresnel_mask', False)
+            has_alpha_socket = layer_alpha_out is not None
             group_mods = layer.layer_type == "GROUP" and (
                 abs(layer.opacity - 1.0) > 1e-4
                 or layer.blend_mode != "MIX"
             )
-            needs_modulator = has_mask or group_mods
+            needs_modulator = has_mask or has_fresnel or has_alpha_socket or group_mods
             if needs_modulator:
-                bg = _new_fill(node_tree, (0.5, 0.5, 0.5, 1.0),
+                # Neutral white background — visible as "empty" wherever the
+                # layer's alpha (or mask) drops to zero. Better UX than black.
+                bg = _new_fill(node_tree, (1.0, 1.0, 1.0, 1.0),
                                x - 180, y + 120,
                                layer_name=layer.name, channel="base_color")
                 bg.name = f"{TLM_PREFIX}bottom_bg_{_next_id()}"

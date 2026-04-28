@@ -181,7 +181,13 @@ def _add_layer_common(context, layer_type):
         res = int(tlm.resolution)
         img = bpy.data.images.new(layer.name, width=res, height=res, alpha=True, float_buffer=False)
         import numpy as np
-        px = np.zeros(res * res * 4, dtype=np.float32)
+        # Initialize as WHITE-TRANSPARENT (RGB=1, A=0) instead of np.zeros
+        # (which gave RGBA=0,0,0,0 and rendered the UIList thumbnail
+        # solid black — confused users into thinking the new layer was
+        # going to render dark). With white RGB the thumbnail looks
+        # neutral, and alpha=0 still keeps the layer fully transparent
+        # until the user paints over it.
+        px = np.tile([1.0, 1.0, 1.0, 0.0], res * res).astype(np.float32)
         img.pixels.foreach_set(px)
         img.use_fake_user = True  # prevent GC when layer is hidden
         layer.image_name = img.name
