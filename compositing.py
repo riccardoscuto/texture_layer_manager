@@ -2012,26 +2012,17 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
             continue
 
         # Skip layers that don't contribute to this channel.
-        # output_channel routing: a layer with output_channel='ROUGHNESS' is
-        # skipped on every other channel including base_color (so it doesn't
-        # leak through the legacy "PAINT image always paints base color" path).
+        # _layer_contributes_to honors:
+        #   - output_channel routing (a layer pinned to ROUGHNESS only enters
+        #     the roughness pass, never base_color / metallic / etc.)
+        #   - the legacy use_<channel> toggles when output_channel == 'AUTO'.
+        #
+        # Note: the legacy "skip but still feed prev_alpha for base_color"
+        # branch (`if flag_attr and not getattr(layer, flag_attr, False)`)
+        # was always dead code for base_color (where flag_attr is None) and
+        # caused output_channel routing to fail for non-base channels because
+        # use_<channel>=False would override the routing. Removed.
         if not _layer_contributes_to(layer, channel_id):
-            continue
-        if flag_attr and not getattr(layer, flag_attr, False):
-            # Still update prev_alpha from base color image
-            if channel_id == 'base_color' and layer.layer_type == "PAINT" and layer.image:
-                tex = _new_img_tex(node_tree, layer.image, uv_map, x, y, layer=layer,
-                                   tag_role="paint_tex")
-                if current is None:
-                    current = tex.outputs["Color"]
-                    prev_alpha = tex.outputs["Alpha"]
-                else:
-                    mix = _new_mix(node_tree, _effective_blend_mode(layer, channel_id), layer.opacity, x + 280, y - 40, layer_name=layer.name, channel=channel_id)
-                    node_tree.links.new(current, _a_socket(mix))
-                    node_tree.links.new(tex.outputs["Color"], _b_socket(mix))
-                    _set_factor(node_tree, mix, layer, tex.outputs["Alpha"], prev_alpha, x + 280, y, i, uv_map, channel=channel_id)
-                    current = _result_socket(mix)
-                    prev_alpha = tex.outputs["Alpha"]
             continue
 
         img_name = getattr(layer, img_attr, "")
@@ -3521,7 +3512,13 @@ def _build_base_color(node_tree, root_layers, group_children, uv_map, start_x, y
             current = _apply_adjustment(node_tree, layer, current, x, y)
             continue
 
-        elif layer.layer_type == "GROUP":
+        # Output channel routing: a layer pinned to a non-base channel must
+        # NOT pollute Base Color. Skip here. (ADJUSTMENT above is exempt
+        # because it modifies `current` rather than feeding into a channel.)
+        if not _layer_contributes_to(layer, 'base_color'):
+            continue
+
+        if layer.layer_type == "GROUP":
             children = [l for l in group_children.get(layer.name, []) if l.visible]
             if not children:
                 continue

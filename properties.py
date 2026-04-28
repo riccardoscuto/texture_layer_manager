@@ -575,40 +575,57 @@ class TLM_LayerItem(PropertyGroup):
         update=_on_layer_update,
     )
 
+    # NOTE: paint_location_* are in UV space — 1.0 means "shift by exactly
+    # one image width". soft_min/soft_max bound slider drag to [-2, +2] so
+    # the user can't accidentally fling the image off the visible UV range
+    # (which would make the layer "disappear" with extension=CLIP). Manual
+    # numeric input still goes beyond.
     paint_location_x: FloatProperty(
         name="Location X", default=0.0,
+        soft_min=-2.0, soft_max=2.0, step=1, precision=3,
+        description="UV-space shift along X. 1.0 = one full image width",
         update=_make_hot_callback("paint_location_x"),
     )
     paint_location_y: FloatProperty(
         name="Location Y", default=0.0,
+        soft_min=-2.0, soft_max=2.0, step=1, precision=3,
+        description="UV-space shift along Y. 1.0 = one full image height",
         update=_make_hot_callback("paint_location_y"),
     )
     paint_location_z: FloatProperty(
         name="Location Z", default=0.0,
+        soft_min=-2.0, soft_max=2.0, step=1, precision=3,
+        description="Z shift — used only with 3D textures or rotated UVs",
         update=_make_hot_callback("paint_location_z"),
     )
     paint_rotation_x: FloatProperty(
         name="Rotation X", default=0.0, subtype='ANGLE',
+        soft_min=-6.2832, soft_max=6.2832,  # ±2π
         update=_make_hot_callback("paint_rotation_x"),
     )
     paint_rotation_y: FloatProperty(
         name="Rotation Y", default=0.0, subtype='ANGLE',
+        soft_min=-6.2832, soft_max=6.2832,
         update=_make_hot_callback("paint_rotation_y"),
     )
     paint_rotation_z: FloatProperty(
         name="Rotation Z", default=0.0, subtype='ANGLE',
+        soft_min=-6.2832, soft_max=6.2832,
         update=_make_hot_callback("paint_rotation_z"),
     )
     paint_scale_x: FloatProperty(
         name="Scale X", default=1.0, soft_min=0.01, soft_max=20.0,
+        step=10, precision=3,
         update=_make_hot_callback("paint_scale_x"),
     )
     paint_scale_y: FloatProperty(
         name="Scale Y", default=1.0, soft_min=0.01, soft_max=20.0,
+        step=10, precision=3,
         update=_make_hot_callback("paint_scale_y"),
     )
     paint_scale_z: FloatProperty(
         name="Scale Z", default=1.0, soft_min=0.01, soft_max=20.0,
+        step=10, precision=3,
         update=_make_hot_callback("paint_scale_z"),
     )
 
