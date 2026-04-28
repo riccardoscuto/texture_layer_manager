@@ -2030,7 +2030,39 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
 
         # ── Determine layer color/value output ────────────────────────────
         if layer.layer_type == "PAINT":
-            if channel_id == 'base_color':
+            out_ch = getattr(layer, 'output_channel', 'AUTO')
+            _routed_handled = False
+
+            # Routed PAINT: the main paint image (layer.image) becomes the
+            # source for whatever target channel was selected, bypassing the
+            # per-channel image_name properties (which the user typically
+            # doesn't fill in for routed layers).
+            # - target=Alpha → use image's native alpha output (PNG cutout)
+            # - target=Roughness/Metallic/Transmission → SeparateColor.R
+            # - target=Base Color → Color output
+            if out_ch != 'AUTO':
+                if not layer.image:
+                    continue
+                cs = "sRGB" if channel_id == 'base_color' else "Non-Color"
+                tex = _new_img_tex(node_tree, layer.image, uv_map, x, y, cs,
+                                   layer=layer,
+                                   tag_role="paint_tex" if channel_id == 'base_color'
+                                            else f"paint_routed_{channel_id}")
+                layer_out = tex.outputs["Color"]
+                layer_alpha = tex.outputs["Alpha"] if channel_id == 'base_color' else None
+                if is_scalar:
+                    if channel_id == 'alpha':
+                        layer_out = tex.outputs["Alpha"]
+                    else:
+                        sep = node_tree.nodes.new("ShaderNodeSeparateColor")
+                        sep.name = f"{TLM_PREFIX}routed_sep_{_next_id()}"
+                        sep.location = (x + 220, y)
+                        node_tree.links.new(tex.outputs["Color"], sep.inputs["Color"])
+                        layer_out = sep.outputs["Red"]
+                    layer_alpha = None
+                _routed_handled = True
+
+            elif channel_id == 'base_color':
                 if not layer.image:
                     continue
                 cs = "sRGB"
@@ -2083,27 +2115,47 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
                     continue
                 cs = "Non-Color"
 
-            target_img = layer.image if channel_id == 'base_color' else img
-            tex_tag = "paint_tex" if channel_id == 'base_color' else f"pbr_tex_{channel_id}"
-            tex = _new_img_tex(node_tree, target_img, uv_map, x, y, cs, layer=layer,
-                               tag_role=tex_tag)
-            layer_out = tex.outputs["Color"]
-            layer_alpha = tex.outputs["Alpha"]
+            if not _routed_handled:
+                target_img = layer.image if channel_id == 'base_color' else img
+                tex_tag = "paint_tex" if channel_id == 'base_color' else f"pbr_tex_{channel_id}"
+                tex = _new_img_tex(node_tree, target_img, uv_map, x, y, cs, layer=layer,
+                                   tag_role=tex_tag)
+                layer_out = tex.outputs["Color"]
+                layer_alpha = tex.outputs["Alpha"]
 
-            if is_scalar:
-                # Use R channel for scalar maps
-                sep = node_tree.nodes.new("ShaderNodeSeparateColor")
-                sep.name = f"{TLM_PREFIX}sep_{_next_id()}"
-                sep.location = (x + 220, y)
-                node_tree.links.new(tex.outputs["Color"], sep.inputs["Color"])
-                layer_out = sep.outputs["Red"]
-                layer_alpha = None
+                if is_scalar:
+                    # Use R channel for scalar maps
+                    sep = node_tree.nodes.new("ShaderNodeSeparateColor")
+                    sep.name = f"{TLM_PREFIX}sep_{_next_id()}"
+                    sep.location = (x + 220, y)
+                    node_tree.links.new(tex.outputs["Color"], sep.inputs["Color"])
+                    layer_out = sep.outputs["Red"]
+                    layer_alpha = None
 
         elif layer.layer_type == "FILL":
             layer_alpha = None
+            fill_out_ch = getattr(layer, 'output_channel', 'AUTO')
+            fill_routed = fill_out_ch != 'AUTO'
+
             if channel_id == 'base_color':
                 fn = _new_fill(node_tree, layer.fill_color, x, y, layer_name=layer.name, channel="base_color")
                 layer_out = fn.outputs["Color"]
+            elif fill_routed and is_scalar:
+                # Routed FILL on a scalar target: derive the scalar from the
+                # color picker (luminance, Rec.709). The per-channel _fill
+                # sliders (alpha_fill, roughness_fill, ...) are not exposed
+                # in the UI for routed layers — the only thing the user sees
+                # is the color swatch, so we honor that.
+                # Black → 0, white → 1, grey 0.5 → 0.5; colors weighted by
+                # ShaderNodeRGBToBW's built-in luminance formula.
+                fn = _new_fill(node_tree, layer.fill_color, x - 100, y,
+                               layer_name=layer.name, channel=channel_id)
+                bw = node_tree.nodes.new("ShaderNodeRGBToBW")
+                bw.name = f"{TLM_PREFIX}fill_lum_{_next_id()}"
+                bw.location = (x + 80, y)
+                _tag(bw, layer.name, f"fill_lum_{channel_id}")
+                node_tree.links.new(fn.outputs["Color"], bw.inputs["Color"])
+                layer_out = bw.outputs["Val"]
             elif is_scalar:
                 img_name = getattr(layer, img_attr, "")
                 img = bpy.data.images.get(img_name) if img_name else None
