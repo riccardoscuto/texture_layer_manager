@@ -940,10 +940,12 @@ def draw_tlm_settings(layout, context):
             prow = grid.row(align=True)
         op = prow.operator("tlm.apply_preset", text=pname, icon='MATERIAL')
         op.preset_name = pname
-    layout.separator(factor=0.3)
-    layout.operator("tlm.save_preset", text="Save Current as Preset…", icon='FILE_TICK')
 
     # ── User-saved presets (cached to avoid os.listdir every draw) ──────
+    # The "Save Current as Preset…" button lives in THIS section because
+    # what it produces is a user preset, not a built-in. Putting it under
+    # the read-only built-in list above (where it used to be) suggested
+    # the user could append to that list, which they can't.
     global _preset_cache, _preset_cache_time
     preset_dir = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "presets")
     now = _time.monotonic()
@@ -956,9 +958,9 @@ def draw_tlm_settings(layout, context):
         else:
             _preset_cache = []
     user_presets = _preset_cache
+    layout.separator(factor=0.5)
+    layout.label(text="Saved Presets:", icon='FILE_FOLDER')
     if user_presets:
-        layout.separator(factor=0.3)
-        layout.label(text="Saved Presets:", icon='FILE_FOLDER')
         ugrid = layout.column(align=True)
         ugrid.scale_y = 0.95
         for pname in user_presets:
@@ -967,6 +969,8 @@ def draw_tlm_settings(layout, context):
             op.preset_name = pname
             dop = urow.operator("tlm.delete_preset", text="", icon='TRASH')
             dop.preset_name = pname
+    layout.operator("tlm.save_preset",
+                    text="Save Current as Preset…", icon='FILE_TICK')
 
     layout.separator(factor=0.8)
     layout.label(text="Layer Stack I/O", icon='FILE_FOLDER')
