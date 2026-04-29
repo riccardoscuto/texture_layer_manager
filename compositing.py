@@ -2271,24 +2271,45 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
                 layer_alpha = None
             elif is_scalar:
                 # Drive roughness/metallic/transmission/alpha from the
-                # procedural Fac output. The fill value is a multiplier
-                # (intensity dial). _layer_contributes_to upstream already
-                # gates AUTO vs output_channel routing.
+                # procedural Fac output.
+                #
+                # When this channel is the layer's PRIMARY routing target
+                # (output_channel matches), the user expects the procedural
+                # pattern to drive the BSDF input directly — no multiplier.
+                # Otherwise (additional channel reached via use_<channel>
+                # toggle), the *_fill slider acts as an intensity dial.
+                # The distinction matters because *_fill defaults are not
+                # symmetrical: roughness_fill=0.5, metallic_fill=0.0,
+                # alpha_fill=1.0. A PROCEDURAL routed to METALLIC with
+                # default fill_val=0.0 was multiplying the noise by zero.
                 fac_out = _build_proc_fac_node(node_tree, layer, f"scalar_{channel_id}_{i}", x, y, uv_map)
                 if fac_out is None:
                     continue
-                fill_val = (layer.roughness_fill if channel_id == 'roughness'
-                           else layer.transmission_fill if channel_id == 'transmission'
-                           else layer.alpha_fill if channel_id == 'alpha'
-                           else layer.metallic_fill)
-                scale = node_tree.nodes.new("ShaderNodeMath")
-                scale.operation = 'MULTIPLY'
-                scale.use_clamp = True
-                scale.name = f"{TLM_PREFIX}proc_scalar_{channel_id}_{i}"
-                scale.location = (x + 120, y)
-                node_tree.links.new(fac_out, scale.inputs[0])
-                scale.inputs[1].default_value = fill_val
-                layer_out   = scale.outputs["Value"]
+
+                _routing_target = {
+                    'BASE_COLOR': 'base_color', 'ROUGHNESS': 'roughness',
+                    'METALLIC': 'metallic', 'ALPHA': 'alpha',
+                }.get(getattr(layer, 'output_channel', 'BASE_COLOR'), 'base_color')
+
+                if _routing_target == channel_id:
+                    # Primary target: pass the procedural Fac through directly.
+                    layer_out = fac_out
+                else:
+                    # Additional channel (use_X toggle on top of the routing
+                    # target). Multiply by the per-channel fill slider so the
+                    # user can dial in intensity.
+                    fill_val = (layer.roughness_fill if channel_id == 'roughness'
+                               else layer.transmission_fill if channel_id == 'transmission'
+                               else layer.alpha_fill if channel_id == 'alpha'
+                               else layer.metallic_fill)
+                    scale = node_tree.nodes.new("ShaderNodeMath")
+                    scale.operation = 'MULTIPLY'
+                    scale.use_clamp = True
+                    scale.name = f"{TLM_PREFIX}proc_scalar_{channel_id}_{i}"
+                    scale.location = (x + 120, y)
+                    node_tree.links.new(fac_out, scale.inputs[0])
+                    scale.inputs[1].default_value = fill_val
+                    layer_out = scale.outputs["Value"]
                 layer_alpha = None
             else:
                 continue
