@@ -912,6 +912,13 @@ def draw_tlm_settings(layout, context):
     comp = layout.column(align=True)
     ac_icon = 'LINKED' if tlm.auto_composite else 'UNLINKED'
     comp.prop(tlm, "auto_composite", text="Auto Composite", icon=ac_icon, toggle=True)
+    # Material-level toggle: wire base color alpha → BSDF.Alpha.
+    # Off by default. Turn on for cutout/decal/foliage materials so a
+    # PAINT layer with native alpha makes the surface transparent and
+    # bakes to a real RGBA PNG with the 'Pack Alpha into Base Color'
+    # bake option.
+    comp.prop(tlm, "use_base_color_alpha",
+              text="Use Paint Alpha", icon='IMAGE_ALPHA', toggle=True)
     ops_row = comp.row(align=True)
     ops_row.operator("tlm.rebuild_composite", text="Rebuild",   icon='FILE_REFRESH')
     ops_row.operator("tlm.flatten_layers",    text="Flatten",   icon='IMAGE_ZDEPTH')

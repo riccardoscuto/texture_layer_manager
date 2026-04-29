@@ -1281,6 +1281,24 @@ class TLM_MaterialProperties(PropertyGroup):
         default=True,
     )
 
+    # When ON, the alpha output of the base color chain (typically the
+    # alpha of a PAINT layer's image) is wired to BSDF.Alpha. Lets a
+    # PAINT layer with a transparent PNG render as transparent and bake
+    # to a real RGBA PNG without setting up a dedicated Output=Alpha layer.
+    # Default OFF — without this, an empty PAINT layer (alpha=0 everywhere)
+    # would unintentionally hide the cube.
+    use_base_color_alpha: BoolProperty(
+        name="Use Paint Alpha",
+        description=(
+            "Wire the alpha of the base color chain (PAINT image alpha) to "
+            "BSDF.Alpha. Enable for cutout/decal/foliage workflows so an "
+            "empty/transparent paint shows through. Disable for additive "
+            "painting where new strokes should layer over a solid base"
+        ),
+        default=False,
+        update=_on_layer_update,
+    )
+
     # Resolution for new layers
     resolution: EnumProperty(
         name="New Layer Resolution",

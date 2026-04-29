@@ -3494,15 +3494,14 @@ def rebuild_node_tree(material):
             if a_out:
                 _link_to_bsdf(node_tree, a_out, bsdf,
                               ["Alpha", "alpha"], "alpha")
-        elif bc_alpha is not None:
-            # No explicit alpha layer (no use_alpha toggle, no
-            # output_channel='ALPHA') — auto-wire the alpha that already
-            # comes out of the base_color chain so a PAINT layer with a
-            # transparent PNG renders / bakes as transparent without
-            # needing a duplicate layer routed to Alpha.
-            #
-            # Tagged separately ("alpha-auto") so we can tell apart a manually
-            # routed alpha channel from this auto-wired path during debug.
+        elif bc_alpha is not None and getattr(tlm, 'use_base_color_alpha', False):
+            # Material-level opt-in: when the user wants the base color's
+            # native alpha (typically the PAINT image alpha) to drive
+            # surface transparency / bake. OFF by default because an empty
+            # PAINT layer (alpha=0 everywhere) would otherwise unintentionally
+            # hide the whole cube the moment it's added on top of a Fill.
+            # Tagged "alpha-auto" so debug can tell it apart from the
+            # explicitly-routed path.
             _link_to_bsdf(node_tree, bc_alpha, bsdf,
                           ["Alpha", "alpha"], "alpha-auto")
 
