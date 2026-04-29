@@ -60,6 +60,21 @@ class TLM_OT_BakePBR(Operator):
     bake_transmission: bpy.props.BoolProperty(name="Transmission", default=False)
     bake_alpha:        bpy.props.BoolProperty(name="Alpha",        default=False)
 
+    # When both Base Color and Alpha are baked, embed the alpha INTO the
+    # base-color PNG (R/G/B = base color, A = baked alpha). Produces a real
+    # transparent PNG usable for cutout / decal / foliage workflows. Without
+    # this, BaseColor.png stays opaque and Alpha.png is a separate greyscale
+    # file the user has to recombine in another tool.
+    pack_alpha_into_base_color: bpy.props.BoolProperty(
+        name="Pack Alpha into Base Color",
+        description=(
+            "When both Base Color and Alpha are selected, output a single "
+            "RGBA PNG (RGB = base color, A = alpha) instead of two "
+            "separate files. Required for true PNG transparency"
+        ),
+        default=True,
+    )
+
     @classmethod
     def poll(cls, context):
         return _get_material(context) is not None
@@ -87,6 +102,11 @@ class TLM_OT_BakePBR(Operator):
             box.prop(self, "bake_emission")
             box.prop(self, "bake_transmission")
             box.prop(self, "bake_alpha")
+            # Surface the pack option only when it's actually meaningful —
+            # both Base Color and Alpha must be selected.
+            if self.bake_base_color and self.bake_alpha:
+                box.separator(factor=0.4)
+                box.prop(self, "pack_alpha_into_base_color")
 
     def execute(self, context):
         mat = _get_material(context)
@@ -354,6 +374,58 @@ class TLM_OT_BakePBR(Operator):
                     bpy.data.images.remove(metallic_img)
                 return mr
 
+            def _pack_base_alpha(base_img, alpha_img):
+                """Combine RGB(base) + R(alpha) into a single RGBA PNG.
+
+                The result is what users mean by 'PNG with alpha' — open it in
+                any tool and the alpha channel actually masks the colour. The
+                two temp images are removed afterwards (only the combined
+                output is saved to disk).
+                """
+                if base_img is None:
+                    return None
+                img_name = f"{base}_BaseColor"
+                if img_name in bpy.data.images:
+                    bpy.data.images.remove(bpy.data.images[img_name])
+                out = bpy.data.images.new(img_name, width=res, height=res, alpha=True)
+                # sRGB — base colour space, alpha is straight (PNG default)
+                try:
+                    out.colorspace_settings.name = "sRGB"
+                except Exception:
+                    pass
+
+                base_px = np.zeros(res * res * 4, dtype=np.float32)
+                base_img.pixels.foreach_get(base_px)
+                # Copy RGB straight from the base
+                px = np.empty(res * res * 4, dtype=np.float32)
+                px[0::4] = base_px[0::4]  # R
+                px[1::4] = base_px[1::4]  # G
+                px[2::4] = base_px[2::4]  # B
+                # A = R channel of the alpha bake (alpha bake is greyscale,
+                # value replicated across R/G/B; we read R)
+                if alpha_img is not None:
+                    a_px = np.zeros(res * res * 4, dtype=np.float32)
+                    alpha_img.pixels.foreach_get(a_px)
+                    px[3::4] = a_px[0::4]
+                else:
+                    px[3::4] = 1.0  # no alpha bake → fully opaque
+
+                out.pixels.foreach_set(px)
+                out.update()
+
+                filepath = os.path.join(out_dir, f"{img_name}.{ext}")
+                out.filepath_raw = filepath
+                out.file_format = self.file_format
+                out.save()
+                baked.append(f"BaseColor (RGBA) → {img_name}.{ext}")
+
+                # Cleanup temp inputs — only the packed output stays.
+                if base_img and base_img.name != img_name:
+                    bpy.data.images.remove(base_img)
+                if alpha_img is not None:
+                    bpy.data.images.remove(alpha_img)
+                return out
+
             if self.preset == 'UNREAL':
                 _bake_channel("Albedo",     "Base Color",  "sRGB")
                 _bake_channel("Normal",     "Normal",      "Non-Color")
@@ -379,8 +451,23 @@ class TLM_OT_BakePBR(Operator):
                 # Each channel honors its own checkbox. Use these to export
                 # specific PBR maps (e.g. Base Color + Alpha only for cutout
                 # decals; Roughness + Metallic only for material refinement).
-                if self.bake_base_color:
-                    _bake_channel("BaseColor",    "Base Color",     "sRGB")
+                pack_ba = (self.pack_alpha_into_base_color
+                           and self.bake_base_color
+                           and self.bake_alpha)
+
+                if pack_ba:
+                    # Bake to temp images so we can pack RGB(base)+A(alpha)
+                    # into a single transparent PNG. Temp images are
+                    # removed inside _pack_base_alpha after the save.
+                    base_img  = _bake_channel("_tmp_BaseColor", "Base Color", "sRGB")
+                    alpha_img = _bake_channel("_tmp_Alpha",     "Alpha",      "Non-Color")
+                    _pack_base_alpha(base_img, alpha_img)
+                else:
+                    if self.bake_base_color:
+                        _bake_channel("BaseColor", "Base Color", "sRGB")
+                    if self.bake_alpha:
+                        _bake_channel("Alpha",     "Alpha",      "Non-Color")
+
                 if self.bake_roughness:
                     _bake_channel("Roughness",    "Roughness",      "Non-Color")
                 if self.bake_metallic:
@@ -391,8 +478,6 @@ class TLM_OT_BakePBR(Operator):
                     _bake_channel("Emission",     "Emission Color", "sRGB")
                 if self.bake_transmission:
                     _bake_channel("Transmission", "Transmission Weight", "Non-Color")
-                if self.bake_alpha:
-                    _bake_channel("Alpha",        "Alpha",          "Non-Color")
 
         # End of _BakeGuard context — engine and selection restored here.
 
