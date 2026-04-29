@@ -1008,15 +1008,15 @@ def _new_img_tex(node_tree, image, uv_map, x, y, colorspace="sRGB", layer=None, 
     node.name = f"{TLM_PREFIX}img_{image.name}_{_next_id()}"
     node.image = image
     node.location = (x, y)
-    # Always force the colorspace explicitly — previously we only set it
-    # when caller asked for "Non-Color", which meant once an image had
-    # been used in a routed-to-scalar pass, its colorspace stayed at
-    # "Non-Color" forever. Switching that PAINT layer back to AUTO (Base
-    # Color) then displayed the image dark / un-gamma-corrected.
-    # Setting it on every rebuild keeps the image consistent with how
-    # this current layer actually uses it.
+    # Force the colorspace explicitly — keeps the image consistent with
+    # how this layer uses it (sRGB for base color, Non-Color for data).
+    # IMPORTANT: only write when actually different. Writing the same
+    # value re-triggers Blender 5.0's internal image loader which can
+    # discard paint pixels that haven't been packed yet (user reports
+    # "I painted then changed Output channel and my paint disappeared").
     try:
-        node.image.colorspace_settings.name = colorspace
+        if node.image.colorspace_settings.name != colorspace:
+            node.image.colorspace_settings.name = colorspace
     except Exception:
         pass
     # Wrap mode (CLIP / REPEAT / EXTEND / MIRROR). Default 'CLIP' on the
@@ -3291,6 +3291,16 @@ def rebuild_node_tree(material):
             img = _bpy.data.images.get(layer.image_name)
             if img:
                 img.use_fake_user = True
+                # Pack any dirty PAINT image (user painted but didn't save)
+                # so the pixels survive the upcoming colorspace / image
+                # reassign on the new tex node. Without this, Blender 5.0
+                # was discarding fresh paint when output_channel changed
+                # because the rebuild looked like an image reload.
+                if getattr(img, 'is_dirty', False):
+                    try:
+                        img.pack()
+                    except Exception:
+                        pass  # already packed or packing not supported
         # Also protect PBR channel images (roughness, metallic, normal, emission)
         for attr in ('roughness_image_name', 'metallic_image_name',
                      'normal_image_name', 'emission_image_name',
