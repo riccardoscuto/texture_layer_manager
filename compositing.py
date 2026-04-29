@@ -3414,7 +3414,7 @@ def rebuild_node_tree(material):
         }
 
         # ── Base Color — built from root_layers to preserve GROUP alpha for clipping mask ─
-        bc_out = _build_base_color(node_tree, root_layers, group_children, uv_map, start_x, ch_y['base_color'], x_step)
+        bc_out, bc_alpha = _build_base_color(node_tree, root_layers, group_children, uv_map, start_x, ch_y['base_color'], x_step)
         if bc_out:
             _link_to_bsdf(node_tree, bc_out, bsdf, ["Base Color", "base_color"], "base_color")
 
@@ -3488,11 +3488,23 @@ def rebuild_node_tree(material):
         # Drives the BSDF Alpha input (surface opacity / cutout). Distinct from
         # transmission (which is volumetric). Useful for foliage cards, decals,
         # masks projected on a surface, etc.
-        if _channel_used(expanded, 'use_alpha'):
+        alpha_explicitly_routed = _channel_used(expanded, 'use_alpha')
+        if alpha_explicitly_routed:
             a_out = _build_channel(node_tree, expanded, 'alpha', uv_map, start_x, ch_y.get('alpha', 0), x_step)
             if a_out:
                 _link_to_bsdf(node_tree, a_out, bsdf,
                               ["Alpha", "alpha"], "alpha")
+        elif bc_alpha is not None:
+            # No explicit alpha layer (no use_alpha toggle, no
+            # output_channel='ALPHA') — auto-wire the alpha that already
+            # comes out of the base_color chain so a PAINT layer with a
+            # transparent PNG renders / bakes as transparent without
+            # needing a duplicate layer routed to Alpha.
+            #
+            # Tagged separately ("alpha-auto") so we can tell apart a manually
+            # routed alpha channel from this auto-wired path during debug.
+            _link_to_bsdf(node_tree, bc_alpha, bsdf,
+                          ["Alpha", "alpha"], "alpha-auto")
 
         # ── Bump ──────────────────────────────────────────────────────────────────
         # Pass incoming_normal=normal_out so each per-layer Bump perturbs the
@@ -3733,7 +3745,11 @@ def _build_base_color(node_tree, root_layers, group_children, uv_map, start_x, y
         current = _result_socket(mix)
         prev_alpha = layer_alpha_out
 
-    return current
+    # Return both the color result AND the final alpha. The caller can wire
+    # alpha to BSDF.Alpha automatically when no explicit alpha layer is
+    # present — gives the natural "PAINT image with transparency = cube
+    # transparent" workflow without requiring a dedicated Output=Alpha layer.
+    return current, prev_alpha
 
 
 def _build_proc_fac_node(node_tree, layer, name_suffix, x, y, uv_map="UVMap"):
