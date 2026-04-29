@@ -179,22 +179,42 @@ def _add_layer_common(context, layer_type):
     if layer_type == "PAINT":
         layer.name = f"Layer {len(tlm.layers)}"
         res = int(tlm.resolution)
-        img = bpy.data.images.new(layer.name, width=res, height=res, alpha=True, float_buffer=False)
-        # Initialize as WHITE-TRANSPARENT (RGB=1, A=0) so:
-        # - the UIList thumbnail looks neutral (not solid black)
-        # - the layer renders as fully transparent until the user paints
-        # foreach_set + update() is the official Blender 5.0 path; without
-        # update() the buffer stays at Blender's default (black opaque
-        # 0,0,0,1) and any rebuild reading layer.image.pixels sees garbage.
+        # Override Blender's default 'generated black opaque' image — set
+        # the generated_color BEFORE we start writing pixels so any path
+        # that consults it (preview, internal cache invalidation) sees
+        # white-transparent first.
+        try:
+            img_gen = bpy.data.images.new(layer.name,
+                                           width=res, height=res,
+                                           alpha=True, float_buffer=False)
+        except TypeError:
+            img_gen = bpy.data.images.new(layer.name,
+                                           width=res, height=res,
+                                           alpha=True)
+        img = img_gen
+        try:
+            img.generated_color = (1.0, 1.0, 1.0, 0.0)
+        except Exception:
+            pass
+
+        # Now overwrite the pixel buffer explicitly. We do BOTH foreach_set
+        # (fast) AND a slow-path fallback if it's unavailable, then call
+        # update() + update_tag() — Blender 5.0 needs both for the buffer
+        # to be visible to downstream readers (rebuild, tex node sampling).
         try:
             import numpy as np
             px = np.tile([1.0, 1.0, 1.0, 0.0], res * res).astype(np.float32)
             img.pixels.foreach_set(px)
         except Exception:
-            # Slow fallback for environments where numpy isn't available
-            # or foreach_set rejects the array — uses Python list assignment.
             img.pixels[:] = [1.0, 1.0, 1.0, 0.0] * (res * res)
-        img.update()
+        try:
+            img.update()
+        except Exception:
+            pass
+        try:
+            img.update_tag()
+        except Exception:
+            pass
         img.use_fake_user = True  # prevent GC when layer is hidden
         layer.image_name = img.name
         previews.invalidate(img.name)

@@ -54,6 +54,10 @@ def _subscribe_msgbus():
 
 
 def register():
+    # Print loaded version + module path so the user can verify in the
+    # System Console that Blender actually picked up the latest code
+    # (cached __pycache__ or duplicate installs sometimes load stale).
+    print(f"[TLM] register: version {bl_info['version']} from {__file__}")
     for mod in modules:
         mod.register()
     _subscribe_msgbus()
