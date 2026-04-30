@@ -20,6 +20,53 @@ class TLM_OT_AddPaintLayer(Operator):
         if name is None:
             self.report({'ERROR'}, "No active material")
             return {'CANCELLED'}
+
+        # Convenience: take the user straight to a usable paint workflow.
+        # Three side effects:
+        #   1. Mark the new layer's image as the active paint canvas
+        #      (selects the right tex node so brush strokes hit it).
+        #   2. Switch the object to TEXTURE_PAINT mode.
+        #   3. Switch the 3D viewport to MATERIAL preview shading
+        #      (RENDERED doesn't update live during paint strokes —
+        #       Cycles re-renders only after the stroke finishes,
+        #       Eevee/MaterialPreview updates per-stroke).
+        # Each step is wrapped in try/except — these are nice-to-have,
+        # the paint layer was already added successfully and we don't
+        # want to roll back on a context-restricted failure.
+        mat = _get_material(context)
+        if mat:
+            new_idx = mat.tlm.active_layer_index
+            try:
+                bpy.ops.tlm.set_active_paint_layer(layer_index=new_idx)
+            except Exception:
+                pass
+
+        obj = context.active_object
+        if obj and obj.type == 'MESH':
+            try:
+                bpy.ops.object.mode_set(mode='TEXTURE_PAINT')
+            except Exception:
+                pass  # not always allowed (e.g. no UV map, or restricted ctx)
+
+        # Find the 3D viewport the user is working in and switch shading.
+        # We pick the first VIEW_3D area that's not in SOLID — if they're
+        # already in MATERIAL or RENDERED we still nudge to MATERIAL since
+        # painting is sluggish in RENDERED.
+        screen = getattr(context, "screen", None)
+        if screen:
+            for area in screen.areas:
+                if area.type != 'VIEW_3D':
+                    continue
+                for space in area.spaces:
+                    if space.type == 'VIEW_3D':
+                        try:
+                            if space.shading.type != 'MATERIAL':
+                                space.shading.type = 'MATERIAL'
+                        except Exception:
+                            pass
+                        break
+                break
+
         self.report({'INFO'}, f"Added paint layer '{name}'")
         return {'FINISHED'}
 

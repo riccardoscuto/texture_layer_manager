@@ -177,7 +177,7 @@ def _add_layer_common(context, layer_type):
     layer.group_name = parent_group  # assign to group if applicable
 
     if layer_type == "PAINT":
-        layer.name = f"Layer {len(tlm.layers)}"
+        layer.name = f"Paint {len(tlm.layers)}"
         res = int(tlm.resolution)
         # Override Blender's default 'generated black opaque' image — set
         # the generated_color BEFORE we start writing pixels so any path
