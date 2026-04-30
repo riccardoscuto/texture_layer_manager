@@ -16,10 +16,11 @@ from . import compositing
 # ── Rebuild debounce ──────────────────────────────────────────────────────────
 # Prevents a full node-tree rebuild on every individual slider tick.
 # Multiple rapid changes within the debounce window are batched into a single rebuild.
-# 180ms is a balance: feels snappy to the eye, absorbs a slider drag
-# (~60Hz ticks from Blender) into ~5 rebuilds per 1-second drag instead of ~20.
+# 250ms balances responsiveness with absorbing a slider drag — ~4 rebuilds
+# per 1-second drag instead of one per 60Hz tick. Larger values feel laggy
+# on hover-edit; smaller values stutter on slider drags with many layers.
 
-_REBUILD_DEBOUNCE_S = 0.18
+_REBUILD_DEBOUNCE_S = 0.25
 
 # Set of material names that need rebuilding — accumulates across rapid changes.
 _pending_materials: set = set()
@@ -183,7 +184,12 @@ class TLM_LayerItem(PropertyGroup):
     name: StringProperty(
         name="Name",
         default="Layer",
-        update=_on_layer_update,
+        # No update callback — the layer name is metadata. It's used by
+        # the tag system to find nodes (tlm_layer custom prop), but
+        # renaming a layer doesn't change which nodes exist or how they
+        # connect, so a full rebuild is wasteful. The tags carry the
+        # OLD name in the existing nodes; that's fine — they'll be
+        # refreshed at the next genuine rebuild.
     )
 
     layer_type: EnumProperty(
