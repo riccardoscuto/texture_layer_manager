@@ -33,6 +33,20 @@ class TLM_OT_AddPaintLayer(Operator):
         # Each step is wrapped in try/except — these are nice-to-have,
         # the paint layer was already added successfully and we don't
         # want to roll back on a context-restricted failure.
+        obj = context.active_object
+        was_in_paint = bool(obj and obj.mode == 'TEXTURE_PAINT')
+
+        # If we're already in TEXTURE_PAINT, drop back to OBJECT first.
+        # Selecting a new active tex node while still in paint mode
+        # doesn't refresh the brush canvas — the user keeps painting on
+        # the previous layer's image. The exit/re-enter cycle below
+        # forces Blender to re-resolve the active image.
+        if was_in_paint and obj and obj.type == 'MESH':
+            try:
+                bpy.ops.object.mode_set(mode='OBJECT')
+            except Exception:
+                pass
+
         mat = _get_material(context)
         if mat:
             new_idx = mat.tlm.active_layer_index
@@ -41,7 +55,6 @@ class TLM_OT_AddPaintLayer(Operator):
             except Exception:
                 pass
 
-        obj = context.active_object
         if obj and obj.type == 'MESH':
             try:
                 bpy.ops.object.mode_set(mode='TEXTURE_PAINT')
