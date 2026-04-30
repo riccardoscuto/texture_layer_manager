@@ -1287,6 +1287,15 @@ class TLM_MaterialProperties(PropertyGroup):
         default=True,
     )
 
+    # ── UI state — collapsible subsections inside the 'TLM Settings' panel ──
+    # Defaults: 'frequent action' sections open, 'set-once' sections closed.
+    # Saved per-material so the user's preferred layout sticks.
+    show_settings_canvas:    BoolProperty(name="Show Canvas",     default=False)
+    show_settings_composite: BoolProperty(name="Show Composite",  default=True)
+    show_settings_bake:      BoolProperty(name="Show Bake",       default=True)
+    show_settings_presets:   BoolProperty(name="Show Presets",    default=False)
+    show_settings_io:        BoolProperty(name="Show Stack I/O",  default=False)
+
     # When ON, the alpha output of the base color chain (typically the
     # alpha of a PAINT layer's image) is wired to BSDF.Alpha. Lets a
     # PAINT layer with a transparent PNG render as transparent and bake

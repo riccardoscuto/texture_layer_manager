@@ -895,6 +895,18 @@ def _draw_group_assignment(col, active, tlm):
             op.group_name = g.name
 
 
+def _draw_section_header(layout, tlm, prop_name, label, icon):
+    """Render a clickable collapsible header. Returns True if expanded."""
+    expanded = getattr(tlm, prop_name, False)
+    row = layout.row(align=True)
+    row.prop(tlm, prop_name,
+             text=label,
+             icon='TRIA_DOWN' if expanded else 'TRIA_RIGHT',
+             emboss=False)
+    row.label(text="", icon=icon)
+    return expanded
+
+
 def draw_tlm_settings(layout, context):
     obj = context.active_object
     if not obj or not obj.active_material:
@@ -902,89 +914,89 @@ def draw_tlm_settings(layout, context):
     mat = obj.active_material
     tlm = mat.tlm
 
-    layout.label(text="Canvas", icon='IMAGE_DATA')
-    canvas = layout.column(align=True)
-    canvas.prop(tlm, "resolution")
-    canvas.prop(tlm, "uv_map")
+    # ── Canvas ──────────────────────────────────────────────────────────
+    if _draw_section_header(layout, tlm, "show_settings_canvas",
+                            "Canvas", 'IMAGE_DATA'):
+        canvas = layout.box().column(align=True)
+        canvas.prop(tlm, "resolution")
+        canvas.prop(tlm, "uv_map")
 
-    layout.separator(factor=0.8)
-    layout.label(text="Composite", icon='NODE_MATERIAL')
-    comp = layout.column(align=True)
-    ac_icon = 'LINKED' if tlm.auto_composite else 'UNLINKED'
-    comp.prop(tlm, "auto_composite", text="Auto Composite", icon=ac_icon, toggle=True)
-    # Material-level toggle: wire base color alpha → BSDF.Alpha.
-    # Off by default. Turn on for cutout/decal/foliage materials so a
-    # PAINT layer with native alpha makes the surface transparent and
-    # bakes to a real RGBA PNG with the 'Pack Alpha into Base Color'
-    # bake option.
-    comp.prop(tlm, "use_base_color_alpha",
-              text="Use Paint Alpha", icon='IMAGE_ALPHA', toggle=True)
-    ops_row = comp.row(align=True)
-    ops_row.operator("tlm.rebuild_composite", text="Rebuild",   icon='FILE_REFRESH')
-    ops_row.operator("tlm.flatten_layers",    text="Flatten",   icon='IMAGE_ZDEPTH')
-    comp.operator("tlm.refresh_thumbnails",   text="Refresh Thumbnails", icon='FILE_REFRESH')
+    # ── Composite ───────────────────────────────────────────────────────
+    if _draw_section_header(layout, tlm, "show_settings_composite",
+                            "Composite", 'NODE_MATERIAL'):
+        comp = layout.box().column(align=True)
+        ac_icon = 'LINKED' if tlm.auto_composite else 'UNLINKED'
+        comp.prop(tlm, "auto_composite", text="Auto Composite",
+                  icon=ac_icon, toggle=True)
+        # Material-level toggle: wire base color alpha → BSDF.Alpha.
+        comp.prop(tlm, "use_base_color_alpha",
+                  text="Use Paint Alpha", icon='IMAGE_ALPHA', toggle=True)
+        ops_row = comp.row(align=True)
+        ops_row.operator("tlm.rebuild_composite", text="Rebuild", icon='FILE_REFRESH')
+        ops_row.operator("tlm.flatten_layers",    text="Flatten", icon='IMAGE_ZDEPTH')
+        comp.operator("tlm.refresh_thumbnails",
+                      text="Refresh Thumbnails", icon='FILE_REFRESH')
 
-    layout.separator(factor=0.8)
-    layout.label(text="Bake & Export", icon='RENDER_STILL')
-    layout.operator("tlm.bake_pbr", text="Bake PBR Maps…", icon='EXPORT')
-    # "PBR Channels…" — shortcut to TLM_OT_BakePBR with preset='CUSTOM' which
-    # exposes per-channel checkboxes (Base Color / Roughness / Metallic /
-    # Normal / Emission / Transmission / Alpha). Replaces the old Channel
-    # Pack button (still callable via F3 -> tlm.channel_pack as a separate
-    # RGBA-packing utility).
-    op = layout.operator("tlm.bake_pbr", text="PBR Channels…",
-                         icon='NODE_COMPOSITING')
-    op.preset = 'CUSTOM'
+    # ── Bake & Export ───────────────────────────────────────────────────
+    if _draw_section_header(layout, tlm, "show_settings_bake",
+                            "Bake & Export", 'RENDER_STILL'):
+        bake = layout.box().column(align=True)
+        bake.operator("tlm.bake_pbr", text="Bake PBR Maps…", icon='EXPORT')
+        # "PBR Channels…" — shortcut to TLM_OT_BakePBR with preset='CUSTOM'
+        # for per-channel selection (incl. Pack Alpha into Base Color).
+        op = bake.operator("tlm.bake_pbr", text="PBR Channels…",
+                           icon='NODE_COMPOSITING')
+        op.preset = 'CUSTOM'
 
-    layout.separator(factor=0.8)
-    layout.label(text="Presets", icon='PRESET_NEW')
-    from .operators import BUILTIN_PRESETS
-    grid = layout.column(align=True)
-    grid.scale_y = 0.95
-    prow = None
-    for i, pname in enumerate(BUILTIN_PRESETS):
-        if i % 2 == 0:
-            prow = grid.row(align=True)
-        op = prow.operator("tlm.apply_preset", text=pname, icon='MATERIAL')
-        op.preset_name = pname
-
-    # ── User-saved presets (cached to avoid os.listdir every draw) ──────
-    # The "Save Current as Preset…" button lives in THIS section because
-    # what it produces is a user preset, not a built-in. Putting it under
-    # the read-only built-in list above (where it used to be) suggested
-    # the user could append to that list, which they can't.
-    global _preset_cache, _preset_cache_time
-    preset_dir = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "presets")
-    now = _time.monotonic()
-    if now - _preset_cache_time > _PRESET_CACHE_TTL:
-        _preset_cache_time = now
-        if _os.path.isdir(preset_dir):
-            _preset_cache = sorted(
-                f[:-4] for f in _os.listdir(preset_dir) if f.endswith(".tlm")
-            )
-        else:
-            _preset_cache = []
-    user_presets = _preset_cache
-    layout.separator(factor=0.5)
-    layout.label(text="Saved Presets:", icon='FILE_FOLDER')
-    if user_presets:
-        ugrid = layout.column(align=True)
-        ugrid.scale_y = 0.95
-        for pname in user_presets:
-            urow = ugrid.row(align=True)
-            op = urow.operator("tlm.apply_preset", text=pname, icon='PRESET')
+    # ── Presets (built-in + user) ───────────────────────────────────────
+    if _draw_section_header(layout, tlm, "show_settings_presets",
+                            "Presets", 'PRESET_NEW'):
+        pbox = layout.box().column(align=True)
+        from .operators import BUILTIN_PRESETS
+        grid = pbox.column(align=True)
+        grid.scale_y = 0.95
+        prow = None
+        for i, pname in enumerate(BUILTIN_PRESETS):
+            if i % 2 == 0:
+                prow = grid.row(align=True)
+            op = prow.operator("tlm.apply_preset", text=pname, icon='MATERIAL')
             op.preset_name = pname
-            dop = urow.operator("tlm.delete_preset", text="", icon='TRASH')
-            dop.preset_name = pname
-    layout.operator("tlm.save_preset",
-                    text="Save Current as Preset…", icon='FILE_TICK')
 
-    layout.separator(factor=0.8)
-    layout.label(text="Layer Stack I/O", icon='FILE_FOLDER')
-    io_row = layout.row(align=True)
-    io_row.operator("tlm.export_json", text="Export .tlm", icon='EXPORT')
-    io_row.operator("tlm.import_json", text="Import .tlm", icon='IMPORT')
-    layout.operator("tlm.import_pbr_set", text="Import PBR Set...", icon='TEXTURE')
+        # User-saved presets (cached to avoid os.listdir every draw)
+        global _preset_cache, _preset_cache_time
+        preset_dir = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "presets")
+        now = _time.monotonic()
+        if now - _preset_cache_time > _PRESET_CACHE_TTL:
+            _preset_cache_time = now
+            if _os.path.isdir(preset_dir):
+                _preset_cache = sorted(
+                    f[:-4] for f in _os.listdir(preset_dir) if f.endswith(".tlm")
+                )
+            else:
+                _preset_cache = []
+        user_presets = _preset_cache
+        pbox.separator(factor=0.5)
+        pbox.label(text="Saved Presets:", icon='FILE_FOLDER')
+        if user_presets:
+            ugrid = pbox.column(align=True)
+            ugrid.scale_y = 0.95
+            for pname in user_presets:
+                urow = ugrid.row(align=True)
+                op = urow.operator("tlm.apply_preset", text=pname, icon='PRESET')
+                op.preset_name = pname
+                dop = urow.operator("tlm.delete_preset", text="", icon='TRASH')
+                dop.preset_name = pname
+        pbox.operator("tlm.save_preset",
+                      text="Save Current as Preset…", icon='FILE_TICK')
+
+    # ── Layer Stack I/O ─────────────────────────────────────────────────
+    if _draw_section_header(layout, tlm, "show_settings_io",
+                            "Layer Stack I/O", 'FILE_FOLDER'):
+        iobox = layout.box().column(align=True)
+        io_row = iobox.row(align=True)
+        io_row.operator("tlm.export_json", text="Export .tlm", icon='EXPORT')
+        io_row.operator("tlm.import_json", text="Import .tlm", icon='IMPORT')
+        iobox.operator("tlm.import_pbr_set", text="Import PBR Set...", icon='TEXTURE')
 
 
 class TLM_PT_MainPanel(Panel):
