@@ -895,108 +895,85 @@ def _draw_group_assignment(col, active, tlm):
             op.group_name = g.name
 
 
-def _draw_section_header(layout, tlm, prop_name, label, icon):
-    """Render a clickable collapsible header. Returns True if expanded."""
-    expanded = getattr(tlm, prop_name, False)
-    row = layout.row(align=True)
-    row.prop(tlm, prop_name,
-             text=label,
-             icon='TRIA_DOWN' if expanded else 'TRIA_RIGHT',
-             emboss=False)
-    row.label(text="", icon=icon)
-    return expanded
+# Each section is a small standalone draw function — used by both the
+# Properties-tab and Viewport-sidebar variants of the per-section panels.
+# No wrapper "TLM Settings" panel anymore: each section is a direct
+# sibling sub-panel of the Texture Layers main panel, collapsed by
+# default. The user opens the one they need without opening a wrapper
+# first.
+
+def _draw_canvas_section(layout, tlm):
+    canvas = layout.column(align=True)
+    canvas.prop(tlm, "resolution")
+    canvas.prop(tlm, "uv_map")
 
 
-def draw_tlm_settings(layout, context):
-    obj = context.active_object
-    if not obj or not obj.active_material:
-        return
-    mat = obj.active_material
-    tlm = mat.tlm
+def _draw_composite_section(layout, tlm):
+    comp = layout.column(align=True)
+    ac_icon = 'LINKED' if tlm.auto_composite else 'UNLINKED'
+    comp.prop(tlm, "auto_composite", text="Auto Composite",
+              icon=ac_icon, toggle=True)
+    comp.prop(tlm, "use_base_color_alpha",
+              text="Use Paint Alpha", icon='IMAGE_ALPHA', toggle=True)
+    ops_row = comp.row(align=True)
+    ops_row.operator("tlm.rebuild_composite", text="Rebuild", icon='FILE_REFRESH')
+    ops_row.operator("tlm.flatten_layers",    text="Flatten", icon='IMAGE_ZDEPTH')
+    comp.operator("tlm.refresh_thumbnails",
+                  text="Refresh Thumbnails", icon='FILE_REFRESH')
 
-    # ── Canvas ──────────────────────────────────────────────────────────
-    if _draw_section_header(layout, tlm, "show_settings_canvas",
-                            "Canvas", 'IMAGE_DATA'):
-        canvas = layout.box().column(align=True)
-        canvas.prop(tlm, "resolution")
-        canvas.prop(tlm, "uv_map")
 
-    # ── Composite ───────────────────────────────────────────────────────
-    if _draw_section_header(layout, tlm, "show_settings_composite",
-                            "Composite", 'NODE_MATERIAL'):
-        comp = layout.box().column(align=True)
-        ac_icon = 'LINKED' if tlm.auto_composite else 'UNLINKED'
-        comp.prop(tlm, "auto_composite", text="Auto Composite",
-                  icon=ac_icon, toggle=True)
-        # Material-level toggle: wire base color alpha → BSDF.Alpha.
-        comp.prop(tlm, "use_base_color_alpha",
-                  text="Use Paint Alpha", icon='IMAGE_ALPHA', toggle=True)
-        ops_row = comp.row(align=True)
-        ops_row.operator("tlm.rebuild_composite", text="Rebuild", icon='FILE_REFRESH')
-        ops_row.operator("tlm.flatten_layers",    text="Flatten", icon='IMAGE_ZDEPTH')
-        comp.operator("tlm.refresh_thumbnails",
-                      text="Refresh Thumbnails", icon='FILE_REFRESH')
+def _draw_bake_section(layout, tlm):
+    bake = layout.column(align=True)
+    bake.operator("tlm.bake_pbr", text="Bake PBR Maps…", icon='EXPORT')
+    op = bake.operator("tlm.bake_pbr", text="PBR Channels…",
+                       icon='NODE_COMPOSITING')
+    op.preset = 'CUSTOM'
 
-    # ── Bake & Export ───────────────────────────────────────────────────
-    if _draw_section_header(layout, tlm, "show_settings_bake",
-                            "Bake & Export", 'RENDER_STILL'):
-        bake = layout.box().column(align=True)
-        bake.operator("tlm.bake_pbr", text="Bake PBR Maps…", icon='EXPORT')
-        # "PBR Channels…" — shortcut to TLM_OT_BakePBR with preset='CUSTOM'
-        # for per-channel selection (incl. Pack Alpha into Base Color).
-        op = bake.operator("tlm.bake_pbr", text="PBR Channels…",
-                           icon='NODE_COMPOSITING')
-        op.preset = 'CUSTOM'
 
-    # ── Presets (built-in + user) ───────────────────────────────────────
-    if _draw_section_header(layout, tlm, "show_settings_presets",
-                            "Presets", 'PRESET_NEW'):
-        pbox = layout.box().column(align=True)
-        from .operators import BUILTIN_PRESETS
-        grid = pbox.column(align=True)
-        grid.scale_y = 0.95
-        prow = None
-        for i, pname in enumerate(BUILTIN_PRESETS):
-            if i % 2 == 0:
-                prow = grid.row(align=True)
-            op = prow.operator("tlm.apply_preset", text=pname, icon='MATERIAL')
+def _draw_presets_section(layout, tlm):
+    from .operators import BUILTIN_PRESETS
+    grid = layout.column(align=True)
+    grid.scale_y = 0.95
+    prow = None
+    for i, pname in enumerate(BUILTIN_PRESETS):
+        if i % 2 == 0:
+            prow = grid.row(align=True)
+        op = prow.operator("tlm.apply_preset", text=pname, icon='MATERIAL')
+        op.preset_name = pname
+
+    # User-saved presets (cached to avoid os.listdir every draw)
+    global _preset_cache, _preset_cache_time
+    preset_dir = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "presets")
+    now = _time.monotonic()
+    if now - _preset_cache_time > _PRESET_CACHE_TTL:
+        _preset_cache_time = now
+        if _os.path.isdir(preset_dir):
+            _preset_cache = sorted(
+                f[:-4] for f in _os.listdir(preset_dir) if f.endswith(".tlm")
+            )
+        else:
+            _preset_cache = []
+    user_presets = _preset_cache
+    layout.separator(factor=0.5)
+    layout.label(text="Saved Presets:", icon='FILE_FOLDER')
+    if user_presets:
+        ugrid = layout.column(align=True)
+        ugrid.scale_y = 0.95
+        for pname in user_presets:
+            urow = ugrid.row(align=True)
+            op = urow.operator("tlm.apply_preset", text=pname, icon='PRESET')
             op.preset_name = pname
+            dop = urow.operator("tlm.delete_preset", text="", icon='TRASH')
+            dop.preset_name = pname
+    layout.operator("tlm.save_preset",
+                    text="Save Current as Preset…", icon='FILE_TICK')
 
-        # User-saved presets (cached to avoid os.listdir every draw)
-        global _preset_cache, _preset_cache_time
-        preset_dir = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "presets")
-        now = _time.monotonic()
-        if now - _preset_cache_time > _PRESET_CACHE_TTL:
-            _preset_cache_time = now
-            if _os.path.isdir(preset_dir):
-                _preset_cache = sorted(
-                    f[:-4] for f in _os.listdir(preset_dir) if f.endswith(".tlm")
-                )
-            else:
-                _preset_cache = []
-        user_presets = _preset_cache
-        pbox.separator(factor=0.5)
-        pbox.label(text="Saved Presets:", icon='FILE_FOLDER')
-        if user_presets:
-            ugrid = pbox.column(align=True)
-            ugrid.scale_y = 0.95
-            for pname in user_presets:
-                urow = ugrid.row(align=True)
-                op = urow.operator("tlm.apply_preset", text=pname, icon='PRESET')
-                op.preset_name = pname
-                dop = urow.operator("tlm.delete_preset", text="", icon='TRASH')
-                dop.preset_name = pname
-        pbox.operator("tlm.save_preset",
-                      text="Save Current as Preset…", icon='FILE_TICK')
 
-    # ── Layer Stack I/O ─────────────────────────────────────────────────
-    if _draw_section_header(layout, tlm, "show_settings_io",
-                            "Layer Stack I/O", 'FILE_FOLDER'):
-        iobox = layout.box().column(align=True)
-        io_row = iobox.row(align=True)
-        io_row.operator("tlm.export_json", text="Export .tlm", icon='EXPORT')
-        io_row.operator("tlm.import_json", text="Import .tlm", icon='IMPORT')
-        iobox.operator("tlm.import_pbr_set", text="Import PBR Set...", icon='TEXTURE')
+def _draw_io_section(layout, tlm):
+    io_row = layout.row(align=True)
+    io_row.operator("tlm.export_json", text="Export .tlm", icon='EXPORT')
+    io_row.operator("tlm.import_json", text="Import .tlm", icon='IMPORT')
+    layout.operator("tlm.import_pbr_set", text="Import PBR Set...", icon='TEXTURE')
 
 
 class TLM_PT_MainPanel(Panel):
@@ -1015,22 +992,70 @@ class TLM_PT_MainPanel(Panel):
         draw_tlm_main(self.layout, context)
 
 
-class TLM_PT_SettingsPanel(Panel):
-    bl_label       = "TLM Settings"
-    bl_idname      = "TLM_PT_settings_panel"
-    bl_space_type  = 'PROPERTIES'
-    bl_region_type = 'WINDOW'
-    bl_context     = "material"
-    bl_parent_id   = "TLM_PT_main_panel"
-    bl_options     = {'DEFAULT_CLOSED'}
+# Each macro-section gets its own collapsible Panel attached as a child
+# of the Texture Layers main panel. Five Panels for the Properties tab,
+# five mirror Panels for the Viewport sidebar — they share the same
+# _draw_*_section helper so behavior stays identical between contexts.
+# All default to CLOSED so the panel doesn't grow visually before the
+# user clicks into a section.
 
-    @classmethod
-    def poll(cls, context):
-        return (context.active_object is not None
-                and context.active_object.active_material is not None)
+def _make_section_panel(idname, label, icon, parent_id, draw_fn,
+                        space, region, category=None):
+    """Factory: build a Panel subclass for a single TLM section."""
 
-    def draw(self, context):
-        draw_tlm_settings(self.layout, context)
+    class _Section(Panel):
+        bl_label       = label
+        bl_idname      = idname
+        bl_space_type  = space
+        bl_region_type = region
+        bl_parent_id   = parent_id
+        bl_options     = {'DEFAULT_CLOSED'}
+        if category is not None:
+            bl_category = category
+
+        @classmethod
+        def poll(cls, context):
+            return (context.active_object is not None
+                    and context.active_object.active_material is not None)
+
+        def draw_header(self, context):
+            self.layout.label(text="", icon=icon)
+
+        def draw(self, context):
+            mat = context.active_object.active_material
+            tlm = mat.tlm
+            draw_fn(self.layout, tlm)
+
+    _Section.__name__ = idname.replace('TLM_PT_', 'TLM_PT_')
+    return _Section
+
+
+# ── Properties → Material → child sections ──────────────────────────────
+TLM_PT_PropsCanvas    = _make_section_panel(
+    "TLM_PT_props_canvas",    "Canvas",          'IMAGE_DATA',
+    "TLM_PT_main_panel", _draw_canvas_section,
+    space='PROPERTIES', region='WINDOW',
+)
+TLM_PT_PropsComposite = _make_section_panel(
+    "TLM_PT_props_composite", "Composite",       'NODE_MATERIAL',
+    "TLM_PT_main_panel", _draw_composite_section,
+    space='PROPERTIES', region='WINDOW',
+)
+TLM_PT_PropsBake      = _make_section_panel(
+    "TLM_PT_props_bake",      "Bake & Export",   'RENDER_STILL',
+    "TLM_PT_main_panel", _draw_bake_section,
+    space='PROPERTIES', region='WINDOW',
+)
+TLM_PT_PropsPresets   = _make_section_panel(
+    "TLM_PT_props_presets",   "Presets",         'PRESET_NEW',
+    "TLM_PT_main_panel", _draw_presets_section,
+    space='PROPERTIES', region='WINDOW',
+)
+TLM_PT_PropsIO        = _make_section_panel(
+    "TLM_PT_props_io",        "Layer Stack I/O", 'FILE_FOLDER',
+    "TLM_PT_main_panel", _draw_io_section,
+    space='PROPERTIES', region='WINDOW',
+)
 
 
 class TLM_PT_ViewportPanel(Panel):
@@ -1049,30 +1074,48 @@ class TLM_PT_ViewportPanel(Panel):
         draw_tlm_main(self.layout, context)
 
 
-class TLM_PT_ViewportSettingsPanel(Panel):
-    bl_label       = "TLM Settings"
-    bl_idname      = "TLM_PT_viewport_settings_panel"
-    bl_space_type  = 'VIEW_3D'
-    bl_region_type = 'UI'
-    bl_category    = 'TLM'
-    bl_parent_id   = 'TLM_PT_viewport_panel'
-    bl_options     = {'DEFAULT_CLOSED'}
-
-    @classmethod
-    def poll(cls, context):
-        return (context.active_object is not None
-                and context.active_object.active_material is not None)
-
-    def draw(self, context):
-        draw_tlm_settings(self.layout, context)
+# ── Viewport sidebar → TLM tab → child sections ─────────────────────────
+TLM_PT_ViewCanvas    = _make_section_panel(
+    "TLM_PT_view_canvas",    "Canvas",          'IMAGE_DATA',
+    "TLM_PT_viewport_panel", _draw_canvas_section,
+    space='VIEW_3D', region='UI', category='TLM',
+)
+TLM_PT_ViewComposite = _make_section_panel(
+    "TLM_PT_view_composite", "Composite",       'NODE_MATERIAL',
+    "TLM_PT_viewport_panel", _draw_composite_section,
+    space='VIEW_3D', region='UI', category='TLM',
+)
+TLM_PT_ViewBake      = _make_section_panel(
+    "TLM_PT_view_bake",      "Bake & Export",   'RENDER_STILL',
+    "TLM_PT_viewport_panel", _draw_bake_section,
+    space='VIEW_3D', region='UI', category='TLM',
+)
+TLM_PT_ViewPresets   = _make_section_panel(
+    "TLM_PT_view_presets",   "Presets",         'PRESET_NEW',
+    "TLM_PT_viewport_panel", _draw_presets_section,
+    space='VIEW_3D', region='UI', category='TLM',
+)
+TLM_PT_ViewIO        = _make_section_panel(
+    "TLM_PT_view_io",        "Layer Stack I/O", 'FILE_FOLDER',
+    "TLM_PT_viewport_panel", _draw_io_section,
+    space='VIEW_3D', region='UI', category='TLM',
+)
 
 
 classes = [
     TLM_UL_LayerList,
     TLM_PT_MainPanel,
-    TLM_PT_SettingsPanel,
+    TLM_PT_PropsCanvas,
+    TLM_PT_PropsComposite,
+    TLM_PT_PropsBake,
+    TLM_PT_PropsPresets,
+    TLM_PT_PropsIO,
     TLM_PT_ViewportPanel,
-    TLM_PT_ViewportSettingsPanel,
+    TLM_PT_ViewCanvas,
+    TLM_PT_ViewComposite,
+    TLM_PT_ViewBake,
+    TLM_PT_ViewPresets,
+    TLM_PT_ViewIO,
 ]
 
 
