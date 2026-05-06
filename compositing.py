@@ -3032,6 +3032,53 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
         # Checker already outputs Color directly
         return tex_node.outputs["Color"], None
 
+    elif pt == 'BRICK':
+        # ShaderNodeTexBrick — color1/color2 are brick variants, color3
+        # (if use_proc_color3) is the mortar color. Otherwise mortar
+        # falls back to a sensible default dark grey.
+        tex_node = node_tree.nodes.new("ShaderNodeTexBrick")
+        tex_node.offset           = layer.proc_brick_offset
+        tex_node.offset_frequency = layer.proc_brick_offset_freq
+        tex_node.squash           = layer.proc_brick_squash
+        tex_node.squash_frequency = layer.proc_brick_squash_freq
+        tex_node.inputs["Scale"].default_value         = layer.proc_scale
+        tex_node.inputs["Color1"].default_value        = layer.proc_color1
+        tex_node.inputs["Color2"].default_value        = layer.proc_color2
+        if getattr(layer, 'use_proc_color3', False):
+            tex_node.inputs["Mortar"].default_value    = layer.proc_color3
+        else:
+            tex_node.inputs["Mortar"].default_value    = (0.05, 0.05, 0.05, 1.0)
+        tex_node.inputs["Mortar Size"].default_value   = layer.proc_brick_mortar_size
+        tex_node.inputs["Mortar Smooth"].default_value = layer.proc_brick_mortar_smooth
+        tex_node.inputs["Bias"].default_value          = layer.proc_brick_bias
+        tex_node.name = f"{TLM_PREFIX}proc_tex_{_next_id()}"
+        tex_node.location = (x - 100, y)
+        _tag(tex_node, layer.name, "proc_tex")
+        node_tree.links.new(vec_out, tex_node.inputs["Vector"])
+        return tex_node.outputs["Color"], None
+
+    elif pt == 'MAGIC':
+        # ShaderNodeTexMagic — kaleidoscopic colored swirl. depth
+        # controls fractal iterations; distortion warps the swirls.
+        tex_node = node_tree.nodes.new("ShaderNodeTexMagic")
+        tex_node.turbulence_depth = layer.proc_magic_depth
+        tex_node.inputs["Scale"].default_value      = layer.proc_scale
+        tex_node.inputs["Distortion"].default_value = layer.proc_distortion
+        tex_node.name = f"{TLM_PREFIX}proc_tex_{_next_id()}"
+        tex_node.location = (x - 100, y)
+        _tag(tex_node, layer.name, "proc_tex")
+        node_tree.links.new(vec_out, tex_node.inputs["Vector"])
+        # Magic outputs Color directly (already saturated/coloured)
+        return tex_node.outputs["Color"], None
+
+    elif pt == 'WHITE_NOISE':
+        # ShaderNodeTexWhiteNoise — pure per-pixel random. Uses the
+        # standard Value output (scalar) as fac so the ColorRamp
+        # downstream maps it via Color1 → Color2.
+        tex_node = node_tree.nodes.new("ShaderNodeTexWhiteNoise")
+        tex_node.noise_dimensions = '3D'
+        fac_out = tex_node.outputs["Value"]
+
     elif pt == 'MARBLE':
         # Marble = Wave base + Noise turbulence on phase
         wave = node_tree.nodes.new("ShaderNodeTexWave")
@@ -3930,6 +3977,33 @@ def _build_proc_fac_node(node_tree, layer, name_suffix, x, y, uv_map="UVMap"):
         tex.inputs["Scale"].default_value = layer.proc_scale
         node_tree.links.new(vec_out, tex.inputs["Vector"])
         fac_out = tex.outputs.get("Fac") or tex.outputs[0]
+
+    elif pt == 'BRICK':
+        tex = node_tree.nodes.new("ShaderNodeTexBrick")
+        tex.offset           = layer.proc_brick_offset
+        tex.offset_frequency = layer.proc_brick_offset_freq
+        tex.squash           = layer.proc_brick_squash
+        tex.squash_frequency = layer.proc_brick_squash_freq
+        tex.inputs["Scale"].default_value         = layer.proc_scale
+        tex.inputs["Mortar Size"].default_value   = layer.proc_brick_mortar_size
+        tex.inputs["Mortar Smooth"].default_value = layer.proc_brick_mortar_smooth
+        tex.inputs["Bias"].default_value          = layer.proc_brick_bias
+        node_tree.links.new(vec_out, tex.inputs["Vector"])
+        fac_out = tex.outputs.get("Fac") or tex.outputs[0]
+
+    elif pt == 'MAGIC':
+        tex = node_tree.nodes.new("ShaderNodeTexMagic")
+        tex.turbulence_depth = layer.proc_magic_depth
+        tex.inputs["Scale"].default_value      = layer.proc_scale
+        tex.inputs["Distortion"].default_value = layer.proc_distortion
+        node_tree.links.new(vec_out, tex.inputs["Vector"])
+        fac_out = tex.outputs.get("Fac") or tex.outputs[0]
+
+    elif pt == 'WHITE_NOISE':
+        tex = node_tree.nodes.new("ShaderNodeTexWhiteNoise")
+        tex.noise_dimensions = '3D'
+        node_tree.links.new(vec_out, tex.inputs["Vector"])
+        fac_out = tex.outputs["Value"]
 
     elif pt == 'GRADIENT':
         tex = node_tree.nodes.new("ShaderNodeTexGradient")

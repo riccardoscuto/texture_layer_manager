@@ -375,6 +375,31 @@ def _draw_procedural(col, active, tlm):
         col.prop(active, "proc_roughness_proc", slider=True, text="Roughness")
         col.prop(active, "proc_distortion", slider=True, text="Wave Distortion")
         col.prop(active, "proc_marble_distortion", slider=True, text="Turbulence")
+    elif pt == 'BRICK':
+        # Brick uses Color1/Color2 as the two brick variants and Color3
+        # (when use_proc_color3 is on) as the mortar. The other Color UI
+        # is shared above via the colour-pickers row, so here we only
+        # surface the brick-specific layout knobs.
+        offr = col.row(align=True)
+        offr.prop(active, "proc_brick_offset",      text="Offset",  slider=True)
+        offr.prop(active, "proc_brick_offset_freq", text="Every")
+        sqr = col.row(align=True)
+        sqr.prop(active, "proc_brick_squash",      text="Squash",  slider=True)
+        sqr.prop(active, "proc_brick_squash_freq", text="Every")
+        col.separator(factor=0.3)
+        mr = col.row(align=True)
+        mr.prop(active, "proc_brick_mortar_size",   text="Mortar Size",   slider=True)
+        mr.prop(active, "proc_brick_mortar_smooth", text="Mortar Smooth", slider=True)
+        col.prop(active, "proc_brick_bias", text="Color Bias", slider=True)
+        if not active.use_proc_color3:
+            col.label(text="Tip: enable Color 3 above to set mortar colour",
+                      icon='INFO')
+    elif pt == 'MAGIC':
+        col.prop(active, "proc_magic_depth", text="Depth", slider=True)
+        col.prop(active, "proc_distortion",  text="Distortion", slider=True)
+    elif pt == 'WHITE_NOISE':
+        col.label(text="Pure per-pixel random — no extra params",
+                  icon='INFO')
 
 
     col.separator(factor=0.5)
@@ -415,11 +440,11 @@ def _draw_procedural(col, active, tlm):
                 if ratio > 1.3:
                     col.label(text="Anisotropic shape \u2014 try Object coords", icon='INFO')
 
-    # Contrast controls the ColorRamp stop positions. CHECKER outputs Color
-    # directly (no ColorRamp) so the slider would be a no-op; GRADIENT already
-    # gives a clean linear ramp where contrast adds little value and confuses
-    # users. Hide for both.
-    if active.proc_type not in ('CHECKER', 'GRADIENT'):
+    # Contrast controls the ColorRamp stop positions. Hidden for the proc
+    # types that bypass the ramp (CHECKER / BRICK / MAGIC output Color
+    # directly) and for GRADIENT where it's already a clean linear ramp
+    # and contrast adds nothing useful.
+    if active.proc_type not in ('CHECKER', 'GRADIENT', 'BRICK', 'MAGIC'):
         col.prop(active, "proc_contrast", slider=True)
     col.prop(active, "proc_vector_distortion", slider=True, text="Vec Distort")
 
