@@ -196,6 +196,16 @@ def _add_layer_common(context, layer_type):
             img.generated_color = (1.0, 1.0, 1.0, 0.0)
         except Exception:
             pass
+        # alpha_mode='NONE' tells Blender's tex node to ignore the image's
+        # alpha as a colour-space-related straight/premultiplied flag.
+        # The compositor still reads tex.outputs["Alpha"] for layer
+        # coverage — that's a separate path. With STRAIGHT (default),
+        # Blender 5.0 sometimes auto-multiplies RGB by Alpha when
+        # sampling, which fights the routing logic for paint layers.
+        try:
+            img.alpha_mode = 'NONE'
+        except Exception:
+            pass
 
         # Now overwrite the pixel buffer explicitly. We do BOTH foreach_set
         # (fast) AND a slow-path fallback if it's unavailable, then call

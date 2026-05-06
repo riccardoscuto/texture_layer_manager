@@ -289,7 +289,8 @@ def _draw_active_layer(layout, active, tlm, mat):
         # Blend mode + opacity row — group treats its composited output as a
         # single layer, so these apply to the entire folder.
         br = col.row(align=True)
-        br.prop(active, "blend_mode", text="")
+        if getattr(active, 'output_channel', 'BASE_COLOR') != 'ALPHA':
+            br.prop(active, "blend_mode", text="")
         br.prop(active, "opacity", text="Opacity", slider=True)
         br.operator("tlm.keyframe_opacity", text="", icon='KEYFRAME_HLT',
                     emboss=False).action = 'INSERT'
@@ -313,7 +314,11 @@ def _draw_active_layer(layout, active, tlm, mat):
 def _draw_procedural(col, active, tlm):
     # Blend mode + Opacity at top (same position as Fill/Paint)
     br = col.row(align=True)
-    br.prop(active, "blend_mode", text="")
+    # Hide blend mode when the layer routes to Alpha — alpha is coverage,
+    # not a colour; artistic blend modes (Overlay/Hard Light/etc.) make no
+    # sense there. The compositor force-sets MIX for alpha regardless.
+    if getattr(active, 'output_channel', 'BASE_COLOR') != 'ALPHA':
+        br.prop(active, "blend_mode", text="")
     br.prop(active, "opacity",    text="Opacity", slider=True)
     br.operator("tlm.keyframe_opacity", text="", icon='KEYFRAME_HLT',
                 emboss=False).action = 'INSERT'
@@ -575,7 +580,11 @@ def _draw_mask_block(col, active):
 def _draw_reference(col, active, tlm):
     """Reference layer UI — reuses another layer's pattern with its own blend/mask/channels."""
     br = col.row(align=True)
-    br.prop(active, "blend_mode", text="")
+    # Hide blend mode when the layer routes to Alpha — alpha is coverage,
+    # not a colour; artistic blend modes (Overlay/Hard Light/etc.) make no
+    # sense there. The compositor force-sets MIX for alpha regardless.
+    if getattr(active, 'output_channel', 'BASE_COLOR') != 'ALPHA':
+        br.prop(active, "blend_mode", text="")
     br.prop(active, "opacity",    text="Opacity", slider=True)
     br.operator("tlm.keyframe_opacity", text="", icon='KEYFRAME_HLT',
                 emboss=False).action = 'INSERT'
@@ -674,7 +683,8 @@ def _draw_adjustment(col, active, tlm):
 
 def _draw_paint_fill(col, active, tlm):
     br = col.row(align=True)
-    br.prop(active, "blend_mode", text="")
+    if getattr(active, 'output_channel', 'BASE_COLOR') != 'ALPHA':
+        br.prop(active, "blend_mode", text="")
     br.prop(active, "opacity",    text="", slider=True)
     br.operator("tlm.keyframe_opacity", text="", icon='KEYFRAME_HLT',
                 emboss=False).action = 'INSERT'

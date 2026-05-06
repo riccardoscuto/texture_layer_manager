@@ -487,12 +487,21 @@ class TLM_OT_ApplyPreset(Operator):
             layer.group_name = "" if layer.layer_type == "GROUP" else _raw_group
             layer.collapsed  = ld.get("collapsed", False)
             layer.use_clipping_mask = ld.get("use_clipping_mask", False)
+            # Routing — restore output_channel; legacy 'AUTO' maps to 'BASE_COLOR'
+            _out_ch = ld.get("output_channel", "BASE_COLOR")
+            if _out_ch == "AUTO":
+                _out_ch = "BASE_COLOR"
+            try:
+                layer.output_channel = _out_ch
+            except (TypeError, ValueError):
+                layer.output_channel = "BASE_COLOR"
             # Branching — per-channel blend mode overrides
             layer.blend_mode_base_color   = ld.get("blend_mode_base_color",   "INHERIT")
             layer.blend_mode_roughness    = ld.get("blend_mode_roughness",    "INHERIT")
             layer.blend_mode_metallic     = ld.get("blend_mode_metallic",     "INHERIT")
             layer.blend_mode_emission     = ld.get("blend_mode_emission",     "INHERIT")
             layer.blend_mode_transmission = ld.get("blend_mode_transmission", "INHERIT")
+            layer.blend_mode_alpha        = ld.get("blend_mode_alpha",        "INHERIT")
 
             # blend_mode: map UI names to internal enum values
             bm_map = {
@@ -705,12 +714,15 @@ class TLM_OT_SavePreset(Operator):
                 "collapsed": layer.collapsed,
                 "use_clipping_mask": layer.use_clipping_mask,
             }
+            # Routing — which BSDF input the layer drives
+            d["output_channel"]          = getattr(layer, 'output_channel',          'BASE_COLOR')
             # Branching — per-channel blend mode overrides
             d["blend_mode_base_color"]   = getattr(layer, 'blend_mode_base_color',   'INHERIT')
             d["blend_mode_roughness"]    = getattr(layer, 'blend_mode_roughness',    'INHERIT')
             d["blend_mode_metallic"]     = getattr(layer, 'blend_mode_metallic',     'INHERIT')
             d["blend_mode_emission"]     = getattr(layer, 'blend_mode_emission',     'INHERIT')
             d["blend_mode_transmission"] = getattr(layer, 'blend_mode_transmission', 'INHERIT')
+            d["blend_mode_alpha"]        = getattr(layer, 'blend_mode_alpha',        'INHERIT')
 
             if layer.layer_type == "FILL":
                 d["fill_color"] = list(layer.fill_color)

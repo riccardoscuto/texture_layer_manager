@@ -104,12 +104,15 @@ def _layer_to_dict(layer):
         "group_name":        layer.group_name,
         "collapsed":         layer.collapsed,
         "use_clipping_mask": layer.use_clipping_mask,
+        # Routing — which BSDF input this layer drives
+        "output_channel":    getattr(layer, 'output_channel', 'BASE_COLOR'),
         # Branching — per-channel blend mode overrides
         "blend_mode_base_color":   getattr(layer, 'blend_mode_base_color',   'INHERIT'),
         "blend_mode_roughness":    getattr(layer, 'blend_mode_roughness',    'INHERIT'),
         "blend_mode_metallic":     getattr(layer, 'blend_mode_metallic',     'INHERIT'),
         "blend_mode_emission":     getattr(layer, 'blend_mode_emission',     'INHERIT'),
         "blend_mode_transmission": getattr(layer, 'blend_mode_transmission', 'INHERIT'),
+        "blend_mode_alpha":        getattr(layer, 'blend_mode_alpha',        'INHERIT'),
     }
 
     if layer.layer_type == "PAINT":
@@ -258,12 +261,23 @@ def _dict_to_layer(d, tlm):
     layer.group_name = "" if layer.layer_type == "GROUP" else _raw_group
     layer.collapsed         = d.get("collapsed", False)
     layer.use_clipping_mask = d.get("use_clipping_mask", False)
+    # Routing — default BASE_COLOR keeps pre-routing presets working.
+    # Legacy 'AUTO' (older builds) falls through to BASE_COLOR via the
+    # alias in _layer_contributes_to.
+    _out_ch = d.get("output_channel", "BASE_COLOR")
+    if _out_ch == "AUTO":
+        _out_ch = "BASE_COLOR"
+    try:
+        layer.output_channel = _out_ch
+    except (TypeError, ValueError):
+        layer.output_channel = "BASE_COLOR"
     # Branching — per-channel blend mode overrides (INHERIT default = backward-compat)
     layer.blend_mode_base_color   = d.get("blend_mode_base_color",   "INHERIT")
     layer.blend_mode_roughness    = d.get("blend_mode_roughness",    "INHERIT")
     layer.blend_mode_metallic     = d.get("blend_mode_metallic",     "INHERIT")
     layer.blend_mode_emission     = d.get("blend_mode_emission",     "INHERIT")
     layer.blend_mode_transmission = d.get("blend_mode_transmission", "INHERIT")
+    layer.blend_mode_alpha        = d.get("blend_mode_alpha",        "INHERIT")
 
     if layer.layer_type == "PAINT":
         img_name = d.get("image_name", layer.name)

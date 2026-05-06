@@ -1252,9 +1252,18 @@ def _effective_blend_mode(layer, channel_id):
     Only base_color / roughness / metallic / emission / transmission support
     override — normal and bump have their own math and are unaffected.
 
+    Alpha is always MIX. The channel is coverage / opacity, not a colour
+    input — artistic blend modes (Overlay, Hard Light, Color Dodge…)
+    don't have a meaningful interpretation when applied to a 0..1 alpha.
+    The UI hides the blend_mode dropdown when output_channel='ALPHA' for
+    the same reason; this enforces it on the compositor side too in case
+    a layer arrives at the alpha channel via use_alpha or older presets.
+
     INHERIT (or any channel without an override property) falls back to
     `layer.blend_mode`.
     """
+    if channel_id == 'alpha':
+        return 'MIX'
     if channel_id in ('base_color', 'roughness', 'metallic', 'emission', 'transmission'):
         override = getattr(layer, f"blend_mode_{channel_id}", "INHERIT")
         if override and override != "INHERIT":
@@ -1279,16 +1288,33 @@ def _new_mix(node_tree, blend_mode, opacity, x, y, layer_name="", channel=""):
     return node
 
 
-def _new_mix_scalar(node_tree, opacity, x, y, layer_name="", channel=""):
-    """Mix node for scalar channels (Roughness, Metallic) — Float type."""
+def _new_mix_scalar(node_tree, blend_mode, opacity, x, y, layer_name="", channel=""):
+    """Mix node for scalar channels (Roughness/Metallic/Alpha/Transmission).
+
+    Float-typed mix that honors the layer's blend_mode just like the color
+    Mix does for Base Color. ShaderNodeMix with data_type='FLOAT' supports
+    the standard blend types (MIX/ADD/MULTIPLY/SUBTRACT/DIVIDE/etc.) — no
+    reason to hard-code MIX and lose per-channel blend overrides.
+    Earlier versions used blend_type='MIX' only, which made the
+    branching feature (blend_mode_roughness etc.) silently ineffective on
+    scalar channels.
+    """
     if _USE_NEW_MIX:
         node = node_tree.nodes.new("ShaderNodeMix")
         node.data_type = 'FLOAT'
-        node.blend_type = 'MIX'
+        try:
+            node.blend_type = blend_mode
+        except (TypeError, AttributeError):
+            node.blend_type = 'MIX'  # safety: fall back if Blender rejects
         node.inputs["Factor"].default_value = opacity
     else:
+        # Pre-4.0 fallback — ShaderNodeMixRGB has the same blend_type enum,
+        # output goes through SeparateColor downstream to extract the float.
         node = node_tree.nodes.new("ShaderNodeMixRGB")
-        node.blend_type = 'MIX'
+        try:
+            node.blend_type = blend_mode
+        except (TypeError, AttributeError):
+            node.blend_type = 'MIX'
         node.inputs["Fac"].default_value = opacity
     node.name = f"{TLM_PREFIX}mix_scalar_{_next_id()}"
     node.location = (x, y)
@@ -1971,7 +1997,9 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
                         base_val = _new_value(node_tree, 0.0, x - 160, y - 20,
                                               layer_name=layer.name,
                                               channel=channel_id).outputs["Value"]
-                        mix = _new_mix_scalar(node_tree, layer.opacity, mix_x, y - 40,
+                        mix = _new_mix_scalar(node_tree,
+                                               _effective_blend_mode(layer, channel_id),
+                                               layer.opacity, mix_x, y - 40,
                                                layer_name=layer.name, channel=channel_id)
                         node_tree.links.new(base_val, _a_socket_scalar(mix))
                         node_tree.links.new(layer_out, _b_socket_scalar(mix))
@@ -1997,7 +2025,9 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
                 continue
             mix_x = x + 280
             if is_scalar:
-                mix = _new_mix_scalar(node_tree, layer.opacity, mix_x, y - 40,
+                mix = _new_mix_scalar(node_tree,
+                                       _effective_blend_mode(layer, channel_id),
+                                       layer.opacity, mix_x, y - 40,
                                        layer_name=layer.name, channel=channel_id)
                 node_tree.links.new(current, _a_socket_scalar(mix))
                 node_tree.links.new(layer_out, _b_socket_scalar(mix))
@@ -2351,7 +2381,9 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
                                       layer_name=layer.name,
                                       channel=channel_id).outputs["Value"]
                 mix_x = x + 280
-                mix = _new_mix_scalar(node_tree, layer.opacity, mix_x, y - 40,
+                mix = _new_mix_scalar(node_tree,
+                                       _effective_blend_mode(layer, channel_id),
+                                       layer.opacity, mix_x, y - 40,
                                        layer_name=layer.name, channel=channel_id)
                 node_tree.links.new(base_val, _a_socket_scalar(mix))
                 node_tree.links.new(layer_out, _b_socket_scalar(mix))
@@ -2388,11 +2420,17 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
 
         mix_x = x + 280
         if is_scalar:
-            mix = _new_mix_scalar(node_tree, layer.opacity, mix_x, y - 40, layer_name=layer.name, channel=channel_id)
+            mix = _new_mix_scalar(node_tree,
+                                   _effective_blend_mode(layer, channel_id),
+                                   layer.opacity, mix_x, y - 40,
+                                   layer_name=layer.name, channel=channel_id)
             node_tree.links.new(current, _a_socket_scalar(mix))
             node_tree.links.new(layer_out, _b_socket_scalar(mix))
-            # Tag the scalar mix factor as opacity target
-            _tag(mix, layer.name, f"opacity_target_{channel_id}", opacity_input_idx=-1)
+            # Same factor pipeline as the color path (opacity × alpha × mask
+            # × fresnel × clipping). Without this call, scalar channels
+            # ignored mask/fresnel/clipping and used opacity straight as
+            # the Factor — feature parity break vs Base Color.
+            _set_factor(node_tree, mix, layer, layer_alpha, prev_alpha, mix_x, y, i, uv_map, channel=channel_id)
             current = _result_socket_scalar(mix)
         else:
             mix = _new_mix(node_tree, _effective_blend_mode(layer, channel_id), layer.opacity, mix_x, y - 40, layer_name=layer.name, channel=channel_id)
@@ -2439,11 +2477,17 @@ def _set_factor(node_tree, mix_node, layer, layer_alpha, prev_alpha, x, y, i, uv
             _tag(clip, layer.name, f"opacity_target_{channel}", opacity_input_idx=1)
             node_tree.links.new(clip.outputs["Value"], _factor_socket(mix_node))
     else:
-        # Use effective blend mode for this channel (branching-aware).
-        # Non-MIX blend modes ignore alpha inputs, so only fold layer_alpha
-        # into the factor when the *effective* mode is MIX.
-        eff_bm = _effective_blend_mode(layer, channel)
-        if layer_alpha and eff_bm == "MIX":
+        # Factor = opacity × layer_alpha (whenever alpha exists).
+        # Previous code only folded alpha into the factor when the blend
+        # mode was MIX, on the (wrong) assumption that "non-MIX modes
+        # ignore alpha". The alpha is COVERAGE, not a colour input — it
+        # tells the Mix where the layer "exists". Without it, a paint
+        # layer in DIVIDE/SCREEN/OVERLAY/etc. shows through transparent
+        # pixels because Factor=opacity=1.0 ignores empty paint.
+        # Now wired uniformly:
+        #   layer_alpha present → MULTIPLY(alpha, opacity) → Factor
+        #   no alpha            → default_value = opacity
+        if layer_alpha:
             am = node_tree.nodes.new("ShaderNodeMath")
             am.operation = 'MULTIPLY'
             am.name = f"{TLM_PREFIX}alpha_mult_{i}"
@@ -2847,20 +2891,23 @@ def _build_fresnel_mask(node_tree, layer, x, y, name_tag=""):
     fresnel.inputs["IOR"].default_value = getattr(layer, 'fresnel_ior', 1.45)
     _tag(fresnel, layer.name, "fresnel")
 
+    # ALWAYS create the strength multiplier node, even when strength==1.0.
+    # Earlier we skipped node creation when strength was 1.0 (no-op), but
+    # then _hot_fresnel() couldn't find a tagged node to update when the
+    # user dragged the strength slider down — it returned True (silently
+    # claiming success) so no fallback rebuild happened either, and the
+    # slider had no visible effect. Creating the node unconditionally
+    # makes the hot path work for the entire range.
     strength = getattr(layer, 'fresnel_strength', 1.0)
-    if strength < 1.0:
-        # Scale the Fresnel output: multiply by strength
-        mult = node_tree.nodes.new("ShaderNodeMath")
-        mult.operation = 'MULTIPLY'
-        mult.name = f"{TLM_PREFIX}fresnel_str_{name_tag}_{_next_id()}"
-        mult.location = (x - 50, y - 300)
-        mult.use_clamp = True
-        _tag(mult, layer.name, "fresnel_str")
-        node_tree.links.new(fresnel.outputs["Fac"], mult.inputs[0])
-        mult.inputs[1].default_value = strength
-        return mult.outputs["Value"]
-
-    return fresnel.outputs["Fac"]
+    mult = node_tree.nodes.new("ShaderNodeMath")
+    mult.operation = 'MULTIPLY'
+    mult.name = f"{TLM_PREFIX}fresnel_str_{name_tag}_{_next_id()}"
+    mult.location = (x - 50, y - 300)
+    mult.use_clamp = True
+    _tag(mult, layer.name, "fresnel_str")
+    node_tree.links.new(fresnel.outputs["Fac"], mult.inputs[0])
+    mult.inputs[1].default_value = strength
+    return mult.outputs["Value"]
 
 
 # ── Procedural node builder ───────────────────────────────────────────────────
@@ -3450,31 +3497,22 @@ def rebuild_node_tree(material):
             _link_to_bsdf(node_tree, bc_out, bsdf, ["Base Color", "base_color"], "base_color")
 
         # ── Roughness ─────────────────────────────────────────────────────────────
+        # Same architecture as Base Color: a per-layer Mix chain ending in
+        # the BSDF input. The Math ADD passthrough that used to sit here was
+        # cosmetic (added 0.0 to the value) and confused the debug — the
+        # graph for Roughness now mirrors Base Color, just with Float-typed
+        # mixes instead of Color.
         if _channel_used(expanded, 'use_roughness'):
             r_out = _build_channel(node_tree, expanded, 'roughness', uv_map, start_x, ch_y['roughness'], x_step)
             if r_out:
-                passthrough = node_tree.nodes.new("ShaderNodeMath")
-                passthrough.operation = 'ADD'
-                passthrough.name = f"{TLM_PREFIX}rough_pass"
-                passthrough.inputs[1].default_value = 0.0
-                passthrough.use_clamp = True
-                passthrough.location = (end_x, ch_y['roughness'])
-                node_tree.links.new(r_out, passthrough.inputs[0])
-                _link_to_bsdf(node_tree, passthrough.outputs["Value"], bsdf,
+                _link_to_bsdf(node_tree, r_out, bsdf,
                               ["Roughness", "Specular Roughness"], "roughness")
 
         # ── Metallic ──────────────────────────────────────────────────────────────
         if _channel_used(expanded, 'use_metallic'):
             m_out = _build_channel(node_tree, expanded, 'metallic', uv_map, start_x, ch_y['metallic'], x_step)
             if m_out:
-                passthrough = node_tree.nodes.new("ShaderNodeMath")
-                passthrough.operation = 'ADD'
-                passthrough.name = f"{TLM_PREFIX}metal_pass"
-                passthrough.inputs[1].default_value = 0.0
-                passthrough.use_clamp = True
-                passthrough.location = (end_x, ch_y['metallic'])
-                node_tree.links.new(m_out, passthrough.inputs[0])
-                _link_to_bsdf(node_tree, passthrough.outputs["Value"], bsdf,
+                _link_to_bsdf(node_tree, m_out, bsdf,
                               ["Metallic", "Metalness"], "metallic")
 
         # ── Normal ────────────────────────────────────────────────────────────────

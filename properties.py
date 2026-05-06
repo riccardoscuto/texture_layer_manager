@@ -133,7 +133,10 @@ def _make_hot_callback(prop_name):
 # ─── Blend mode enum ─────────────────────────────────────────────────────────
 
 BLEND_MODES = [
-    ("MIX",        "Normal",     "Alpha composite over layer below", 0),
+    # UI label "Mix" (not "Normal") — matches the Blender ShaderNodeMix
+    # node's blend_type label so users can scan node graph and addon UI
+    # without translating between names.
+    ("MIX",        "Mix",        "Standard alpha/mix composite over layer below", 0),
     ("MULTIPLY",   "Multiply",   "Darken by multiplying values",      1),
     ("SCREEN",     "Screen",     "Lighten, inverse of multiply",      2),
     ("OVERLAY",    "Overlay",    "Contrast-enhancing blend",          3),
@@ -146,7 +149,10 @@ BLEND_MODES = [
     ("COLOR_DODGE","Color Dodge","Brighten based on layer",           10),
     ("COLOR_BURN", "Color Burn", "Darken based on layer",            11),
     ("SOFT_LIGHT", "Soft Light", "Subtle contrast blend",             12),
-    ("HARD_LIGHT", "Hard Light", "Strong contrast blend",             13),
+    # HARD_LIGHT removed — it produces inconsistent results across
+    # Blender versions (different formulas in 3.x vs 4.x), and the
+    # use cases are covered by Overlay + opacity. Re-enable here if
+    # asked, but the index numbering is no longer contiguous.
     ("LINEAR_LIGHT","Linear Light","High-contrast dodge+burn",        14),
     ("EXCLUSION",  "Exclusion",  "Inversion-like difference blend",   15),
     ("HUE",        "Hue",        "Apply hue from this layer",         16),
@@ -955,9 +961,67 @@ class TLM_LayerItem(PropertyGroup):
             ('MUSGRAVE', "Musgrave", "Fractal noise (Multifractal, Ridged, etc.)",           4),
             ('CHECKER',  "Checker",  "Alternating checkerboard pattern",                     5),
             ('MARBLE',   "Marble",   "Wave bands distorted by noise — marble/veined stone", 6),
+            ('BRICK',    "Brick",    "Brick / tile pattern with offset, mortar, color variation", 7),
+            ('MAGIC',    "Magic",    "Kaleidoscopic colored swirl pattern",                  8),
+            ('WHITE_NOISE', "White Noise", "Per-pixel random — fine grain, dust, dithering", 9),
         ],
         default='NOISE',
         update=_on_layer_update,
+    )
+
+    # ── Brick-specific parameters ───────────────────────────────────────
+    # Stock ShaderNodeTexBrick exposes mortar size/smooth/bias and
+    # squash/squash_frequency plus offset/offset_frequency. Mortar color
+    # uses a third color (we re-use proc_color3 for it when active).
+    proc_brick_offset: FloatProperty(
+        name="Offset",
+        description="Row offset (0.5 = standard brick stagger)",
+        default=0.5, min=0.0, max=1.0, subtype='FACTOR',
+        update=_make_hot_callback("proc_brick_offset"),
+    )
+    proc_brick_offset_freq: IntProperty(
+        name="Offset Frequency",
+        description="How many rows before the offset pattern repeats",
+        default=2, min=1, max=99,
+        update=_make_hot_callback("proc_brick_offset_freq"),
+    )
+    proc_brick_squash: FloatProperty(
+        name="Squash",
+        description="Brick squash factor (1.0 = no squash)",
+        default=1.0, min=0.0, max=99.0,
+        update=_make_hot_callback("proc_brick_squash"),
+    )
+    proc_brick_squash_freq: IntProperty(
+        name="Squash Frequency",
+        description="How many rows between squash pulses",
+        default=2, min=1, max=99,
+        update=_make_hot_callback("proc_brick_squash_freq"),
+    )
+    proc_brick_mortar_size: FloatProperty(
+        name="Mortar Size",
+        description="Width of the mortar lines between bricks",
+        default=0.02, min=0.0, max=0.125,
+        update=_make_hot_callback("proc_brick_mortar_size"),
+    )
+    proc_brick_mortar_smooth: FloatProperty(
+        name="Mortar Smooth",
+        description="Edge softness of the mortar lines (0 = sharp, 1 = blurry)",
+        default=0.1, min=0.0, max=1.0, subtype='FACTOR',
+        update=_make_hot_callback("proc_brick_mortar_smooth"),
+    )
+    proc_brick_bias: FloatProperty(
+        name="Bias",
+        description="Color bias between brick1 and brick2 (-1..1)",
+        default=0.0, min=-1.0, max=1.0,
+        update=_make_hot_callback("proc_brick_bias"),
+    )
+
+    # ── Magic-specific parameters ───────────────────────────────────────
+    proc_magic_depth: IntProperty(
+        name="Depth",
+        description="Number of iterations — higher = more swirly detail",
+        default=2, min=0, max=10,
+        update=_make_hot_callback("proc_magic_depth"),
     )
 
     # Shared: scale, mapping offset/rotation
