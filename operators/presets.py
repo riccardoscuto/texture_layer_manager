@@ -652,6 +652,9 @@ class TLM_OT_ApplyPreset(Operator):
                 layer.use_transmission        = ld.get("use_transmission", False)
                 layer.transmission_fill       = ld.get("transmission_fill", 0.0)
                 layer.transmission_image_name = ld.get("transmission_image_name", "")
+                layer.use_alpha               = ld.get("use_alpha", False)
+                layer.alpha_fill              = ld.get("alpha_fill", 1.0)
+                layer.alpha_image_name        = ld.get("alpha_image_name", "")
 
         skipped = 0
         for ld in preset_layers:
@@ -842,6 +845,9 @@ class TLM_OT_SavePreset(Operator):
                 d["use_transmission"]        = getattr(layer, 'use_transmission', False)
                 d["transmission_fill"]       = getattr(layer, 'transmission_fill', 0.0)
                 d["transmission_image_name"] = getattr(layer, 'transmission_image_name', "")
+                d["use_alpha"]               = getattr(layer, 'use_alpha', False)
+                d["alpha_fill"]              = getattr(layer, 'alpha_fill', 1.0)
+                d["alpha_image_name"]        = getattr(layer, 'alpha_image_name', "")
             layers_data.append(d)
 
         data = {"preset_name": self.preset_name, "layers": layers_data}

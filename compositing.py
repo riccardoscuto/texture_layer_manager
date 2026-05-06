@@ -34,7 +34,10 @@ BLEND_TO_MIX_MODE = {
     "OVERLAY": "OVERLAY", "ADD": "ADD", "SUBTRACT": "SUBTRACT",
     "DIFFERENCE": "DIFFERENCE", "DIVIDE": "DIVIDE", "DARKEN": "DARKEN",
     "LIGHTEN": "LIGHTEN", "COLOR_DODGE": "DODGE", "COLOR_BURN": "BURN",
-    "SOFT_LIGHT": "SOFT_LIGHT", "HARD_LIGHT": "HARD_LIGHT",
+    "SOFT_LIGHT": "SOFT_LIGHT",
+    # HARD_LIGHT removed from the user-facing BLEND_MODES enum due to
+    # cross-version inconsistency. Older presets that still carry the
+    # identifier fall through .get(..., "MIX") to a safe default.
     "LINEAR_LIGHT": "LINEAR_LIGHT", "EXCLUSION": "EXCLUSION",
     "HUE": "HUE", "SATURATION": "SATURATION", "COLOR": "COLOR",
     "LUMINOSITY": "VALUE",
@@ -1656,7 +1659,7 @@ def _build_mask_slot(node_tree, layer, slot, uv_map, x, y, name_tag=""):
     return val
 
 
-def _apply_mask(node_tree, mix_node, layer, uv_map, x, y):
+def _apply_mask(node_tree, mix_node, layer, uv_map, x, y, layer_alpha=None):
     """Build the advanced mask pipeline and wire it into mix_node's factor.
 
     Pipeline: A [combine B] → contrast → multiply(opacity) → factor socket
@@ -1823,7 +1826,22 @@ def _apply_mask(node_tree, mix_node, layer, uv_map, x, y):
     mult.name = f"{TLM_PREFIX}mask_mult_{_next_id()}"
     mult.location = (x + 520, y - 80)
     node_tree.links.new(combined, mult.inputs[0])
-    node_tree.links.new(mult.outputs["Value"], _factor_socket(mix_node))
+
+    # When the layer also has a paint alpha (PAINT image alpha or PROC fac
+    # for emission), combine it INTO the factor: factor = mask × opacity ×
+    # alpha. Previously the mask path overwrote the alpha contribution, so
+    # a transparent paint stroke under a mask still painted as if opaque.
+    if layer_alpha is not None:
+        am = node_tree.nodes.new("ShaderNodeMath")
+        am.operation = 'MULTIPLY'
+        am.use_clamp = True
+        am.name = f"{TLM_PREFIX}mask_alpha_mult_{_next_id()}"
+        am.location = (x + 640, y - 80)
+        node_tree.links.new(mult.outputs["Value"], am.inputs[0])
+        node_tree.links.new(layer_alpha, am.inputs[1])
+        node_tree.links.new(am.outputs["Value"], _factor_socket(mix_node))
+    else:
+        node_tree.links.new(mult.outputs["Value"], _factor_socket(mix_node))
     return mult
 
 
@@ -2373,10 +2391,14 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
                 current = _result_socket(mix)
                 prev_alpha = layer_alpha
             elif needs_modulator_mix and is_scalar:
-                # Scalar channel (roughness/metallic/transmission): mix against
-                # a 0.0 Value baseline so mask/fresnel/opacity control where
-                # this value is written. Scalar masking previously fell through
-                # to `current = layer_out`, silently dropping the mask.
+                # Scalar channel first-layer (roughness/metallic/transmission/
+                # alpha): mix against a 0.0 baseline so mask/fresnel/opacity/
+                # alpha can all modulate where this value is written.
+                # Earlier this branch only set the Mix Factor's default to
+                # opacity and tagged it for hot updates — no mask, no fresnel,
+                # no clipping support. Now wired through _set_factor so the
+                # full coverage chain (alpha × mask × fresnel × opacity)
+                # applies, identical to the color first-layer path.
                 base_val = _new_value(node_tree, 0.0, x - 100, y - 20,
                                       layer_name=layer.name,
                                       channel=channel_id).outputs["Value"]
@@ -2387,12 +2409,11 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
                                        layer_name=layer.name, channel=channel_id)
                 node_tree.links.new(base_val, _a_socket_scalar(mix))
                 node_tree.links.new(layer_out, _b_socket_scalar(mix))
-                _tag(mix, layer.name, f"opacity_target_{channel_id}",
-                     opacity_input_idx=-1)
-                # NOTE: _set_factor isn't wired for the scalar path today —
-                # opacity is the only modulator supported on scalar first-layer.
-                # Full mask/fresnel routing on scalars is an architectural
-                # follow-up (scalar path never runs _apply_mask).
+                # prev_alpha=None because this is the bottom layer (no clip
+                # target). _set_factor handles the no-prev-alpha branch via
+                # `if layer.use_clipping_mask and prev_alpha is not None`.
+                _set_factor(node_tree, mix, layer, layer_alpha, None,
+                            mix_x, y, i, uv_map, channel=channel_id)
                 current = _result_socket_scalar(mix)
             elif needs_modulator_mix:
                 # Color channel (base_color via _composite_layer_list for group
@@ -2447,7 +2468,12 @@ def _set_factor(node_tree, mix_node, layer, layer_alpha, prev_alpha, x, y, i, uv
     """Wire up the blend factor for a color mix node."""
     mask_applied = False
     if getattr(layer, 'use_mask', False):
-        mult = _apply_mask(node_tree, mix_node, layer, uv_map, x, y)
+        # Pass layer_alpha so the mask pipeline folds it into the final
+        # factor: factor = mask × opacity × alpha. The mask alone is not
+        # enough — a transparent paint stroke must remain transparent
+        # even where the mask says "show".
+        mult = _apply_mask(node_tree, mix_node, layer, uv_map, x, y,
+                           layer_alpha=layer_alpha)
         if mult is not None:
             mult.inputs[1].default_value = layer.opacity
             _tag(mult, layer.name, f"opacity_target_{channel}", opacity_input_idx=1)

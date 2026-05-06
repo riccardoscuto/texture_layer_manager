@@ -242,6 +242,14 @@ def _layer_to_dict(layer):
         d["use_transmission"]  = getattr(layer, 'use_transmission', False)
         d["transmission_fill"] = round(getattr(layer, 'transmission_fill', 0.0), 4)
         d["transmission_image_name"] = getattr(layer, 'transmission_image_name', "")
+        # Alpha is a routable channel AND can also be enabled via use_alpha
+        # on top of any other routing target (cumulative). Both paths need
+        # the same triplet of properties saved/restored, otherwise a layer
+        # like 'output=BASE_COLOR + use_alpha=True' would lose its alpha
+        # config on export/import.
+        d["use_alpha"]         = getattr(layer, 'use_alpha', False)
+        d["alpha_fill"]        = round(getattr(layer, 'alpha_fill', 1.0), 4)
+        d["alpha_image_name"]  = getattr(layer, 'alpha_image_name', "")
 
     return d
 
@@ -425,6 +433,9 @@ def _dict_to_layer(d, tlm):
         layer.use_transmission        = d.get("use_transmission", False)
         layer.transmission_fill       = d.get("transmission_fill", 0.0)
         layer.transmission_image_name = d.get("transmission_image_name", "")
+        layer.use_alpha               = d.get("use_alpha", False)
+        layer.alpha_fill              = d.get("alpha_fill", 1.0)
+        layer.alpha_image_name        = d.get("alpha_image_name", "")
 
     return layer
 

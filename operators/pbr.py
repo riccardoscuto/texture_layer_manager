@@ -11,6 +11,7 @@ CHANNEL_INFO = {
     'normal':       ('use_normal',       'normal_image_name',       'Normal'),
     'transmission': ('use_transmission', 'transmission_image_name', 'Transmission'),
     'emission':     ('use_emission',     'emission_image_name',     'Emission'),
+    'alpha':        ('use_alpha',        'alpha_image_name',        'Alpha'),
 }
 
 
@@ -48,6 +49,11 @@ class TLM_OT_AddChannelImage(Operator):
             'normal':    [0.5, 0.5, 1.0, 1.0],
             'emission':     [0.0, 0.0, 0.0, 1.0],
             'transmission': [0.0, 0.0, 0.0, 1.0],
+            # Alpha defaults to white = fully visible. The user can paint
+            # the cutout shape afterwards. Black would also be defensible
+            # but "everything visible until I paint it away" matches the
+            # mental model of every other PBR channel.
+            'alpha':        [1.0, 1.0, 1.0, 1.0],
         }
         fill = defaults.get(self.channel, [0.5, 0.5, 0.5, 1.0])
 
@@ -57,7 +63,8 @@ class TLM_OT_AddChannelImage(Operator):
         img.pixels.foreach_set(fill_px)
         img.pack()
 
-        if self.channel in ('roughness', 'metallic', 'normal', 'transmission'):
+        if self.channel in ('roughness', 'metallic', 'normal',
+                            'transmission', 'alpha'):
             try:
                 img.colorspace_settings.name = "Non-Color"
             except Exception:
