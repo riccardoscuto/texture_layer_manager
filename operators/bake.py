@@ -17,6 +17,19 @@ class TLM_OT_BakePBR(Operator):
 
     directory: bpy.props.StringProperty(subtype='DIR_PATH')
 
+    # User-customisable prefix for every output file. Defaults to the
+    # material name (set in invoke). Suffixes like _BaseColor / _Normal /
+    # _ORM are still appended automatically so the channel is recognisable.
+    filename_prefix: bpy.props.StringProperty(
+        name="Filename Prefix",
+        description=(
+            "Prefix for every exported file — e.g. 'rusty_metal' produces "
+            "rusty_metal_BaseColor.png, rusty_metal_Normal.png, etc. "
+            "Defaults to the material name"
+        ),
+        default="",
+    )
+
     preset: bpy.props.EnumProperty(
         name="Preset",
         items=[
@@ -80,6 +93,11 @@ class TLM_OT_BakePBR(Operator):
         return _get_material(context) is not None
 
     def invoke(self, context, event):
+        # Pre-fill the prefix with the material name so the user only
+        # needs to override it when they want a custom name.
+        mat = _get_material(context)
+        if mat and not self.filename_prefix:
+            self.filename_prefix = mat.name
         context.window_manager.fileselect_add(self)
         return {'RUNNING_MODAL'}
 
@@ -88,6 +106,7 @@ class TLM_OT_BakePBR(Operator):
         checkboxes when preset='CUSTOM' so the user can pick exactly which
         maps to export."""
         layout = self.layout
+        layout.prop(self, "filename_prefix")
         layout.prop(self, "preset")
         layout.prop(self, "resolution")
         layout.prop(self, "file_format")
@@ -122,7 +141,15 @@ class TLM_OT_BakePBR(Operator):
 
         res = int(self.resolution)
         ext = {'PNG': 'png', 'JPEG': 'jpg', 'TIFF': 'tif', 'OPEN_EXR': 'exr'}[self.file_format]
-        base = mat.name
+        # Strip the prefix of any path separators / dodgy filename chars
+        # the user might have pasted in. Empty / blank → fall back to mat.name.
+        prefix = (self.filename_prefix or "").strip()
+        if not prefix:
+            prefix = mat.name
+        # Sanitise: only keep filename-safe characters
+        import re
+        prefix = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '_', prefix)
+        base = prefix
         out_dir = bpy.path.abspath(self.directory)
         try:
             os.makedirs(out_dir, exist_ok=True)

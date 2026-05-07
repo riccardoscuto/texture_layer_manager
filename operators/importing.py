@@ -83,14 +83,30 @@ class TLM_OT_ImportTextureAsLayer(Operator):
                     setattr(layer, img_attr, img.name)
                     setattr(layer, flag_attr, True)
         else:
-            # Create a new PAINT layer with this image as base color
+            # Create a new PAINT layer with this image as base color.
+            # Inherit the same group as the currently active layer so the
+            # imported texture lands in the user's working group, mirroring
+            # the behaviour of _add_layer_common.
+            active = tlm.active_layer
+            parent_group = ""
+            if active:
+                if active.layer_type == "GROUP":
+                    has_children = any(l.group_name == active.name
+                                       for l in tlm.layers)
+                    if has_children:
+                        parent_group = ""  # above the group at root
+                    else:
+                        parent_group = active.name  # inside the empty group
+                elif active.group_name:
+                    parent_group = active.group_name
+
             layer = tlm.layers.add()
             layer.layer_type = "PAINT"
             layer.name = img.name.rsplit('.', 1)[0]  # strip extension
             layer.opacity = 1.0
             layer.blend_mode = "MIX"
             layer.visible = True
-            layer.group_name = ""
+            layer.group_name = parent_group
 
             if self.channel == 'base_color':
                 layer.image_name = img.name
@@ -101,8 +117,21 @@ class TLM_OT_ImportTextureAsLayer(Operator):
                     setattr(layer, img_attr, img.name)
                     setattr(layer, flag_attr, True)
 
-            # Append at end (base convention)
+            # Place the new layer ABOVE the active one in the UI, matching
+            # what tlm.add_paint_layer / add_fill_layer / etc. do. Without
+            # this the imported texture always landed at the bottom of the
+            # list regardless of where the user was working.
             new_idx = len(tlm.layers) - 1
+            if len(tlm.layers) > 1:
+                if parent_group and active and active.layer_type == "GROUP":
+                    target = tlm.active_layer_index + 1
+                else:
+                    target = tlm.active_layer_index
+            else:
+                target = 0
+            while new_idx > target:
+                tlm.layers.move(new_idx, new_idx - 1)
+                new_idx -= 1
             tlm.active_layer_index = new_idx
 
         if tlm.auto_composite:

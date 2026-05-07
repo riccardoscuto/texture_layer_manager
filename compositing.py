@@ -366,7 +366,12 @@ _PROC_INPUT_MAP = {
 }
 
 _ALL_CHANNELS = ("base_color", "roughness", "metallic", "normal",
-                 "emission", "transmission", "bump")
+                 "emission", "transmission", "alpha", "bump")
+# NOTE: "alpha" was missing here for a while. _set_factor tags alpha
+# mix nodes with `opacity_target_alpha`, but _hot_opacity walks this
+# tuple — without "alpha" the alpha mix's Factor stayed stale on every
+# opacity change (the visible symptom: layers with use_alpha enabled
+# appeared to "ignore" opacity until a full rebuild ran).
 
 
 def _hot_opacity(node_tree, layer, prop_name):
@@ -380,11 +385,6 @@ def _hot_opacity(node_tree, layer, prop_name):
             _factor_socket(node).default_value = layer.opacity
         else:
             node.inputs[idx].default_value = layer.opacity
-        found = True
-    # Adjustment HUE_SAT layers drive Fac from opacity — keep in sync.
-    hs = _find_tagged(node_tree, layer.name, "adj_hue_sat")
-    if hs and "Fac" in hs.inputs:
-        hs.inputs["Fac"].default_value = layer.opacity
         found = True
     return found
 
@@ -3507,6 +3507,29 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
 
     return cr.outputs["Color"], None
 
+def _wrap_adjustment_opacity(node_tree, layer, original_output, adjusted_output, x, y):
+    """Wrap an adjustment chain with an opacity-driven Mix.
+
+    Mix(A=original, B=adjusted, factor=opacity) makes layer.opacity behave
+    uniformly as "strength" across every adjustment type:
+      - opacity = 0 → bypass (output equals input)
+      - opacity = 1 → full effect
+      - 0 < opacity < 1 → linear blend
+    The mix is tagged as ``opacity_target_base_color`` so _hot_opacity
+    can update its Factor without a full rebuild.
+    """
+    mix = node_tree.nodes.new("ShaderNodeMix")
+    mix.data_type = 'RGBA'
+    mix.blend_type = 'MIX'
+    mix.location = (x + 600, y)
+    mix.name = f"{TLM_PREFIX}adj_opacity_{_next_id()}"
+    _factor_socket(mix).default_value = layer.opacity
+    node_tree.links.new(original_output, _a_socket(mix))
+    node_tree.links.new(adjusted_output, _b_socket(mix))
+    _tag(mix, layer.name, "opacity_target_base_color", opacity_input_idx=-1)
+    return _result_socket(mix)
+
+
 def _apply_adjustment(node_tree, layer, current_output, x, y):
     adj = layer.adj_type
 
@@ -3519,12 +3542,12 @@ def _apply_adjustment(node_tree, layer, current_output, x, y):
         node.inputs["Hue"].default_value        = layer.adj_hue
         node.inputs["Saturation"].default_value = layer.adj_saturation
         node.inputs["Value"].default_value      = layer.adj_value
-        # Fac is the adjustment-mix factor: 0 = bypass, 1 = full effect.
-        # Driving it from layer.opacity makes the slider behave as
-        # "strength" for adjustment layers.
-        node.inputs["Fac"].default_value        = layer.opacity
+        # Fac stays at full strength here — the wrapping Mix below
+        # provides the opacity-as-strength behaviour uniformly.
+        node.inputs["Fac"].default_value        = 1.0
         node_tree.links.new(current_output, node.inputs["Color"])
-        return node.outputs["Color"]
+        return _wrap_adjustment_opacity(node_tree, layer,
+                                        current_output, node.outputs["Color"], x, y)
 
     elif adj == 'BRIGHT_CONTRAST':
         node = node_tree.nodes.new("ShaderNodeBrightContrast")
@@ -3535,7 +3558,8 @@ def _apply_adjustment(node_tree, layer, current_output, x, y):
         node.inputs["Bright"].default_value   = layer.adj_brightness
         node.inputs["Contrast"].default_value = layer.adj_contrast
         node_tree.links.new(current_output, node.inputs["Color"])
-        return node.outputs["Color"]
+        return _wrap_adjustment_opacity(node_tree, layer,
+                                        current_output, node.outputs["Color"], x, y)
 
     elif adj == 'LEVELS':
         mr_in = node_tree.nodes.new("ShaderNodeMapRange")
@@ -3581,14 +3605,16 @@ def _apply_adjustment(node_tree, layer, current_output, x, y):
             mr_out.inputs["To Min"].default_value   = (layer.adj_out_min,) * 3
             mr_out.inputs["To Max"].default_value   = (layer.adj_out_max,) * 3
             node_tree.links.new(gamma_node.outputs["Color"], mr_out.inputs["Vector"])
-            return mr_out.outputs["Vector"]
+            adjusted = mr_out.outputs["Vector"]
         else:
             mr_out.inputs["From Min"].default_value = 0.0
             mr_out.inputs["From Max"].default_value = 1.0
             mr_out.inputs["To Min"].default_value   = layer.adj_out_min
             mr_out.inputs["To Max"].default_value   = layer.adj_out_max
             node_tree.links.new(gamma_node.outputs["Color"], mr_out.inputs["Value"])
-            return mr_out.outputs["Result"]
+            adjusted = mr_out.outputs["Result"]
+        return _wrap_adjustment_opacity(node_tree, layer,
+                                        current_output, adjusted, x, y)
 
     elif adj == 'COLOR_BALANCE':
         # Lift/Gamma/Gain implemented as:
@@ -3639,13 +3665,15 @@ def _apply_adjustment(node_tree, layer, current_output, x, y):
             gain_node.inputs["Factor"].default_value = 1.0
             _enabled_socket(gain_node.inputs, "B").default_value = (*layer.adj_gain, 1.0)
             node_tree.links.new(gamma_node.outputs["Color"], _enabled_socket(gain_node.inputs, "A"))
-            return _enabled_socket(gain_node.outputs, "Result")
+            adjusted = _enabled_socket(gain_node.outputs, "Result")
         else:
             gain_node.blend_type = 'MULTIPLY'
             gain_node.inputs["Fac"].default_value = 1.0
             gain_node.inputs["Color2"].default_value = (*layer.adj_gain, 1.0)
             node_tree.links.new(gamma_node.outputs["Color"], gain_node.inputs["Color1"])
-            return gain_node.outputs["Color"]
+            adjusted = gain_node.outputs["Color"]
+        return _wrap_adjustment_opacity(node_tree, layer,
+                                        current_output, adjusted, x, y)
 
     return current_output
 

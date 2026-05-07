@@ -675,6 +675,14 @@ def _draw_reference(col, active, tlm):
 
 def _draw_adjustment(col, active, tlm):
     col.prop(active, "adj_type")
+    # Opacity acts as the adjustment STRENGTH:
+    # - HUE_SAT: drives the node's Fac socket (0 = bypass, 1 = full effect)
+    # - other adj types: not yet wired to a strength socket — rebuild
+    #   triggers but the visual effect is currently all-or-nothing on
+    #   them. Surfacing the slider regardless keeps the UI uniform
+    #   across layer types and is forward-compatible with future wiring.
+    br = col.row(align=True)
+    br.prop(active, "opacity",   text="Opacity / Strength", slider=True)
     col.separator(factor=0.5)
     if active.adj_type == 'HUE_SAT':
         col.prop(active, "adj_hue",        slider=True)
