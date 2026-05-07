@@ -1,0 +1,47 @@
+# ── Python ─────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ── Editor / IDE backup & swap files ──────────────────────────────────────
+*~
+*.bak
+*.swp
+*.swo
+.idea/
+.vscode/
+*.code-workspace
+.DS_Store
+Thumbs.db
+
+# ── Blender ────────────────────────────────────────────────────────────────
+# Auto-saved blend backups; keep .blend itself if the user commits any.
+*.blend1
+*.blend2
+*.blend3
+*.blend@
+
+# ── Claude Code workspace ─────────────────────────────────────────────────
+# `.claude/worktrees/` is where Claude Code spins up scratch git
+# worktrees for parallel sessions; `settings.local.json` is per-user
+# local config. Neither belongs in the shared repo.
+.claude/
+
+# ── User-local material presets ───────────────────────────────────────────
+# The shipped presets (Alien Crystal, Brushed Gold, Lava Rock, Rusted
+# Iron, Weathered Marble, copper test) are tracked. Anything else under
+# presets/ is treated as user scratch — uncomment and adjust the
+# negation list if you want to ship additional presets.
+# Currently: track ONLY the explicit allowlist below.
+presets/*.tlm
+!presets/Alien\ Crystal.tlm
+!presets/Brushed\ Gold.tlm
+!presets/Lava\ Rock.tlm
+!presets/Rusted\ Iron.tlm
+!presets/Weathered\ Marble.tlm
+!presets/copper\ test.tlm
