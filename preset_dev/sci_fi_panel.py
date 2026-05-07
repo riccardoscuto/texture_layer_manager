@@ -68,40 +68,43 @@ PANEL_VARIATION_DARK     = (0.04, 0.05, 0.07, 1.0)
 PANEL_VARIATION_LIGHT    = (0.10, 0.12, 0.15, 1.0)
 PANEL_VARIATION_ALT      = (0.07, 0.07, 0.10, 1.0)   # subtle violet tint
 EMISSIVE_COLOR           = (1.00, 0.30, 0.05, 1.0)   # bright orange
-EMISSIVE_STRENGTH        = 6.0
+EMISSIVE_STRENGTH        = 2.5    # dim accent — was 6.0 (overwhelming)
 
 # ── Layer opacities ──
 PANEL_OPACITY            = 1.0
 PANEL_VAR_OPACITY        = 0.50
 SCRATCH_OPACITY          = 0.30
-EMISSIVE_OPACITY         = 1.0
+EMISSIVE_OPACITY         = 0.55   # let the dark panels read first — was 1.0
 ROUGH_BOOST_OPACITY      = 0.5
 COLOR_GRADE_OPACITY      = 0.3
 
 # ── Brick params ──
 # Same scale + offset/squash on the visible Panel Pattern AND the
 # Emissive Strips so they align. Tweak these together.
-PANEL_SCALE              = 4.0
-BRICK_OFFSET             = 0.5    # 0.5 = standard offset stagger
+#
+# Goal is a FEW BIG sci-fi hull panels per face, not a uniform tile
+# of small bricks. Lower scale = fewer / bigger bricks.
+PANEL_SCALE              = 1.8    # ~3-5 panels per face on a unit Cube
+BRICK_OFFSET             = 0.5
 BRICK_OFFSET_FREQ        = 2
-BRICK_SQUASH             = 1.6    # > 1 widens every Nth row
-BRICK_SQUASH_FREQ        = 3
+BRICK_SQUASH             = 2.4    # high so adjacent rows have very different widths
+BRICK_SQUASH_FREQ        = 5
 
-PANEL_MORTAR_SIZE        = 0.04   # visible seam gap
+PANEL_MORTAR_SIZE        = 0.02   # thin seam — was 0.04 (too thick)
 PANEL_MORTAR_SMOOTH      = 0.05
 
-# Emissive strips — slightly thinner mortar so the glow reads as a
-# bright thin line along the dark seam rather than fully filling it.
-EMISSIVE_MORTAR_SIZE     = 0.03
+# Emissive strips — even thinner mortar so the glow is a hairline
+# accent at the very centre of each seam, not a bright stripe.
+EMISSIVE_MORTAR_SIZE     = 0.012
 EMISSIVE_MORTAR_SMOOTH   = 0.02
 
 # Emission shape: with the brick mortar mask, fac is 1 at bricks and
 # 0 at mortar. The emission pipeline inverts to (1-fac), so mortar
-# pixels arrive as 1.0. A low threshold + tiny falloff makes the
-# whole mortar band glow uniformly. Raise the threshold to thin the
-# glow into a tight line at the centre of each seam.
-EMISSIVE_THRESHOLD       = 0.6
-EMISSIVE_FALLOFF         = 0.05
+# pixels arrive as 1.0 and brick pixels as 0.0 — the smoothstep
+# threshold then decides where the on/off boundary sits.
+# Higher threshold = thinner glow band centred on the seam.
+EMISSIVE_THRESHOLD       = 0.7
+EMISSIVE_FALLOFF         = 0.08
 EMISSIVE_CONTRAST        = 0.55
 
 # ── Surface scratch params ──
