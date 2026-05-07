@@ -926,19 +926,22 @@ class TLM_LayerItem(PropertyGroup):
 
     proc_type: EnumProperty(
         name="Type",
+        # Alphabetical order by display label so the dropdown is
+        # scannable. Numeric identifiers are kept stable across versions
+        # (changing them would re-shuffle existing presets/.tlm files).
         items=[
-            ('NOISE',    "Noise",    "Perlin/FBM noise",                                    0),
-            ('VORONOI',  "Voronoi",  "Cell/Worley noise",                                   1),
-            ('WAVE',     "Wave",     "Sine wave bands or rings",                             2),
-            ('GRADIENT', "Gradient", "Linear, radial, quadratic or spherical gradient",      3),
-            ('MUSGRAVE', "Musgrave", "Fractal noise (Multifractal, Ridged, etc.)",           4),
-            ('CHECKER',  "Checker",  "Alternating checkerboard pattern",                     5),
-            ('MARBLE',   "Marble",   "Wave bands distorted by noise — marble/veined stone", 6),
-            ('BRICK',    "Brick",    "Brick / tile pattern with offset, mortar, color variation", 7),
-            ('MAGIC',    "Magic",    "Kaleidoscopic colored swirl pattern",                  8),
-            ('WHITE_NOISE', "White Noise", "Per-pixel random — fine grain, dust, dithering", 9),
-            ('STRIPES',  "Stripes",  "Hard-edged stripes (X, Y or diagonal) with adjustable width and sharpness", 10),
-            ('HEX_GRID', "Hex Grid", "Honeycomb / cell grid using Voronoi distance-to-edge", 11),
+            ('BRICK',       "Brick",       "Brick / tile pattern with offset, mortar, color variation", 7),
+            ('CHECKER',     "Checker",     "Alternating checkerboard pattern",                     5),
+            ('GRADIENT',    "Gradient",    "Linear, radial, quadratic or spherical gradient",      3),
+            ('HEX_GRID',    "Hex Grid",    "Honeycomb / cell grid using Voronoi distance-to-edge", 11),
+            ('MAGIC',       "Magic",       "Kaleidoscopic colored swirl pattern",                  8),
+            ('MARBLE',      "Marble",      "Wave bands distorted by noise — marble/veined stone", 6),
+            ('MUSGRAVE',    "Musgrave",    "Fractal noise (Multifractal, Ridged, etc.)",           4),
+            ('NOISE',       "Noise",       "Perlin/FBM noise",                                    0),
+            ('STRIPES',     "Stripes",     "Hard-edged stripes (X, Y or diagonal) with adjustable width and sharpness", 10),
+            ('VORONOI',     "Voronoi",     "Cell/Worley noise",                                   1),
+            ('WAVE',        "Wave",        "Sine wave bands or rings",                             2),
+            ('WHITE_NOISE', "White Noise", "Per-pixel random — fine grain, dust, dithering",       9),
         ],
         default='NOISE',
         update=_on_layer_update,

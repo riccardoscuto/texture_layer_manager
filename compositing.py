@@ -3775,17 +3775,61 @@ def rebuild_node_tree(material):
     # Solo override — show only the solo'd layer.
     # Use tlm.layers (not all_layers which is reversed) since solo_layer_index
     # comes from the UIList which indexes into tlm.layers directly.
-    # When the soloed layer is a GROUP, keep its children so the group
-    # composites as a unit instead of appearing empty.
+    #
+    # GROUP / ADJUSTMENT / REFERENCE need special handling because they
+    # don't make sense in isolation:
+    #  - GROUP: keep its children so the group composites as a unit.
+    #  - ADJUSTMENT: it modifies the layers BELOW it; soloing it alone
+    #    leaves nothing for the adjustment to act on (visible symptom:
+    #    the BSDF gets no Base Color input). Include the entire prefix
+    #    of layers up to and including the adjustment so the user sees
+    #    "the stack with this adjustment applied".
+    #  - REFERENCE: pulls its pattern from another layer by name. If the
+    #    referenced layer isn't in the solo set the lookup fails and
+    #    nothing renders. Include the source layer too.
     solo_idx = tlm.solo_layer_index
     if 0 <= solo_idx < len(tlm.layers):
         solo_layer = tlm.layers[solo_idx]
         if solo_layer.visible:
-            root_layers = [solo_layer]
-            if solo_layer.layer_type == "GROUP":
+            if solo_layer.layer_type == "ADJUSTMENT":
+                prefix = list(tlm.layers[:solo_idx + 1])
+                root_layers = [l for l in prefix if _is_root(l)]
+                # Trim group_children to only the groups present in the prefix.
+                kept = {l.name for l in prefix if l.layer_type == "GROUP"}
+                group_children = {k: v for k, v in group_children.items()
+                                  if k in kept}
+            elif solo_layer.layer_type == "REFERENCE":
+                ref_name = getattr(solo_layer, 'reference_layer_name', '')
+                ref_layer = next(
+                    (l for l in tlm.layers
+                     if l.name == ref_name and l != solo_layer),
+                    None,
+                )
+                if ref_layer is not None:
+                    # Stack order: source first so it becomes `current`,
+                    # then the REFERENCE composes on top with its own
+                    # opacity / mask / blend.
+                    root_layers = [ref_layer, solo_layer]
+                    # If the source is a group, keep its children too.
+                    if ref_layer.layer_type == "GROUP":
+                        preserved = group_children.get(ref_layer.name, [])
+                        group_children = ({ref_layer.name: preserved}
+                                          if preserved else {})
+                    else:
+                        group_children = {}
+                else:
+                    # Invalid / missing reference name — fall back to the
+                    # reference itself; the build path will skip it but
+                    # we avoid an empty tree.
+                    root_layers = [solo_layer]
+                    group_children = {}
+            elif solo_layer.layer_type == "GROUP":
+                root_layers = [solo_layer]
                 preserved = group_children.get(solo_layer.name, [])
-                group_children = {solo_layer.name: preserved} if preserved else {}
+                group_children = ({solo_layer.name: preserved}
+                                  if preserved else {})
             else:
+                root_layers = [solo_layer]
                 group_children = {}
         else:
             root_layers = []

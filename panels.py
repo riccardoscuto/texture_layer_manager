@@ -177,6 +177,11 @@ class TLM_UL_LayerList(UIList):
             row.prop(layer, "opacity", text="", slider=True)
         elif layer.layer_type == "GROUP":
             row.prop(layer, "opacity", text="", slider=True)
+        elif layer.layer_type == "ADJUSTMENT":
+            # No blend mode (adjustment is destructive on the channel),
+            # but opacity acts as the strength dial — surface it inline
+            # so the user can dial without opening the layer settings.
+            row.prop(layer, "opacity", text="", slider=True)
 
     def filter_items(self, context, data, propname):
         layers = getattr(data, propname)
@@ -219,9 +224,12 @@ def draw_tlm_main(layout, context):
 
     add_row = layout.row(align=True)
     add_row.scale_y = 1.1
-    add_row.operator("tlm.add_paint_layer",       text="Paint", icon='IMAGE_RGB_ALPHA')
-    add_row.operator("tlm.add_fill_layer",         text="Fill",  icon='COLOR')
+    # Layer-type buttons in alphabetical order (Adj / Fill / Paint /
+    # Proc / Ref) so they're predictable to find regardless of which
+    # type the user reaches for first.
     add_row.operator("tlm.add_adjustment_layer",   text="Adj",   icon='MODIFIER')
+    add_row.operator("tlm.add_fill_layer",         text="Fill",  icon='COLOR')
+    add_row.operator("tlm.add_paint_layer",        text="Paint", icon='IMAGE_RGB_ALPHA')
     add_row.operator("tlm.add_procedural_layer",   text="Proc",  icon='TEXTURE')
     add_row.operator("tlm.add_reference_layer",    text="Ref",   icon='LINKED')
     add_row.operator("tlm.add_group",              text="",      icon='FILE_FOLDER')
