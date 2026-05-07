@@ -4505,8 +4505,25 @@ def _build_proc_fac_node(node_tree, layer, name_suffix, x, y, uv_map="UVMap"):
         tex.inputs["Mortar Size"].default_value   = layer.proc_brick_mortar_size
         tex.inputs["Mortar Smooth"].default_value = layer.proc_brick_mortar_smooth
         tex.inputs["Bias"].default_value          = layer.proc_brick_bias
+        # Sentinel colours: WHITE bricks + BLACK mortar so Color.R is a
+        # 0/1 brick-vs-mortar mask. Brick.Fac would be a 0/1 between
+        # Color1 and Color2 bricks (alternation), which is rarely the
+        # mask people actually want — and worse, when fed through the
+        # emission pipeline (which inverts the fac to put glow on the
+        # "low" side) it puts the glow on alternating brick FACES
+        # instead of the seams. Encoding the mortar via Color sidesteps
+        # that and gives the intuitive default: routed-to-roughness
+        # makes bricks rougher than mortar; routed-to-emission glows on
+        # the seams.
+        tex.inputs["Color1"].default_value = (1.0, 1.0, 1.0, 1.0)
+        tex.inputs["Color2"].default_value = (1.0, 1.0, 1.0, 1.0)
+        tex.inputs["Mortar"].default_value = (0.0, 0.0, 0.0, 1.0)
         node_tree.links.new(vec_out, tex.inputs["Vector"])
-        fac_out = tex.outputs.get("Fac") or tex.outputs[0]
+        sep = node_tree.nodes.new("ShaderNodeSeparateColor")
+        sep.name = f"{TLM_PREFIX}pfac_brick_sep_{name_suffix}"
+        sep.location = (x + 100, y)
+        node_tree.links.new(tex.outputs["Color"], sep.inputs["Color"])
+        fac_out = sep.outputs["Red"]
 
     elif pt == 'MAGIC':
         tex = node_tree.nodes.new("ShaderNodeTexMagic")

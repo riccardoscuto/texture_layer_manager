@@ -1,58 +1,50 @@
 """
-TLM Flagship Preset — Sci-Fi Panel (dark hull with emissive seams)
-====================================================================
+TLM Flagship Preset — Sci-Fi Panel (dark hull with rectangular panels +
+emissive seams)
+=========================================================================
 
 Recreates the centre material from the reference grid: a dark
-metallic hull broken into irregular armoured cells, with bright
-orange emissive light strips running along the cell joints.
+metallic hull broken into RECTANGULAR brick-style panels with bright
+orange emissive light strips running along the panel seams.
 
 How to use:
   1. Open Blender 5.0 with the TLM addon enabled.
-  2. Select a mesh — a Cube reads the panel pattern crisply, a
-     Sphere or Suzanne also work.
+  2. Select a mesh — a Cube reads the brick pattern crisply, a Sphere
+     or Suzanne also work but the rectangles wrap to the UV.
   3. Open the Scripting editor → New → paste this file → Run.
   4. Build a material called "TLM_Sci_Fi_Panel" on the active object.
   5. View in Material Preview / Rendered. Cycles emission is brighter
      than Eevee — both work.
 
-Why HEX_GRID + Voronoi DTE instead of Brick:
-  The first iteration of this preset used a Brick procedural for the
-  panel grid and another Brick for the emissive seams. That broke
-  because Blender's Brick `Fac` output distinguishes Color1 vs Color2
-  (i.e., alternating bricks), NOT brick-vs-mortar. So the emission
-  pipeline (which inverts the fac) put glow on alternating bricks
-  instead of the seams — visible as orange stripes covering full
-  bricks rather than thin lines along the joints.
+Two iterations of this preset failed before getting here. Notes:
+  V1: Used Brick for both panels and emission. Brick's Fac output
+      distinguishes Color1 vs Color2 BRICKS (alternation), not
+      brick-vs-mortar — so the emission pipeline (which inverts the
+      fac to place the glow on the "low" side) lit alternating brick
+      FACES with full orange instead of seam lines.
+  V2: Switched to HEX_GRID + Voronoi DTE. Worked correctly but
+      produced ORGANIC Voronoi cells, not the rectangular panel look
+      of the reference.
 
-  HEX_GRID is purpose-built for cell-with-bordered-line patterns: its
-  internal Voronoi(DISTANCE_TO_EDGE) + Map Range gives a clean fac of
-  1 at edges, 0 at cell interior, with proc_hex_edge_width controlling
-  line thickness. For the emissive layer we use raw Voronoi
-  DISTANCE_TO_EDGE at the same proc_scale and proc_randomness, so the
-  cell boundaries align — and the emission pipeline's
-  invert + smoothstep then carves a clean thin glow at the joints.
+V3 (this file): The TLM addon was extended so `_build_proc_fac_node`
+for BRICK now uses sentinel colours (WHITE brick + BLACK mortar) and
+SeparateColor.R to derive a brick-vs-mortar mask. With that fix in
+place we can use Brick for both:
+  - Visible Panel Pattern: layer.proc_color1/2/3 give the panel
+    colours (Color1 / Color2 alternating for cell tonal variation,
+    Mortar = darker recessed seam)
+  - Emissive Strips: same scale + offset/squash so the seams align
+    perfectly. The emission pipeline now correctly carves the glow
+    along the mortar.
 
-What this preset showcases:
-  - HEX_GRID procedural for the panel structure
-  - Voronoi F1 with random_color for per-panel tonal variation
-  - Voronoi DISTANCE_TO_EDGE on ROUGHNESS for surface scuffing
-  - PROCEDURAL routed to EMISSION via use_emission, threshold-tuned
-    so the orange glow lives on the joints only
-  - Cumulative routing: the emissive layer's primary target is
-    ROUGHNESS (so the joints are slightly more polished), and
-    use_emission adds the orange glow on top — Base Color is left
-    alone
-  - BRIGHT_CONTRAST adjustment routed to ROUGHNESS
-  - Empty PAINT layer at the top for hand-added LEDs / decals
-
-Layer stack (top to bottom — top is rendered last):
+Layer stack (top to bottom):
    0. Hand Details      — empty PAINT
    1. Color Grade       — HUE_SAT on Base Color
    2. Roughness Boost   — BRIGHT_CONTRAST on Roughness
-   3. Emissive Joints   — Voronoi DTE, use_emission, glow at joints
-   4. Surface Wear      — Voronoi DTE on Roughness, fine scuffing
+   3. Emissive Strips   — Brick aligned with Panel Pattern, glow at seams
+   4. Surface Wear      — Voronoi DISTANCE_TO_EDGE on Roughness
    5. Panel Variation   — Voronoi F1 random per cell, OVERLAY on base
-   6. Panel Pattern     — HEX_GRID on Base Color (cells + joints)
+   6. Panel Pattern     — Brick on Base Color (defines rectangles)
    7. Steel Base        — solid dark steel, metallic=1.0
 """
 
@@ -69,38 +61,51 @@ RESOLUTION = "1024"
 
 # ── Colours (linear RGB) ──
 STEEL_COLOR              = (0.04, 0.05, 0.06, 1.0)
-PANEL_FACE_COLOR         = (0.06, 0.07, 0.09, 1.0)   # slightly bluer than steel
-PANEL_JOINT_COLOR        = (0.005, 0.005, 0.008, 1.0)  # near-black recessed seam
+PANEL_FACE_DARK          = (0.05, 0.06, 0.08, 1.0)
+PANEL_FACE_LIGHT         = (0.08, 0.09, 0.11, 1.0)
+PANEL_MORTAR_COLOR       = (0.005, 0.005, 0.008, 1.0)  # near-black recessed seam
 PANEL_VARIATION_DARK     = (0.04, 0.05, 0.07, 1.0)
-PANEL_VARIATION_LIGHT    = (0.10, 0.12, 0.16, 1.0)
-PANEL_VARIATION_ALT      = (0.07, 0.07, 0.11, 1.0)   # subtle violet tint
+PANEL_VARIATION_LIGHT    = (0.10, 0.12, 0.15, 1.0)
+PANEL_VARIATION_ALT      = (0.07, 0.07, 0.10, 1.0)   # subtle violet tint
 EMISSIVE_COLOR           = (1.00, 0.30, 0.05, 1.0)   # bright orange
 EMISSIVE_STRENGTH        = 6.0
 
 # ── Layer opacities ──
-PANEL_OPACITY            = 1.0    # let the HEX_GRID fully replace base color
-PANEL_VAR_OPACITY        = 0.55
+PANEL_OPACITY            = 1.0
+PANEL_VAR_OPACITY        = 0.50
 SCRATCH_OPACITY          = 0.30
 EMISSIVE_OPACITY         = 1.0
 ROUGH_BOOST_OPACITY      = 0.5
 COLOR_GRADE_OPACITY      = 0.3
 
-# ── Procedural scales ──
-# Panel scale and Emissive scale must match for joints to align.
-PANEL_SCALE              = 5.0
-PANEL_RANDOMNESS         = 1.0    # 0 = honeycomb, 1 = irregular Voronoi cells
+# ── Brick params ──
+# Same scale + offset/squash on the visible Panel Pattern AND the
+# Emissive Strips so they align. Tweak these together.
+PANEL_SCALE              = 4.0
+BRICK_OFFSET             = 0.5    # 0.5 = standard offset stagger
+BRICK_OFFSET_FREQ        = 2
+BRICK_SQUASH             = 1.6    # > 1 widens every Nth row
+BRICK_SQUASH_FREQ        = 3
+
+PANEL_MORTAR_SIZE        = 0.04   # visible seam gap
+PANEL_MORTAR_SMOOTH      = 0.05
+
+# Emissive strips — slightly thinner mortar so the glow reads as a
+# bright thin line along the dark seam rather than fully filling it.
+EMISSIVE_MORTAR_SIZE     = 0.03
+EMISSIVE_MORTAR_SMOOTH   = 0.02
+
+# Emission shape: with the brick mortar mask, fac is 1 at bricks and
+# 0 at mortar. The emission pipeline inverts to (1-fac), so mortar
+# pixels arrive as 1.0. A low threshold + tiny falloff makes the
+# whole mortar band glow uniformly. Raise the threshold to thin the
+# glow into a tight line at the centre of each seam.
+EMISSIVE_THRESHOLD       = 0.6
+EMISSIVE_FALLOFF         = 0.05
+EMISSIVE_CONTRAST        = 0.55
+
+# ── Surface scratch params ──
 SCRATCH_SCALE            = 22.0
-
-# Joint thickness on the visible panel pattern (HEX_GRID)
-HEX_EDGE_WIDTH           = 0.05
-
-# Emission shape: threshold close to 1 → only the very-near-edge
-# fragments glow. With Voronoi DTE the raw fac is the distance; the
-# emission build path inverts this (1 - distance), so high threshold
-# keeps the glow on a thin band around the cell edge.
-EMISSIVE_THRESHOLD       = 0.78
-EMISSIVE_FALLOFF         = 0.08
-EMISSIVE_CONTRAST        = 0.7    # sharpens the glow band edge
 
 # ── Adjustment params ──
 HUE_GRADE_HUE            = 0.51   # tiny cool tilt
@@ -182,6 +187,17 @@ def _add_adjustment(mat, name, adj_type, opacity=1.0,
     return layer
 
 
+def _setup_brick(layer, mortar_size, mortar_smooth):
+    """Apply the shared Brick parameters to a procedural layer."""
+    layer.proc_scale = PANEL_SCALE
+    layer.proc_brick_offset = BRICK_OFFSET
+    layer.proc_brick_offset_freq = BRICK_OFFSET_FREQ
+    layer.proc_brick_squash = BRICK_SQUASH
+    layer.proc_brick_squash_freq = BRICK_SQUASH_FREQ
+    layer.proc_brick_mortar_size = mortar_size
+    layer.proc_brick_mortar_smooth = mortar_smooth
+
+
 # ─── BUILD ────────────────────────────────────────────────────────────────────
 
 def build_sci_fi_panel():
@@ -206,31 +222,32 @@ def build_sci_fi_panel():
     l_steel.use_metallic = True
     l_steel.metallic_fill = 1.0
 
-    # ── 6: Panel Pattern — HEX_GRID on Base Color ──────────────────────────
-    # Defines the cell grid. HEX_GRID is a Voronoi(DTE) thresholded by a
-    # Map Range, so proc_hex_edge_width directly controls the joint
-    # thickness. Color1 = panel face, Color2 = darker joint.
-    l_panels = _add_procedural(mat, "Panel Pattern", "HEX_GRID",
+    # ── 6: Panel Pattern — Brick on Base Color ─────────────────────────────
+    # Defines the rectangular panel grid via Brick. Color1/Color2 give a
+    # subtle tonal alternation between adjacent rows / bricks; Mortar is
+    # the darker recessed seam.
+    l_panels = _add_procedural(mat, "Panel Pattern", "BRICK",
                                 opacity=PANEL_OPACITY, blend_mode="MIX",
                                 output_channel="BASE_COLOR")
-    l_panels.proc_scale = PANEL_SCALE
-    l_panels.proc_randomness = PANEL_RANDOMNESS
-    l_panels.proc_hex_edge_width = HEX_EDGE_WIDTH
-    # HEX_GRID's Mix-topology uses Color1 for the cell, Color2 for the line.
-    l_panels.proc_color1 = PANEL_FACE_COLOR
-    l_panels.proc_color2 = PANEL_JOINT_COLOR
+    _setup_brick(l_panels, PANEL_MORTAR_SIZE, PANEL_MORTAR_SMOOTH)
+    l_panels.proc_color1 = PANEL_FACE_DARK
+    l_panels.proc_color2 = PANEL_FACE_LIGHT
+    l_panels.use_proc_color3 = True
+    l_panels.proc_color3 = PANEL_MORTAR_COLOR
+    l_panels.proc_color3_position = 0.5
 
     # ── 5: Panel Variation — Voronoi F1 random per cell, OVERLAY ───────────
-    # Same proc_scale + proc_randomness as the Panel Pattern so cells line
-    # up. random_color = True gives each cell a random tonal shift inside
-    # the [Color1..Color2..Color3] palette.
+    # Voronoi cells don't strictly align with brick cells, but the
+    # OVERLAY blend at moderate opacity gives each rough region a
+    # subtly different tonal cast — reads as panel-to-panel variation
+    # without locking to the exact brick grid.
     l_var = _add_procedural(mat, "Panel Variation", "VORONOI",
                              opacity=PANEL_VAR_OPACITY, blend_mode="OVERLAY",
                              output_channel="BASE_COLOR")
     l_var.proc_voronoi_feature = 'F1'
     l_var.proc_voronoi_distance = 'EUCLIDEAN'
-    l_var.proc_scale = PANEL_SCALE
-    l_var.proc_randomness = PANEL_RANDOMNESS
+    l_var.proc_scale = PANEL_SCALE * 0.7   # slightly larger cells than bricks
+    l_var.proc_randomness = 1.0
     l_var.proc_voronoi_random_color = True
     l_var.proc_voronoi_random_seed = 4.2
     l_var.proc_color1 = PANEL_VARIATION_DARK
@@ -240,8 +257,6 @@ def build_sci_fi_panel():
     l_var.proc_color3_position = 0.5
 
     # ── 4: Surface Wear — Voronoi DTE on Roughness ─────────────────────────
-    # Smaller scale than the panels so this reads as fine scuffing /
-    # micro-scratches, not as a second tier of cells.
     l_wear = _add_procedural(mat, "Surface Wear", "VORONOI",
                               opacity=SCRATCH_OPACITY, blend_mode="ADD",
                               output_channel="ROUGHNESS")
@@ -253,28 +268,30 @@ def build_sci_fi_panel():
     l_wear.proc_color2 = (1.0, 1.0, 1.0, 1.0)
     l_wear.proc_contrast = 0.6
 
-    # ── 3: Emissive Joints — Voronoi DTE driving emission ──────────────────
-    # SAME proc_scale + proc_randomness as the Panel Pattern so the glow
-    # falls exactly on the visible joints. The emission build path
-    # (_build_proc_fac_node + invert + smoothstep) takes the raw distance
-    # fac (0 at edges, ~0.5 at cell centres), inverts it, then carves a
-    # thin glowing band via the threshold/falloff.
+    # ── 3: Emissive Strips — Brick aligned with Panel Pattern ──────────────
+    # Same scale + offset/squash as the visible Panel Pattern so the
+    # mortar lines align exactly. output_channel=ROUGHNESS keeps Base
+    # Color untouched; use_emission adds the orange glow on top.
     #
-    # output_channel = ROUGHNESS keeps Base Color untouched. The
-    # Voronoi DTE on roughness barely changes the channel because the
-    # adjusted fac is mostly 0.
-    l_emit = _add_procedural(mat, "Emissive Joints", "VORONOI",
+    # Now relies on the addon's brick mortar mask (commit immediately
+    # before this preset rewrite): _build_proc_fac_node for BRICK uses
+    # sentinel WHITE/BLACK colours and SeparateColor.R to give a clean
+    # 1-at-bricks / 0-at-mortar mask. The emission pipeline inverts
+    # that, so the orange glow correctly lands on the seams.
+    l_emit = _add_procedural(mat, "Emissive Strips", "BRICK",
                               opacity=EMISSIVE_OPACITY, blend_mode="MIX",
                               output_channel="ROUGHNESS")
-    l_emit.proc_voronoi_feature = 'DISTANCE_TO_EDGE'
-    l_emit.proc_voronoi_distance = 'EUCLIDEAN'
-    l_emit.proc_scale = PANEL_SCALE
-    l_emit.proc_randomness = PANEL_RANDOMNESS
-    # Colours don't visually affect emission (the emission pipeline uses
-    # the FAC, not the Color output), but they DO drive the roughness
-    # contribution. Keep both at 0 so roughness barely shifts.
+    _setup_brick(l_emit, EMISSIVE_MORTAR_SIZE, EMISSIVE_MORTAR_SMOOTH)
+    # Colours are visually irrelevant for emission (the pipeline uses
+    # the fac, not the Color output). The fac path uses sentinel
+    # colours internally — our user-facing colours go to the
+    # roughness contribution, kept all black so roughness barely
+    # shifts.
     l_emit.proc_color1 = (0.0, 0.0, 0.0, 1.0)
     l_emit.proc_color2 = (0.0, 0.0, 0.0, 1.0)
+    l_emit.use_proc_color3 = True
+    l_emit.proc_color3 = (0.0, 0.0, 0.0, 1.0)
+    l_emit.proc_color3_position = 0.5
     l_emit.proc_contrast = EMISSIVE_CONTRAST
     # Emission contribution
     l_emit.use_emission = True
