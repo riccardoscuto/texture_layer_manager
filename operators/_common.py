@@ -179,10 +179,25 @@ def _add_layer_common(context, layer_type):
     if layer_type == "PAINT":
         layer.name = f"Paint {len(tlm.layers)}"
         res = int(tlm.resolution)
-        # Override Blender's default 'generated black opaque' image — set
-        # the generated_color BEFORE we start writing pixels so any path
-        # that consults it (preview, internal cache invalidation) sees
-        # white-transparent first.
+        # Initialise unpainted pixels as BLACK-transparent (0,0,0,0).
+        #
+        # We used to init as WHITE-transparent (1,1,1,0) here, on the theory
+        # that "if alpha ever leaks, white is benign". But the compositor
+        # has since been hardened to always honour layer_alpha (commit
+        # 0ce37dc + the first-layer modulator path), so RGB at alpha=0
+        # never reaches the BSDF — the init colour only matters at the
+        # brush AA edge, where the texture sampler interpolates between
+        # the unpainted RGB and the painted RGB.
+        #
+        # With WHITE init and a DARK brush, that edge interpolates
+        # through grey, which mixes with the layer below into a visible
+        # darker fringe. With BLACK init and a DARK brush the edge
+        # stays near-black throughout the gradient, so the fringe
+        # collapses into a smooth alpha fade. The reverse case
+        # (light brush, dark below) gets a mild light fringe instead,
+        # which is the lesser of the two evils for typical paint
+        # workflows (most artists paint dark masks/dirt over a brighter
+        # base, not the opposite).
         try:
             img_gen = bpy.data.images.new(layer.name,
                                            width=res, height=res,
@@ -193,7 +208,7 @@ def _add_layer_common(context, layer_type):
                                            alpha=True)
         img = img_gen
         try:
-            img.generated_color = (1.0, 1.0, 1.0, 0.0)
+            img.generated_color = (0.0, 0.0, 0.0, 0.0)
         except Exception:
             pass
         # alpha_mode='NONE' tells Blender's tex node to ignore the image's
@@ -213,10 +228,10 @@ def _add_layer_common(context, layer_type):
         # to be visible to downstream readers (rebuild, tex node sampling).
         try:
             import numpy as np
-            px = np.tile([1.0, 1.0, 1.0, 0.0], res * res).astype(np.float32)
+            px = np.zeros(res * res * 4, dtype=np.float32)
             img.pixels.foreach_set(px)
         except Exception:
-            img.pixels[:] = [1.0, 1.0, 1.0, 0.0] * (res * res)
+            img.pixels[:] = [0.0, 0.0, 0.0, 0.0] * (res * res)
         try:
             img.update()
         except Exception:
