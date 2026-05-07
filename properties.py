@@ -96,6 +96,50 @@ def _on_layer_update(self, context):
         pass  # object or material was deleted mid-callback
 
 
+def _on_name_change(self, context):
+    """Called when a layer's `name` is edited.
+
+    Two responsibilities beyond a regular rebuild:
+    1. Repoint cross-references that used the OLD name — group children
+       (``group_name``) and REFERENCE layers (``reference_layer_name``).
+       Without this, renaming a group orphans every child and renaming
+       a referenced layer breaks every reference into it.
+    2. Trigger the standard debounced rebuild so node tags
+       (``tlm_layer = layer.name``) catch up — the hot-update lookups
+       use the current name, so leftover nodes tagged with the old
+       name become unreachable until a rebuild runs.
+
+    The previous name is shadowed in ``_name_prev`` (a hidden
+    StringProperty); we read it before overwriting it with the new
+    value.
+    """
+    try:
+        new_name = self.name
+        old_name = self.get("_name_prev", "") or ""
+        # Update mirror so the next rename has a fresh "old" to read.
+        self["_name_prev"] = new_name
+
+        if old_name and old_name != new_name and context and context.active_object:
+            mat = context.active_object.active_material
+            if mat and hasattr(mat, "tlm"):
+                tlm = mat.tlm
+                # Repoint group children so they stay nested in their group.
+                for sib in tlm.layers:
+                    if sib == self:
+                        continue
+                    if getattr(sib, "group_name", "") == old_name:
+                        sib.group_name = new_name
+                    if getattr(sib, "reference_layer_name", "") == old_name:
+                        sib.reference_layer_name = new_name
+
+        # Always rebuild — the rebuild re-tags all nodes with current
+        # layer names, fixing any stale `tlm_layer` custom props that
+        # would otherwise break the hot-update path.
+        _on_layer_update(self, context)
+    except ReferenceError:
+        pass
+
+
 def _on_preset_change(self, context):
     """Apply coordinate preset — sets coord_type, normalize, and distortion in one click."""
     preset = self.proc_coord_preset
@@ -183,20 +227,26 @@ LAYER_TYPES = [
 class TLM_LayerItem(PropertyGroup):
     """Represents a single texture layer."""
 
-    # Override the implicit PropertyGroup `name` so renames trigger a rebuild.
-    # The rebuild re-labels the layer's NodeFrame in the shader editor, keeping
-    # the frame label in sync with the UI name. Debounced (180ms) like every
-    # other structural update.
+    # Override the implicit PropertyGroup `name` so renames trigger:
+    #   1. A debounced full rebuild (so `tlm_layer` tags on existing
+    #      nodes are refreshed — without this, the hot-update path
+    #      can no longer find any of this layer's nodes by the new
+    #      name and silently goes stale until the user nudges any
+    #      other property to force a manual rebuild).
+    #   2. Cross-reference repointing so group children and REFERENCE
+    #      layers that pointed at the OLD name are re-pointed at the
+    #      NEW name.
+    # See _on_name_change for the full logic.
     name: StringProperty(
         name="Name",
         default="Layer",
-        # No update callback — the layer name is metadata. It's used by
-        # the tag system to find nodes (tlm_layer custom prop), but
-        # renaming a layer doesn't change which nodes exist or how they
-        # connect, so a full rebuild is wasteful. The tags carry the
-        # OLD name in the existing nodes; that's fine — they'll be
-        # refreshed at the next genuine rebuild.
+        update=_on_name_change,
     )
+
+    # NOTE: the previous name is shadowed in self["_name_prev"] (an ID
+    # custom property, set/read via the dict-style API). No
+    # bpy.props annotation is needed — IDPropertyGroup supports
+    # arbitrary keys directly. See _on_name_change for the read/write.
 
     layer_type: EnumProperty(
         name="Type",

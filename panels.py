@@ -173,7 +173,15 @@ class TLM_UL_LayerList(UIList):
             op.layer_index = index
             clip_icon = 'CLIPUV_HLT' if layer.use_clipping_mask else 'CLIPUV_DEHLT'
             row.prop(layer, "use_clipping_mask", text="", icon=clip_icon, emboss=False)
-            row.prop(layer, "blend_mode", text="")
+            # Blend mode is meaningless on an Alpha-routed layer (alpha
+            # is coverage, not a colour input — see _effective_blend_mode
+            # which forces 'MIX' for channel_id='alpha'). Grey the
+            # dropdown out instead of hiding it so the column layout
+            # stays aligned across rows.
+            bm_row = row.row(align=True)
+            if getattr(layer, 'output_channel', 'BASE_COLOR') == 'ALPHA':
+                bm_row.enabled = False
+            bm_row.prop(layer, "blend_mode", text="")
             row.prop(layer, "opacity", text="", slider=True)
         elif layer.layer_type == "GROUP":
             row.prop(layer, "opacity", text="", slider=True)
