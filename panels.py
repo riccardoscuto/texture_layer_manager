@@ -690,13 +690,21 @@ def _draw_reference(col, active, tlm):
 
 
 def _draw_adjustment(col, active, tlm):
+    # Target channel — adjustments now route to a specific PBR channel,
+    # not just base color. Colour channels (Base Color) accept every
+    # adj_type; scalar channels (Roughness / Metallic / Alpha) only get
+    # a meaningful effect from BRIGHT_CONTRAST and LEVELS, while
+    # HUE_SAT / COLOR_BALANCE pass through as no-ops. We surface a hint
+    # so the user knows when their pick is silently ignored.
+    oc = col.row(align=True)
+    oc.prop(active, "output_channel", text="Target", icon='NODE_COMPOSITING')
     col.prop(active, "adj_type")
-    # Opacity acts as the adjustment STRENGTH:
-    # - HUE_SAT: drives the node's Fac socket (0 = bypass, 1 = full effect)
-    # - other adj types: not yet wired to a strength socket — rebuild
-    #   triggers but the visual effect is currently all-or-nothing on
-    #   them. Surfacing the slider regardless keeps the UI uniform
-    #   across layer types and is forward-compatible with future wiring.
+
+    target_is_scalar = active.output_channel in ('ROUGHNESS', 'METALLIC', 'ALPHA')
+    if target_is_scalar and active.adj_type in ('HUE_SAT', 'COLOR_BALANCE'):
+        col.label(text=f"{active.adj_type.replace('_', '/')} has no effect on a scalar channel",
+                  icon='INFO')
+
     br = col.row(align=True)
     br.prop(active, "opacity",   text="Opacity / Strength", slider=True)
     col.separator(factor=0.5)
