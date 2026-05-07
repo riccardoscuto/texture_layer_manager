@@ -395,10 +395,19 @@ def _draw_procedural(col, active, tlm):
             col.label(text="Tip: enable Color 3 above to set mortar colour",
                       icon='INFO')
     elif pt == 'MAGIC':
-        col.prop(active, "proc_magic_depth", text="Depth", slider=True)
-        col.prop(active, "proc_distortion",  text="Distortion", slider=True)
+        col.prop(active, "proc_magic_depth",      text="Depth", slider=True)
+        col.prop(active, "proc_magic_distortion", text="Distortion", slider=True)
     elif pt == 'WHITE_NOISE':
         col.label(text="Pure per-pixel random — no extra params",
+                  icon='INFO')
+    elif pt == 'STRIPES':
+        col.prop(active, "proc_stripe_direction", text="Direction")
+        col.prop(active, "proc_stripe_width",     slider=True)
+        col.prop(active, "proc_stripe_sharpness", slider=True)
+    elif pt == 'HEX_GRID':
+        col.prop(active, "proc_hex_edge_width", text="Edge Width", slider=True)
+        col.prop(active, "proc_randomness",     text="Randomness", slider=True)
+        col.label(text="Tip: Randomness=0 gives the cleanest honeycomb",
                   icon='INFO')
 
 
@@ -694,14 +703,6 @@ def _draw_adjustment(col, active, tlm):
         g.prop(active, "adj_gamma", text="")
         g.label(text="Gain (Highlights):")
         g.prop(active, "adj_gain",  text="")
-    elif active.adj_type == 'CURVES':
-        col.prop(active, "adj_curve_contrast",   slider=True)
-        col.prop(active, "adj_curve_brightness", slider=True)
-        col.separator(factor=0.3)
-        col.label(text="Tone Clipping:", icon='IPO_LINEAR')
-        cr = col.row(align=True)
-        cr.prop(active, "adj_curve_black_point", text="Black", slider=True)
-        cr.prop(active, "adj_curve_white_point", text="White", slider=True)
     col.separator(factor=0.5)
     _draw_group_assignment(col, active, tlm)
 

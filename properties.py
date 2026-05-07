@@ -844,7 +844,6 @@ class TLM_LayerItem(PropertyGroup):
             ('BRIGHT_CONTRAST', "Brightness/Contrast","Adjust brightness and contrast",              1),
             ('LEVELS',         "Levels",             "Remap input/output tonal range",               2),
             ('COLOR_BALANCE',  "Color Balance",      "Lift / Gamma / Gain (cinematic grading)",      3),
-            ('CURVES',         "Curves",             "Parametric RGB curve (contrast, brightness, tone clipping)", 4),
         ],
         default='HUE_SAT',
         update=_on_layer_update,
@@ -923,32 +922,6 @@ class TLM_LayerItem(PropertyGroup):
         default=(1.0, 1.0, 1.0), update=_make_hot_callback("adj_gain"),
     )
 
-    # Curves (parametric)
-    adj_curve_contrast: FloatProperty(
-        name="Contrast",
-        description="S-curve contrast: positive increases contrast, negative decreases",
-        default=0.0, min=-1.0, max=1.0,
-        update=_make_hot_callback("adj_curve_contrast"),
-    )
-    adj_curve_brightness: FloatProperty(
-        name="Brightness",
-        description="Shift midpoint of curve up or down",
-        default=0.0, min=-1.0, max=1.0,
-        update=_make_hot_callback("adj_curve_brightness"),
-    )
-    adj_curve_black_point: FloatProperty(
-        name="Black Point",
-        description="Raise shadows — crush blacks by lifting the low end",
-        default=0.0, min=0.0, max=1.0, subtype='FACTOR',
-        update=_make_hot_callback("adj_curve_black_point"),
-    )
-    adj_curve_white_point: FloatProperty(
-        name="White Point",
-        description="Lower highlights — clip whites by pulling down the high end",
-        default=1.0, min=0.0, max=1.0, subtype='FACTOR',
-        update=_make_hot_callback("adj_curve_white_point"),
-    )
-
     # ── Procedural layer properties ───────────────────────────────────────────
 
     proc_type: EnumProperty(
@@ -964,6 +937,8 @@ class TLM_LayerItem(PropertyGroup):
             ('BRICK',    "Brick",    "Brick / tile pattern with offset, mortar, color variation", 7),
             ('MAGIC',    "Magic",    "Kaleidoscopic colored swirl pattern",                  8),
             ('WHITE_NOISE', "White Noise", "Per-pixel random — fine grain, dust, dithering", 9),
+            ('STRIPES',  "Stripes",  "Hard-edged stripes (X, Y or diagonal) with adjustable width and sharpness", 10),
+            ('HEX_GRID', "Hex Grid", "Honeycomb / cell grid using Voronoi distance-to-edge", 11),
         ],
         default='NOISE',
         update=_on_layer_update,
@@ -1022,6 +997,57 @@ class TLM_LayerItem(PropertyGroup):
         description="Number of iterations — higher = more swirly detail",
         default=2, min=0, max=10,
         update=_make_hot_callback("proc_magic_depth"),
+    )
+    # Dedicated distortion (proc_distortion is shared and defaults to 0.0,
+    # which makes Magic produce flat vertical bands instead of the
+    # expected coloured swirls). 1.0 gives the canonical "rainbow swirl"
+    # users expect.
+    proc_magic_distortion: FloatProperty(
+        name="Distortion",
+        description="Warp strength of the swirls — 0 = vertical bands, "
+                    "1 = canonical swirl, higher = more chaotic",
+        default=1.0, min=0.0, max=10.0,
+        update=_make_hot_callback("proc_magic_distortion"),
+    )
+
+    # ── Stripes-specific parameters ─────────────────────────────────────
+    # Stripes are built from a Wave (BANDS, SAW profile) thresholded
+    # through a Map Range smoothstep — that lets the user dial both the
+    # width of the lit stripe and the sharpness of its edge.
+    proc_stripe_direction: EnumProperty(
+        name="Direction",
+        description="Axis along which stripes repeat",
+        items=[
+            ('X',        "X",        "Horizontal stripes (perpendicular to X)", 0),
+            ('Y',        "Y",        "Vertical stripes (perpendicular to Y)",   1),
+            ('DIAGONAL', "Diagonal", "Diagonal stripes",                        2),
+        ],
+        default='Y',
+        update=_on_layer_update,  # structural — direction changes the wave node
+    )
+    proc_stripe_width: FloatProperty(
+        name="Width",
+        description="Fraction of each stripe period that is the bright stripe — "
+                    "0 = no stripes, 0.5 = equal stripes, 1 = solid bright",
+        default=0.5, min=0.0, max=1.0, subtype='FACTOR',
+        update=_make_hot_callback("proc_stripe_width"),
+    )
+    proc_stripe_sharpness: FloatProperty(
+        name="Sharpness",
+        description="Edge hardness of the stripe — 0 = soft fade, 1 = perfectly sharp",
+        default=1.0, min=0.0, max=1.0, subtype='FACTOR',
+        update=_make_hot_callback("proc_stripe_sharpness"),
+    )
+
+    # ── Hex Grid–specific parameters ────────────────────────────────────
+    # Hex grid uses Voronoi(feature=DISTANCE_TO_EDGE) thresholded — true
+    # regular hexagons need a custom UV transform, but the Voronoi
+    # approximation gives a good honeycomb look with proc_randomness=0.
+    proc_hex_edge_width: FloatProperty(
+        name="Edge Width",
+        description="Width of the hex grid lines — 0 = no lines, 0.5 = thick lines",
+        default=0.05, min=0.0, max=0.5, subtype='FACTOR',
+        update=_make_hot_callback("proc_hex_edge_width"),
     )
 
     # Shared: scale, mapping offset/rotation

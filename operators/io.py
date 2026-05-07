@@ -130,6 +130,12 @@ def _layer_to_dict(layer):
         d["proc_detail"]           = round(layer.proc_detail, 4)
         d["proc_roughness_proc"]   = round(layer.proc_roughness_proc, 4)
         d["proc_distortion"]       = round(layer.proc_distortion, 4)
+        d["proc_magic_distortion"] = round(getattr(layer, 'proc_magic_distortion', 1.0), 4)
+        d["proc_magic_depth"]      = getattr(layer, 'proc_magic_depth', 2)
+        d["proc_stripe_direction"] = getattr(layer, 'proc_stripe_direction', 'Y')
+        d["proc_stripe_width"]     = round(getattr(layer, 'proc_stripe_width', 0.5), 4)
+        d["proc_stripe_sharpness"] = round(getattr(layer, 'proc_stripe_sharpness', 1.0), 4)
+        d["proc_hex_edge_width"]   = round(getattr(layer, 'proc_hex_edge_width', 0.05), 4)
         d["proc_lacunarity"]       = round(layer.proc_lacunarity, 4)
         d["proc_offset_x"]         = round(layer.proc_offset_x, 4)
         d["proc_offset_y"]         = round(layer.proc_offset_y, 4)
@@ -175,10 +181,6 @@ def _layer_to_dict(layer):
         d["adj_levels_gamma"] = round(layer.adj_levels_gamma, 4)
         d["adj_out_min"]     = round(layer.adj_out_min, 4)
         d["adj_out_max"]     = round(layer.adj_out_max, 4)
-        d["adj_curve_contrast"]    = round(layer.adj_curve_contrast, 4)
-        d["adj_curve_brightness"]  = round(layer.adj_curve_brightness, 4)
-        d["adj_curve_black_point"] = round(layer.adj_curve_black_point, 4)
-        d["adj_curve_white_point"] = round(layer.adj_curve_white_point, 4)
         d["adj_lift"]  = list(layer.adj_lift)
         d["adj_gamma"] = list(layer.adj_gamma)
         d["adj_gain"]  = list(layer.adj_gain)
@@ -322,6 +324,12 @@ def _dict_to_layer(d, tlm):
         layer.proc_detail           = d.get("proc_detail", 2.0)
         layer.proc_roughness_proc   = d.get("proc_roughness_proc", 0.5)
         layer.proc_distortion       = d.get("proc_distortion", 0.0)
+        layer.proc_magic_distortion = d.get("proc_magic_distortion", 1.0)
+        layer.proc_magic_depth      = d.get("proc_magic_depth", 2)
+        layer.proc_stripe_direction = d.get("proc_stripe_direction", "Y")
+        layer.proc_stripe_width     = d.get("proc_stripe_width", 0.5)
+        layer.proc_stripe_sharpness = d.get("proc_stripe_sharpness", 1.0)
+        layer.proc_hex_edge_width   = d.get("proc_hex_edge_width", 0.05)
         layer.proc_lacunarity       = d.get("proc_lacunarity", 2.0)
         layer.proc_offset_x         = d.get("proc_offset_x", 0.0)
         layer.proc_offset_y         = d.get("proc_offset_y", 0.0)
@@ -354,7 +362,12 @@ def _dict_to_layer(d, tlm):
         layer.reference_layer_name = d.get("reference_layer_name", "")
 
     elif layer.layer_type == "ADJUSTMENT":
-        layer.adj_type       = d.get("adj_type", "HUE_SAT")
+        # CURVES was removed in favour of LEVELS+BRIGHT_CONTRAST — remap
+        # legacy presets so they still load without an enum error.
+        adj_t = d.get("adj_type", "HUE_SAT")
+        if adj_t == "CURVES":
+            adj_t = "BRIGHT_CONTRAST"
+        layer.adj_type       = adj_t
         layer.adj_hue        = d.get("adj_hue", 0.5)
         layer.adj_saturation = d.get("adj_saturation", 1.0)
         layer.adj_value      = d.get("adj_value", 1.0)
@@ -366,10 +379,6 @@ def _dict_to_layer(d, tlm):
         layer.adj_levels_gamma = d.get("adj_levels_gamma", d.get("adj_gamma", 1.0))
         layer.adj_out_min    = d.get("adj_out_min", 0.0)
         layer.adj_out_max    = d.get("adj_out_max", 1.0)
-        layer.adj_curve_contrast    = d.get("adj_curve_contrast", 0.0)
-        layer.adj_curve_brightness  = d.get("adj_curve_brightness", 0.0)
-        layer.adj_curve_black_point = d.get("adj_curve_black_point", 0.0)
-        layer.adj_curve_white_point = d.get("adj_curve_white_point", 1.0)
         layer.adj_lift  = d.get("adj_lift", [1, 1, 1])
         layer.adj_gamma = d.get("adj_gamma", [1, 1, 1])
         layer.adj_gain  = d.get("adj_gain", [1, 1, 1])

@@ -544,6 +544,12 @@ class TLM_OT_ApplyPreset(Operator):
                 layer.proc_detail          = ld.get("proc_detail", 2.0)
                 layer.proc_roughness_proc  = ld.get("proc_roughness_proc", 0.5)
                 layer.proc_distortion      = ld.get("proc_distortion", 0.0)
+                layer.proc_magic_distortion = ld.get("proc_magic_distortion", 1.0)
+                layer.proc_magic_depth     = ld.get("proc_magic_depth", 2)
+                layer.proc_stripe_direction = ld.get("proc_stripe_direction", "Y")
+                layer.proc_stripe_width    = ld.get("proc_stripe_width", 0.5)
+                layer.proc_stripe_sharpness = ld.get("proc_stripe_sharpness", 1.0)
+                layer.proc_hex_edge_width  = ld.get("proc_hex_edge_width", 0.05)
                 layer.proc_lacunarity      = ld.get("proc_lacunarity", 2.0)
                 layer.proc_offset_x        = ld.get("proc_offset_x", 0.0)
                 layer.proc_offset_y        = ld.get("proc_offset_y", 0.0)
@@ -574,7 +580,12 @@ class TLM_OT_ApplyPreset(Operator):
             elif layer.layer_type == "REFERENCE":
                 layer.reference_layer_name = ld.get("reference_layer_name", "")
             elif layer.layer_type == "ADJUSTMENT":
-                layer.adj_type             = ld.get("adj_type", "HUE_SAT")
+                # CURVES was removed in favour of LEVELS+BRIGHT_CONTRAST —
+                # remap legacy presets so they still load without error.
+                adj_t = ld.get("adj_type", "HUE_SAT")
+                if adj_t == "CURVES":
+                    adj_t = "BRIGHT_CONTRAST"
+                layer.adj_type             = adj_t
                 layer.adj_hue              = ld.get("adj_hue", 0.5)
                 layer.adj_saturation       = ld.get("adj_saturation", 1.0)
                 layer.adj_value            = ld.get("adj_value", 1.0)
@@ -585,10 +596,6 @@ class TLM_OT_ApplyPreset(Operator):
                 layer.adj_levels_gamma     = ld.get("adj_levels_gamma", 1.0)
                 layer.adj_out_min          = ld.get("adj_out_min", 0.0)
                 layer.adj_out_max          = ld.get("adj_out_max", 1.0)
-                layer.adj_curve_contrast   = ld.get("adj_curve_contrast", 0.0)
-                layer.adj_curve_brightness = ld.get("adj_curve_brightness", 0.0)
-                layer.adj_curve_black_point = ld.get("adj_curve_black_point", 0.0)
-                layer.adj_curve_white_point = ld.get("adj_curve_white_point", 1.0)
                 layer.adj_lift  = ld.get("adj_lift", [1, 1, 1])
                 layer.adj_gamma = ld.get("adj_gamma", [1, 1, 1])
                 layer.adj_gain  = ld.get("adj_gain", [1, 1, 1])
@@ -736,6 +743,12 @@ class TLM_OT_SavePreset(Operator):
                     "proc_type": layer.proc_type, "proc_scale": layer.proc_scale,
                     "proc_color1": list(layer.proc_color1), "proc_color2": list(layer.proc_color2),
                     "proc_detail": layer.proc_detail, "proc_distortion": layer.proc_distortion,
+                    "proc_magic_distortion": getattr(layer, 'proc_magic_distortion', 1.0),
+                    "proc_magic_depth": getattr(layer, 'proc_magic_depth', 2),
+                    "proc_stripe_direction": getattr(layer, 'proc_stripe_direction', 'Y'),
+                    "proc_stripe_width": getattr(layer, 'proc_stripe_width', 0.5),
+                    "proc_stripe_sharpness": getattr(layer, 'proc_stripe_sharpness', 1.0),
+                    "proc_hex_edge_width": getattr(layer, 'proc_hex_edge_width', 0.05),
                     "proc_roughness_proc": layer.proc_roughness_proc,
                     "proc_lacunarity": layer.proc_lacunarity,
                     "proc_offset_x": layer.proc_offset_x,
@@ -778,10 +791,6 @@ class TLM_OT_SavePreset(Operator):
                     "adj_levels_gamma": layer.adj_levels_gamma,
                     "adj_out_min": layer.adj_out_min,
                     "adj_out_max": layer.adj_out_max,
-                    "adj_curve_contrast": layer.adj_curve_contrast,
-                    "adj_curve_brightness": layer.adj_curve_brightness,
-                    "adj_curve_black_point": layer.adj_curve_black_point,
-                    "adj_curve_white_point": layer.adj_curve_white_point,
                     "adj_lift": list(layer.adj_lift),
                     "adj_gamma": list(layer.adj_gamma),
                     "adj_gain": list(layer.adj_gain),

@@ -359,6 +359,7 @@ _PROC_INPUT_MAP = {
     "proc_detail": "Detail",
     "proc_roughness_proc": "Roughness",
     "proc_distortion": "Distortion",
+    "proc_magic_distortion": "Distortion",  # Magic-only override
     "proc_lacunarity": "Lacunarity",
     "proc_randomness": "Randomness",
     "proc_wave_detail_scale": "Detail Scale",
@@ -379,6 +380,11 @@ def _hot_opacity(node_tree, layer, prop_name):
             _factor_socket(node).default_value = layer.opacity
         else:
             node.inputs[idx].default_value = layer.opacity
+        found = True
+    # Adjustment HUE_SAT layers drive Fac from opacity — keep in sync.
+    hs = _find_tagged(node_tree, layer.name, "adj_hue_sat")
+    if hs and "Fac" in hs.inputs:
+        hs.inputs["Fac"].default_value = layer.opacity
         found = True
     return found
 
@@ -478,6 +484,40 @@ def _hot_proc_offset(node_tree, layer, prop_name):
     loc = (layer.proc_offset_x, layer.proc_offset_y, layer.proc_offset_z)
     for n in nodes:
         n.inputs["Location"].default_value = loc
+    return True
+
+
+def _hot_proc_stripe(node_tree, layer, prop_name):
+    """Update the Map Range smoothstep window driving STRIPES width/sharpness.
+
+    SAW wave fac runs 0→1 each period; the threshold below which fac is
+    "background" is (1 - width), so the bright stripe spans `width` of
+    the period (width=0.5 → equal stripes, width=1 → solid bright).
+    """
+    nodes = _find_all_tagged(node_tree, layer.name, "proc_stripe_mr")
+    if not nodes:
+        return False
+    width = layer.proc_stripe_width
+    sharpness = layer.proc_stripe_sharpness
+    threshold = 1.0 - width
+    edge = (1.0 - sharpness) * 0.4
+    fmin = max(0.0, threshold - edge)
+    fmax = min(1.0, threshold + edge + 1e-4)
+    for n in nodes:
+        n.inputs["From Min"].default_value = fmin
+        n.inputs["From Max"].default_value = fmax
+    return True
+
+
+def _hot_proc_hex(node_tree, layer, prop_name):
+    """Update the Map Range smoothstep window driving HEX_GRID edge width."""
+    nodes = _find_all_tagged(node_tree, layer.name, "proc_hex_mr")
+    if not nodes:
+        return False
+    edge_w = layer.proc_hex_edge_width
+    for n in nodes:
+        n.inputs["From Min"].default_value = max(0.0, edge_w - 0.005)
+        n.inputs["From Max"].default_value = min(1.0, edge_w + 0.005 + 1e-4)
     return True
 
 
@@ -582,27 +622,6 @@ def _hot_adj_cb(node_tree, layer, prop_name):
         gain.inputs["Color2"].default_value = (*layer.adj_gain, 1.0)
     g = layer.adj_gamma
     gamma.inputs["Gamma"].default_value = max(0.001, (g[0] + g[1] + g[2]) / 3.0)
-    return True
-
-
-def _hot_adj_curves(node_tree, layer, prop_name):
-    node = _find_tagged(node_tree, layer.name, "adj_curves")
-    if not node:
-        return False
-    curve = node.mapping.curves[3]
-    # Reset curve points to 2 (remove extras from contrast/brightness)
-    while len(curve.points) > 2:
-        curve.points.remove(curve.points[-1])
-    curve.points[0].location = (0.0, layer.adj_curve_black_point)
-    curve.points[1].location = (1.0, layer.adj_curve_white_point)
-    contrast = layer.adj_curve_contrast
-    brightness = layer.adj_curve_brightness
-    if abs(contrast) > 0.001 or abs(brightness) > 0.001:
-        shadow_y = max(0.0, min(1.0, 0.25 - contrast * 0.25 + brightness * 0.25))
-        highlight_y = max(0.0, min(1.0, 0.75 + contrast * 0.25 + brightness * 0.25))
-        curve.points.new(0.25, shadow_y)
-        curve.points.new(0.75, highlight_y)
-    node.mapping.update()
     return True
 
 
@@ -900,12 +919,16 @@ _HOT_DISPATCH = {
     "proc_detail": _hot_proc_tex_input,
     "proc_roughness_proc": _hot_proc_tex_input,
     "proc_distortion": _hot_proc_tex_input,
+    "proc_magic_distortion": _hot_proc_tex_input,
     "proc_lacunarity": _hot_proc_tex_input,
     "proc_randomness": _hot_proc_tex_input,
     "proc_wave_detail_scale": _hot_proc_tex_input,
     "proc_offset_x": _hot_proc_offset,
     "proc_offset_y": _hot_proc_offset,
     "proc_offset_z": _hot_proc_offset,
+    "proc_stripe_width":     _hot_proc_stripe,
+    "proc_stripe_sharpness": _hot_proc_stripe,
+    "proc_hex_edge_width":   _hot_proc_hex,
     "proc_color1": _hot_proc_color,
     "proc_color2": _hot_proc_color,
     "proc_color3": _hot_proc_color,
@@ -926,10 +949,6 @@ _HOT_DISPATCH = {
     "adj_lift": _hot_adj_cb,
     "adj_gamma": _hot_adj_cb,
     "adj_gain": _hot_adj_cb,
-    "adj_curve_contrast": _hot_adj_curves,
-    "adj_curve_brightness": _hot_adj_curves,
-    "adj_curve_black_point": _hot_adj_curves,
-    "adj_curve_white_point": _hot_adj_curves,
     "bump_strength": _hot_bump,
     "bump_distance": _hot_bump,
     "fresnel_ior": _hot_fresnel,
@@ -3086,10 +3105,14 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
     elif pt == 'MAGIC':
         # ShaderNodeTexMagic — kaleidoscopic colored swirl. depth
         # controls fractal iterations; distortion warps the swirls.
+        # Note: Magic uses its own dedicated proc_magic_distortion (not
+        # the shared proc_distortion) because the canonical "swirl" look
+        # needs distortion ≈ 1.0, while the shared default is 0.0 which
+        # produces flat vertical bands instead of swirls.
         tex_node = node_tree.nodes.new("ShaderNodeTexMagic")
         tex_node.turbulence_depth = layer.proc_magic_depth
         tex_node.inputs["Scale"].default_value      = layer.proc_scale
-        tex_node.inputs["Distortion"].default_value = layer.proc_distortion
+        tex_node.inputs["Distortion"].default_value = layer.proc_magic_distortion
         tex_node.name = f"{TLM_PREFIX}proc_tex_{_next_id()}"
         tex_node.location = (x - 100, y)
         _tag(tex_node, layer.name, "proc_tex")
@@ -3104,6 +3127,87 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
         tex_node = node_tree.nodes.new("ShaderNodeTexWhiteNoise")
         tex_node.noise_dimensions = '3D'
         fac_out = tex_node.outputs["Value"]
+
+    elif pt == 'STRIPES':
+        # Hard stripes = Wave(BANDS, SAW) thresholded by Map Range.
+        # SAW gives a clean 0→1 ramp per period; Map Range with a
+        # smoothstep around proc_stripe_width then makes a binary stripe
+        # whose edge softness is controlled by proc_stripe_sharpness.
+        wave = node_tree.nodes.new("ShaderNodeTexWave")
+        wave.wave_type = 'BANDS'
+        try:
+            wave.bands_direction = layer.proc_stripe_direction
+        except Exception:
+            wave.bands_direction = 'Y'
+        try:
+            wave.wave_profile = 'SAW'
+        except Exception:
+            pass
+        wave.inputs["Scale"].default_value      = layer.proc_scale
+        wave.inputs["Distortion"].default_value = 0.0
+        wave.inputs["Detail"].default_value     = 0.0
+
+        mr = node_tree.nodes.new("ShaderNodeMapRange")
+        mr.interpolation_type = 'SMOOTHSTEP'
+        mr.clamp = True
+        width = layer.proc_stripe_width
+        sharpness = layer.proc_stripe_sharpness
+        # threshold = (1 - width): SAW fac > threshold becomes the bright
+        # stripe so width=0 → no stripe, width=1 → solid.
+        threshold = 1.0 - width
+        # edge half-width: 0 at full sharpness, 0.4 at zero sharpness
+        edge = (1.0 - sharpness) * 0.4
+        mr.inputs["From Min"].default_value = max(0.0, threshold - edge)
+        mr.inputs["From Max"].default_value = min(1.0, threshold + edge + 1e-4)
+        mr.inputs["To Min"].default_value   = 0.0
+        mr.inputs["To Max"].default_value   = 1.0
+        mr.location = (x + 50, y)
+        mr.name = f"{TLM_PREFIX}proc_stripe_mr_{_next_id()}"
+        _tag(mr, layer.name, "proc_stripe_mr")
+        node_tree.links.new(wave.outputs["Fac"], mr.inputs["Value"])
+
+        tex_node = wave  # vec_out → wave.Vector via fall-through
+        fac_out = mr.outputs["Result"]
+
+    elif pt == 'HEX_GRID':
+        # Honeycomb = Voronoi(DISTANCE_TO_EDGE) thresholded.
+        # DISTANCE_TO_EDGE returns 0 right on a cell boundary and rises
+        # toward each cell's centre, so a Map Range that promotes the
+        # low-distance band gives us the grid lines.
+        # NOTE: true regular hexagons need a custom UV transform; with
+        # proc_randomness=0 the Voronoi cells form a passable honeycomb,
+        # higher values give Voronoi-style irregular cells.
+        vor = node_tree.nodes.new("ShaderNodeTexVoronoi")
+        try:
+            vor.feature = 'DISTANCE_TO_EDGE'
+        except Exception:
+            pass
+        try:
+            vor.voronoi_dimensions = '3D'
+        except Exception:
+            pass
+        vor.inputs["Scale"].default_value      = layer.proc_scale
+        if "Randomness" in vor.inputs:
+            vor.inputs["Randomness"].default_value = layer.proc_randomness
+
+        mr = node_tree.nodes.new("ShaderNodeMapRange")
+        mr.interpolation_type = 'SMOOTHSTEP'
+        mr.clamp = True
+        edge_w = layer.proc_hex_edge_width
+        # Smoothstep from edge_w-eps (still on the line) to edge_w+eps
+        # (already inside the cell). To Min=1, To Max=0 inverts: edges
+        # become bright (color2) and cells become dark (color1).
+        mr.inputs["From Min"].default_value = max(0.0, edge_w - 0.005)
+        mr.inputs["From Max"].default_value = min(1.0, edge_w + 0.005 + 1e-4)
+        mr.inputs["To Min"].default_value   = 1.0
+        mr.inputs["To Max"].default_value   = 0.0
+        mr.location = (x + 50, y)
+        mr.name = f"{TLM_PREFIX}proc_hex_mr_{_next_id()}"
+        _tag(mr, layer.name, "proc_hex_mr")
+        node_tree.links.new(vor.outputs["Distance"], mr.inputs["Value"])
+
+        tex_node = vor  # vec_out → vor.Vector via fall-through
+        fac_out = mr.outputs["Result"]
 
     elif pt == 'MARBLE':
         # Marble = Wave base + Noise turbulence on phase
@@ -3223,7 +3327,10 @@ def _apply_adjustment(node_tree, layer, current_output, x, y):
         node.inputs["Hue"].default_value        = layer.adj_hue
         node.inputs["Saturation"].default_value = layer.adj_saturation
         node.inputs["Value"].default_value      = layer.adj_value
-        node.inputs["Fac"].default_value        = 1.0
+        # Fac is the adjustment-mix factor: 0 = bypass, 1 = full effect.
+        # Driving it from layer.opacity makes the slider behave as
+        # "strength" for adjustment layers.
+        node.inputs["Fac"].default_value        = layer.opacity
         node_tree.links.new(current_output, node.inputs["Color"])
         return node.outputs["Color"]
 
@@ -3347,34 +3454,6 @@ def _apply_adjustment(node_tree, layer, current_output, x, y):
             gain_node.inputs["Color2"].default_value = (*layer.adj_gain, 1.0)
             node_tree.links.new(gamma_node.outputs["Color"], gain_node.inputs["Color1"])
             return gain_node.outputs["Color"]
-
-    elif adj == 'CURVES':
-        node = node_tree.nodes.new("ShaderNodeRGBCurve")
-        node.name = f"{TLM_PREFIX}adj_curves_{_next_id()}"
-        node.label = "Curves"
-        node.location = (x, y)
-        _tag(node, layer.name, "adj_curves")
-        node.inputs["Fac"].default_value = 1.0
-        node_tree.links.new(current_output, node.inputs["Color"])
-
-        # Manipulate the combined (C) curve — index 3
-        curve = node.mapping.curves[3]
-        # Default has 2 points: (0,0) and (1,1)
-        p0 = curve.points[0]
-        p1 = curve.points[1]
-        p0.location = (0.0, layer.adj_curve_black_point)
-        p1.location = (1.0, layer.adj_curve_white_point)
-
-        contrast = layer.adj_curve_contrast
-        brightness = layer.adj_curve_brightness
-        if abs(contrast) > 0.001 or abs(brightness) > 0.001:
-            shadow_y = max(0.0, min(1.0, 0.25 - contrast * 0.25 + brightness * 0.25))
-            highlight_y = max(0.0, min(1.0, 0.75 + contrast * 0.25 + brightness * 0.25))
-            curve.points.new(0.25, shadow_y)
-            curve.points.new(0.75, highlight_y)
-
-        node.mapping.update()
-        return node.outputs["Color"]
 
     return current_output
 
@@ -4021,7 +4100,7 @@ def _build_proc_fac_node(node_tree, layer, name_suffix, x, y, uv_map="UVMap"):
         tex = node_tree.nodes.new("ShaderNodeTexMagic")
         tex.turbulence_depth = layer.proc_magic_depth
         tex.inputs["Scale"].default_value      = layer.proc_scale
-        tex.inputs["Distortion"].default_value = layer.proc_distortion
+        tex.inputs["Distortion"].default_value = layer.proc_magic_distortion
         node_tree.links.new(vec_out, tex.inputs["Vector"])
         fac_out = tex.outputs.get("Fac") or tex.outputs[0]
 
@@ -4030,6 +4109,77 @@ def _build_proc_fac_node(node_tree, layer, name_suffix, x, y, uv_map="UVMap"):
         tex.noise_dimensions = '3D'
         node_tree.links.new(vec_out, tex.inputs["Vector"])
         fac_out = tex.outputs["Value"]
+
+    elif pt == 'STRIPES':
+        # Mirror of the STRIPES path in _build_procedural_node — Wave
+        # SAW thresholded by Map Range smoothstep.
+        wave = node_tree.nodes.new("ShaderNodeTexWave")
+        wave.wave_type = 'BANDS'
+        try:
+            wave.bands_direction = layer.proc_stripe_direction
+        except Exception:
+            wave.bands_direction = 'Y'
+        try:
+            wave.wave_profile = 'SAW'
+        except Exception:
+            pass
+        wave.name = f"{TLM_PREFIX}pfac_stripe_wave_{name_suffix}"
+        wave.location = (x - 100, y)
+        wave.inputs["Scale"].default_value      = layer.proc_scale
+        wave.inputs["Distortion"].default_value = 0.0
+        wave.inputs["Detail"].default_value     = 0.0
+        _tag(wave, layer.name, "proc_tex")
+        node_tree.links.new(vec_out, wave.inputs["Vector"])
+
+        mr = node_tree.nodes.new("ShaderNodeMapRange")
+        mr.interpolation_type = 'SMOOTHSTEP'
+        mr.clamp = True
+        width = layer.proc_stripe_width
+        sharpness = layer.proc_stripe_sharpness
+        threshold = 1.0 - width
+        edge = (1.0 - sharpness) * 0.4
+        mr.inputs["From Min"].default_value = max(0.0, threshold - edge)
+        mr.inputs["From Max"].default_value = min(1.0, threshold + edge + 1e-4)
+        mr.inputs["To Min"].default_value   = 0.0
+        mr.inputs["To Max"].default_value   = 1.0
+        mr.name = f"{TLM_PREFIX}pfac_stripe_mr_{name_suffix}"
+        mr.location = (x + 50, y)
+        _tag(mr, layer.name, "proc_stripe_mr")
+        node_tree.links.new(wave.outputs["Fac"], mr.inputs["Value"])
+        return mr.outputs["Result"]
+
+    elif pt == 'HEX_GRID':
+        # Mirror of the HEX_GRID path in _build_procedural_node.
+        vor = node_tree.nodes.new("ShaderNodeTexVoronoi")
+        try:
+            vor.feature = 'DISTANCE_TO_EDGE'
+        except Exception:
+            pass
+        try:
+            vor.voronoi_dimensions = '3D'
+        except Exception:
+            pass
+        vor.name = f"{TLM_PREFIX}pfac_hex_vor_{name_suffix}"
+        vor.location = (x - 100, y)
+        vor.inputs["Scale"].default_value = layer.proc_scale
+        if "Randomness" in vor.inputs:
+            vor.inputs["Randomness"].default_value = layer.proc_randomness
+        _tag(vor, layer.name, "proc_tex")
+        node_tree.links.new(vec_out, vor.inputs["Vector"])
+
+        mr = node_tree.nodes.new("ShaderNodeMapRange")
+        mr.interpolation_type = 'SMOOTHSTEP'
+        mr.clamp = True
+        edge_w = layer.proc_hex_edge_width
+        mr.inputs["From Min"].default_value = max(0.0, edge_w - 0.005)
+        mr.inputs["From Max"].default_value = min(1.0, edge_w + 0.005 + 1e-4)
+        mr.inputs["To Min"].default_value   = 1.0
+        mr.inputs["To Max"].default_value   = 0.0
+        mr.name = f"{TLM_PREFIX}pfac_hex_mr_{name_suffix}"
+        mr.location = (x + 50, y)
+        _tag(mr, layer.name, "proc_hex_mr")
+        node_tree.links.new(vor.outputs["Distance"], mr.inputs["Value"])
+        return mr.outputs["Result"]
 
     elif pt == 'GRADIENT':
         tex = node_tree.nodes.new("ShaderNodeTexGradient")
