@@ -493,6 +493,9 @@ def _hot_proc_stripe(node_tree, layer, prop_name):
     SAW wave fac runs 0→1 each period; the threshold below which fac is
     "background" is (1 - width), so the bright stripe spans `width` of
     the period (width=0.5 → equal stripes, width=1 → solid bright).
+
+    Also syncs the inner Map Range (proc_stripe_mr_inner) when 3-colour
+    mode is on, so the core stripe stays consistent with the main one.
     """
     nodes = _find_all_tagged(node_tree, layer.name, "proc_stripe_mr")
     if not nodes:
@@ -506,11 +509,25 @@ def _hot_proc_stripe(node_tree, layer, prop_name):
     for n in nodes:
         n.inputs["From Min"].default_value = fmin
         n.inputs["From Max"].default_value = fmax
+    # Inner stripe (only present when use_proc_color3 is on)
+    inner_nodes = _find_all_tagged(node_tree, layer.name, "proc_stripe_mr_inner")
+    if inner_nodes:
+        core_frac = max(0.001, layer.proc_color3_position)
+        inner_threshold = 1.0 - width * core_frac
+        i_fmin = max(0.0, inner_threshold - edge)
+        i_fmax = min(1.0, inner_threshold + edge + 1e-4)
+        for n in inner_nodes:
+            n.inputs["From Min"].default_value = i_fmin
+            n.inputs["From Max"].default_value = i_fmax
     return True
 
 
 def _hot_proc_hex(node_tree, layer, prop_name):
-    """Update the Map Range smoothstep window driving HEX_GRID edge width."""
+    """Update the Map Range smoothstep window driving HEX_GRID edge width.
+
+    Also syncs the inner Map Range (proc_hex_mr_inner) when 3-colour
+    mode is on, so the core line stays consistent with the main edge.
+    """
     nodes = _find_all_tagged(node_tree, layer.name, "proc_hex_mr")
     if not nodes:
         return False
@@ -518,30 +535,86 @@ def _hot_proc_hex(node_tree, layer, prop_name):
     for n in nodes:
         n.inputs["From Min"].default_value = max(0.0, edge_w - 0.005)
         n.inputs["From Max"].default_value = min(1.0, edge_w + 0.005 + 1e-4)
+    # Inner edge (only present when use_proc_color3 is on)
+    inner_nodes = _find_all_tagged(node_tree, layer.name, "proc_hex_mr_inner")
+    if inner_nodes:
+        core_frac = max(0.001, layer.proc_color3_position)
+        inner_w = edge_w * core_frac
+        i_fmin = max(0.0, inner_w - 0.005)
+        i_fmax = min(1.0, inner_w + 0.005 + 1e-4)
+        for n in inner_nodes:
+            n.inputs["From Min"].default_value = i_fmin
+            n.inputs["From Max"].default_value = i_fmax
     return True
 
 
 def _hot_proc_color(node_tree, layer, prop_name):
     nodes = _find_all_tagged(node_tree, layer.name, "proc_cr")
-    if not nodes:
+    if nodes:
+        for cr in nodes:
+            elems = cr.color_ramp.elements
+            contrast = getattr(layer, 'proc_contrast', 0.5)
+            # Contrast is hidden in the UI for GRADIENT — force default so a
+            # leftover value from a previous proc_type doesn't bite the ramp.
+            if layer.proc_type == 'GRADIENT':
+                contrast = 0.5
+            half = contrast * 0.49
+            elems[0].position = half
+            elems[0].color = layer.proc_color1
+            elems[1].position = 1.0 - half
+            elems[1].color = layer.proc_color2
+            if getattr(layer, 'use_proc_color3', False) and len(elems) >= 3:
+                elems[2].position = layer.proc_color3_position
+                elems[2].color = layer.proc_color3
+            elif getattr(layer, 'use_proc_color3', False) and len(elems) < 3:
+                return False  # element count mismatch — need rebuild
+        return True
+
+    # ── Mix-topology path (STRIPES / HEX_GRID) ────────────────────────────
+    # These procs produce a binary fac so they bypass ColorRamp and
+    # store their colours on dedicated Mix nodes. proc_color3_position
+    # here means "core fraction" (0..1) of the inner stripe/edge.
+    mix_main = _find_tagged(node_tree, layer.name, "proc_cmix_main")
+    if not mix_main:
+        return False  # nothing to update — fall back to rebuild
+
+    has_color3 = getattr(layer, 'use_proc_color3', False)
+    mix_inner = _find_tagged(node_tree, layer.name, "proc_cmix_inner")
+    # Topology mismatch — let _on_layer_update do a full rebuild.
+    if has_color3 and not mix_inner:
         return False
-    for cr in nodes:
-        elems = cr.color_ramp.elements
-        contrast = getattr(layer, 'proc_contrast', 0.5)
-        # Contrast is hidden in the UI for GRADIENT — force default so a
-        # leftover value from a previous proc_type doesn't bite the ramp.
-        if layer.proc_type == 'GRADIENT':
-            contrast = 0.5
-        half = contrast * 0.49
-        elems[0].position = half
-        elems[0].color = layer.proc_color1
-        elems[1].position = 1.0 - half
-        elems[1].color = layer.proc_color2
-        if getattr(layer, 'use_proc_color3', False) and len(elems) >= 3:
-            elems[2].position = layer.proc_color3_position
-            elems[2].color = layer.proc_color3
-        elif getattr(layer, 'use_proc_color3', False) and len(elems) < 3:
-            return False  # element count mismatch — need rebuild
+    if not has_color3 and mix_inner:
+        return False
+
+    if has_color3:
+        # main: A=color1, B=inner.Result; inner: A=color2, B=color3
+        _a_socket(mix_main).default_value  = layer.proc_color1
+        _a_socket(mix_inner).default_value = layer.proc_color2
+        _b_socket(mix_inner).default_value = layer.proc_color3
+        # When proc_color3_position changes, re-thread the inner Map Range.
+        if prop_name == "proc_color3_position":
+            core_frac = max(0.001, layer.proc_color3_position)
+            if layer.proc_type == 'STRIPES':
+                width = layer.proc_stripe_width
+                sharpness = layer.proc_stripe_sharpness
+                edge = (1.0 - sharpness) * 0.4
+                inner_threshold = 1.0 - width * core_frac
+                fmin = max(0.0, inner_threshold - edge)
+                fmax = min(1.0, inner_threshold + edge + 1e-4)
+                for n in _find_all_tagged(node_tree, layer.name, "proc_stripe_mr_inner"):
+                    n.inputs["From Min"].default_value = fmin
+                    n.inputs["From Max"].default_value = fmax
+            elif layer.proc_type == 'HEX_GRID':
+                edge_w = layer.proc_hex_edge_width
+                inner_w = edge_w * core_frac
+                fmin = max(0.0, inner_w - 0.005)
+                fmax = min(1.0, inner_w + 0.005 + 1e-4)
+                for n in _find_all_tagged(node_tree, layer.name, "proc_hex_mr_inner"):
+                    n.inputs["From Min"].default_value = fmin
+                    n.inputs["From Max"].default_value = fmax
+    else:
+        _a_socket(mix_main).default_value = layer.proc_color1
+        _b_socket(mix_main).default_value = layer.proc_color2
     return True
 
 
@@ -3133,6 +3206,13 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
         # SAW gives a clean 0→1 ramp per period; Map Range with a
         # smoothstep around proc_stripe_width then makes a binary stripe
         # whose edge softness is controlled by proc_stripe_sharpness.
+        #
+        # The standard ColorRamp fall-through doesn't work here because
+        # the resulting fac is binary (0 or 1) and a 3-stop ColorRamp
+        # never samples its middle stop. Instead we build a Mix-node
+        # topology that genuinely uses Color3 as a "core" colour inside
+        # each stripe, with proc_color3_position controlling the core
+        # fraction within the stripe.
         wave = node_tree.nodes.new("ShaderNodeTexWave")
         wave.wave_type = 'BANDS'
         try:
@@ -3146,17 +3226,19 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
         wave.inputs["Scale"].default_value      = layer.proc_scale
         wave.inputs["Distortion"].default_value = 0.0
         wave.inputs["Detail"].default_value     = 0.0
+        wave.name = f"{TLM_PREFIX}proc_tex_{_next_id()}"
+        wave.location = (x - 100, y)
+        _tag(wave, layer.name, "proc_tex")
+        node_tree.links.new(vec_out, wave.inputs["Vector"])
+
+        width = layer.proc_stripe_width
+        sharpness = layer.proc_stripe_sharpness
+        threshold = 1.0 - width
+        edge = (1.0 - sharpness) * 0.4
 
         mr = node_tree.nodes.new("ShaderNodeMapRange")
         mr.interpolation_type = 'SMOOTHSTEP'
         mr.clamp = True
-        width = layer.proc_stripe_width
-        sharpness = layer.proc_stripe_sharpness
-        # threshold = (1 - width): SAW fac > threshold becomes the bright
-        # stripe so width=0 → no stripe, width=1 → solid.
-        threshold = 1.0 - width
-        # edge half-width: 0 at full sharpness, 0.4 at zero sharpness
-        edge = (1.0 - sharpness) * 0.4
         mr.inputs["From Min"].default_value = max(0.0, threshold - edge)
         mr.inputs["From Max"].default_value = min(1.0, threshold + edge + 1e-4)
         mr.inputs["To Min"].default_value   = 0.0
@@ -3166,8 +3248,60 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
         _tag(mr, layer.name, "proc_stripe_mr")
         node_tree.links.new(wave.outputs["Fac"], mr.inputs["Value"])
 
-        tex_node = wave  # vec_out → wave.Vector via fall-through
-        fac_out = mr.outputs["Result"]
+        if getattr(layer, 'use_proc_color3', False):
+            # Inner core stripe — narrower than the main stripe by
+            # `proc_color3_position` (0 = no core, 1 = core fills stripe).
+            core_frac = max(0.001, layer.proc_color3_position)
+            inner_threshold = 1.0 - width * core_frac
+            mr_inner = node_tree.nodes.new("ShaderNodeMapRange")
+            mr_inner.interpolation_type = 'SMOOTHSTEP'
+            mr_inner.clamp = True
+            mr_inner.inputs["From Min"].default_value = max(0.0, inner_threshold - edge)
+            mr_inner.inputs["From Max"].default_value = min(1.0, inner_threshold + edge + 1e-4)
+            mr_inner.inputs["To Min"].default_value   = 0.0
+            mr_inner.inputs["To Max"].default_value   = 1.0
+            mr_inner.location = (x + 50, y - 100)
+            mr_inner.name = f"{TLM_PREFIX}proc_stripe_mri_{_next_id()}"
+            _tag(mr_inner, layer.name, "proc_stripe_mr_inner")
+            node_tree.links.new(wave.outputs["Fac"], mr_inner.inputs["Value"])
+
+            # mix_inner: A=color2 (halo), B=color3 (core), factor=inner_fac
+            mix_inner = node_tree.nodes.new("ShaderNodeMix")
+            mix_inner.data_type = 'RGBA'
+            mix_inner.blend_type = 'MIX'
+            mix_inner.location = (x + 250, y - 100)
+            _factor_socket(mix_inner).default_value = 0.0
+            _a_socket(mix_inner).default_value = layer.proc_color2
+            _b_socket(mix_inner).default_value = layer.proc_color3
+            mix_inner.name = f"{TLM_PREFIX}proc_cmix_inner_{_next_id()}"
+            _tag(mix_inner, layer.name, "proc_cmix_inner")
+            node_tree.links.new(mr_inner.outputs["Result"], _factor_socket(mix_inner))
+
+            # mix_main: A=color1 (bg), B=inner.Result, factor=main_fac
+            mix_main = node_tree.nodes.new("ShaderNodeMix")
+            mix_main.data_type = 'RGBA'
+            mix_main.blend_type = 'MIX'
+            mix_main.location = (x + 450, y)
+            _factor_socket(mix_main).default_value = 0.0
+            _a_socket(mix_main).default_value = layer.proc_color1
+            mix_main.name = f"{TLM_PREFIX}proc_cmix_main_{_next_id()}"
+            _tag(mix_main, layer.name, "proc_cmix_main")
+            node_tree.links.new(mr.outputs["Result"], _factor_socket(mix_main))
+            node_tree.links.new(_result_socket(mix_inner), _b_socket(mix_main))
+            return _result_socket(mix_main), None
+
+        # 2-colour path: simple Mix(color1, color2) by main fac
+        mix_main = node_tree.nodes.new("ShaderNodeMix")
+        mix_main.data_type = 'RGBA'
+        mix_main.blend_type = 'MIX'
+        mix_main.location = (x + 250, y)
+        _factor_socket(mix_main).default_value = 0.0
+        _a_socket(mix_main).default_value = layer.proc_color1
+        _b_socket(mix_main).default_value = layer.proc_color2
+        mix_main.name = f"{TLM_PREFIX}proc_cmix_main_{_next_id()}"
+        _tag(mix_main, layer.name, "proc_cmix_main")
+        node_tree.links.new(mr.outputs["Result"], _factor_socket(mix_main))
+        return _result_socket(mix_main), None
 
     elif pt == 'HEX_GRID':
         # Honeycomb = Voronoi(DISTANCE_TO_EDGE) thresholded.
@@ -3177,6 +3311,11 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
         # NOTE: true regular hexagons need a custom UV transform; with
         # proc_randomness=0 the Voronoi cells form a passable honeycomb,
         # higher values give Voronoi-style irregular cells.
+        #
+        # Same Mix-topology trick as STRIPES: the binary fac defeats a
+        # 3-stop ColorRamp, so we build dedicated Mix nodes instead.
+        # When use_proc_color3 is on, proc_color3_position controls how
+        # much of the edge band is the inner "core" colour.
         vor = node_tree.nodes.new("ShaderNodeTexVoronoi")
         try:
             vor.feature = 'DISTANCE_TO_EDGE'
@@ -3189,14 +3328,16 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
         vor.inputs["Scale"].default_value      = layer.proc_scale
         if "Randomness" in vor.inputs:
             vor.inputs["Randomness"].default_value = layer.proc_randomness
+        vor.name = f"{TLM_PREFIX}proc_tex_{_next_id()}"
+        vor.location = (x - 100, y)
+        _tag(vor, layer.name, "proc_tex")
+        node_tree.links.new(vec_out, vor.inputs["Vector"])
 
+        edge_w = layer.proc_hex_edge_width
         mr = node_tree.nodes.new("ShaderNodeMapRange")
         mr.interpolation_type = 'SMOOTHSTEP'
         mr.clamp = True
-        edge_w = layer.proc_hex_edge_width
-        # Smoothstep from edge_w-eps (still on the line) to edge_w+eps
-        # (already inside the cell). To Min=1, To Max=0 inverts: edges
-        # become bright (color2) and cells become dark (color1).
+        # main fac: 1 inside the edge band (distance < edge_w), 0 in cell
         mr.inputs["From Min"].default_value = max(0.0, edge_w - 0.005)
         mr.inputs["From Max"].default_value = min(1.0, edge_w + 0.005 + 1e-4)
         mr.inputs["To Min"].default_value   = 1.0
@@ -3206,8 +3347,59 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
         _tag(mr, layer.name, "proc_hex_mr")
         node_tree.links.new(vor.outputs["Distance"], mr.inputs["Value"])
 
-        tex_node = vor  # vec_out → vor.Vector via fall-through
-        fac_out = mr.outputs["Result"]
+        if getattr(layer, 'use_proc_color3', False):
+            core_frac = max(0.001, layer.proc_color3_position)
+            inner_w = edge_w * core_frac
+            mr_inner = node_tree.nodes.new("ShaderNodeMapRange")
+            mr_inner.interpolation_type = 'SMOOTHSTEP'
+            mr_inner.clamp = True
+            # inner fac: 1 in the deepest part of the edge (distance < inner_w)
+            mr_inner.inputs["From Min"].default_value = max(0.0, inner_w - 0.005)
+            mr_inner.inputs["From Max"].default_value = min(1.0, inner_w + 0.005 + 1e-4)
+            mr_inner.inputs["To Min"].default_value   = 1.0
+            mr_inner.inputs["To Max"].default_value   = 0.0
+            mr_inner.location = (x + 50, y - 100)
+            mr_inner.name = f"{TLM_PREFIX}proc_hex_mri_{_next_id()}"
+            _tag(mr_inner, layer.name, "proc_hex_mr_inner")
+            node_tree.links.new(vor.outputs["Distance"], mr_inner.inputs["Value"])
+
+            # mix_inner: A=color2 (halo), B=color3 (core), factor=inner_fac
+            mix_inner = node_tree.nodes.new("ShaderNodeMix")
+            mix_inner.data_type = 'RGBA'
+            mix_inner.blend_type = 'MIX'
+            mix_inner.location = (x + 250, y - 100)
+            _factor_socket(mix_inner).default_value = 0.0
+            _a_socket(mix_inner).default_value = layer.proc_color2
+            _b_socket(mix_inner).default_value = layer.proc_color3
+            mix_inner.name = f"{TLM_PREFIX}proc_cmix_inner_{_next_id()}"
+            _tag(mix_inner, layer.name, "proc_cmix_inner")
+            node_tree.links.new(mr_inner.outputs["Result"], _factor_socket(mix_inner))
+
+            # mix_main: A=color1 (cell), B=inner.Result, factor=main_fac
+            mix_main = node_tree.nodes.new("ShaderNodeMix")
+            mix_main.data_type = 'RGBA'
+            mix_main.blend_type = 'MIX'
+            mix_main.location = (x + 450, y)
+            _factor_socket(mix_main).default_value = 0.0
+            _a_socket(mix_main).default_value = layer.proc_color1
+            mix_main.name = f"{TLM_PREFIX}proc_cmix_main_{_next_id()}"
+            _tag(mix_main, layer.name, "proc_cmix_main")
+            node_tree.links.new(mr.outputs["Result"], _factor_socket(mix_main))
+            node_tree.links.new(_result_socket(mix_inner), _b_socket(mix_main))
+            return _result_socket(mix_main), None
+
+        # 2-colour path
+        mix_main = node_tree.nodes.new("ShaderNodeMix")
+        mix_main.data_type = 'RGBA'
+        mix_main.blend_type = 'MIX'
+        mix_main.location = (x + 250, y)
+        _factor_socket(mix_main).default_value = 0.0
+        _a_socket(mix_main).default_value = layer.proc_color1
+        _b_socket(mix_main).default_value = layer.proc_color2
+        mix_main.name = f"{TLM_PREFIX}proc_cmix_main_{_next_id()}"
+        _tag(mix_main, layer.name, "proc_cmix_main")
+        node_tree.links.new(mr.outputs["Result"], _factor_socket(mix_main))
+        return _result_socket(mix_main), None
 
     elif pt == 'MARBLE':
         # Marble = Wave base + Noise turbulence on phase

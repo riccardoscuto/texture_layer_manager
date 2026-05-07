@@ -1088,7 +1088,12 @@ class TLM_LayerItem(PropertyGroup):
     )
     proc_color3_position: FloatProperty(
         name="Color 3 Pos",
-        description="Position of the third color stop (0 = at Color1, 1 = at Color2)",
+        description=(
+            "Position of the third colour stop. "
+            "Most procedurals: 0 = at Color1, 1 = at Color2. "
+            "Stripes / Hex Grid: fraction of the stripe / edge that is "
+            "the inner core colour (0 = no core, 1 = core fills the stripe)"
+        ),
         default=0.5, min=0.01, max=0.99, subtype='FACTOR',
         update=_make_hot_callback("proc_color3_position"),
     )
