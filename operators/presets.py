@@ -663,6 +663,12 @@ class TLM_OT_ApplyPreset(Operator):
                 if layer.use_emission:
                     layer.emission_color    = ld.get("emission_color", [1,1,1,1])
                     layer.emission_strength = ld.get("emission_strength", 1.0)
+                # Selective emission
+                layer.emission_selector_type       = ld.get("emission_selector_type", "NONE")
+                layer.emission_selector_scale      = ld.get("emission_selector_scale", 4.0)
+                layer.emission_selector_threshold  = ld.get("emission_selector_threshold", 0.3)
+                layer.emission_selector_seed       = ld.get("emission_selector_seed", 0.0)
+                layer.emission_selector_image_name = ld.get("emission_selector_image_name", "")
                 layer.use_transmission        = ld.get("use_transmission", False)
                 layer.transmission_fill       = ld.get("transmission_fill", 0.0)
                 layer.transmission_image_name = ld.get("transmission_image_name", "")
@@ -860,6 +866,12 @@ class TLM_OT_SavePreset(Operator):
                 if getattr(layer, 'use_emission', False):
                     d["emission_color"]    = list(layer.emission_color)
                     d["emission_strength"] = layer.emission_strength
+                # Selective emission
+                d["emission_selector_type"]       = getattr(layer, 'emission_selector_type', 'NONE')
+                d["emission_selector_scale"]      = getattr(layer, 'emission_selector_scale', 4.0)
+                d["emission_selector_threshold"]  = getattr(layer, 'emission_selector_threshold', 0.3)
+                d["emission_selector_seed"]       = getattr(layer, 'emission_selector_seed', 0.0)
+                d["emission_selector_image_name"] = getattr(layer, 'emission_selector_image_name', "")
                 d["use_transmission"]        = getattr(layer, 'use_transmission', False)
                 d["transmission_fill"]       = getattr(layer, 'transmission_fill', 0.0)
                 d["transmission_image_name"] = getattr(layer, 'transmission_image_name', "")

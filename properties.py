@@ -1432,6 +1432,65 @@ class TLM_LayerItem(PropertyGroup):
         update=_on_layer_update,
     )
 
+    # ── Selective emission ────────────────────────────────────────────────────
+    # The procedural emission pipeline (proc fac → invert → power →
+    # smoothstep → emission_color) lights up EVERY pixel where the
+    # procedural's fac says so. For sci-fi panel use cases the artist
+    # usually wants only SOME regions to glow (e.g. a random subset of
+    # cells, or a hand-painted area), not the entire pattern.
+    #
+    # The selector is a secondary 0..1 mask multiplied into the emission
+    # mask AFTER the smoothstep but BEFORE the emission_color mix, so
+    # the original procedural threshold/falloff still shape the glow,
+    # while the selector decides WHERE the glow is allowed at all.
+    emission_selector_type: EnumProperty(
+        name="Selective Emission",
+        description="Gate the procedural emission to a subset of regions. "
+                    "None = the whole procedural pattern glows (current "
+                    "behaviour); other modes restrict the glow to a subset",
+        items=[
+            ('NONE',         "None",         "Uniform — every fac-positive pixel glows"),
+            ('RANDOM_CELLS', "Random Cells", "Voronoi-cell based: only some cells glow, "
+                                              "controlled by selector_threshold (=fraction lit). "
+                                              "Best for circuit-board / panel-grid effects"),
+            ('NOISE',        "Noise",        "Soft organic blobs — glows where a Perlin noise "
+                                              "is above selector_threshold"),
+            ('IMAGE',        "Image",        "Use a painted black/white image as the selector. "
+                                              "White = lit, Black = unlit"),
+        ],
+        default='NONE',
+        update=_on_layer_update,
+    )
+    emission_selector_scale: FloatProperty(
+        name="Selector Scale",
+        description="Scale of the selector pattern (cells per unit for "
+                    "RANDOM_CELLS, noise frequency for NOISE)",
+        default=4.0, min=0.1, max=200.0,
+        update=_make_hot_callback("emission_selector_scale"),
+    )
+    emission_selector_threshold: FloatProperty(
+        name="Selector Threshold",
+        description="Fraction of the surface allowed to emit. "
+                    "0 = nothing lit, 0.5 = half, 1 = everywhere lit "
+                    "(equivalent to selector type = None)",
+        default=0.3, min=0.0, max=1.0, subtype='FACTOR',
+        update=_make_hot_callback("emission_selector_threshold"),
+    )
+    emission_selector_seed: FloatProperty(
+        name="Selector Seed",
+        description="Randomization seed — change to get a different "
+                    "subset of glowing regions without altering anything else",
+        default=0.0,
+        update=_make_hot_callback("emission_selector_seed"),
+    )
+    emission_selector_image_name: StringProperty(
+        name="Selector Image",
+        description="Image datablock used as the selective-emission mask "
+                    "(only when emission_selector_type = IMAGE). White = lit",
+        default="",
+        update=_on_layer_update,
+    )
+
     # Fresnel mask — edge glow based on viewing angle
     use_fresnel_mask: BoolProperty(
         name="Fresnel Mask",

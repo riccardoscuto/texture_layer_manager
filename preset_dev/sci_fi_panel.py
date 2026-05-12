@@ -68,13 +68,27 @@ PANEL_VARIATION_DARK     = (0.04, 0.05, 0.07, 1.0)
 PANEL_VARIATION_LIGHT    = (0.10, 0.12, 0.15, 1.0)
 PANEL_VARIATION_ALT      = (0.07, 0.07, 0.10, 1.0)   # subtle violet tint
 EMISSIVE_COLOR           = (1.00, 0.30, 0.05, 1.0)   # bright orange
-EMISSIVE_STRENGTH        = 2.5    # dim accent — was 6.0 (overwhelming)
+EMISSIVE_STRENGTH        = 6.0
+
+# ── Selective emission ──
+# Without this, every panel seam in the surface glows uniformly, which
+# reads as "lit grout" rather than "some panels are lit". The selector
+# gates emission to a random subset of cells controlled by:
+#   SELECTOR_TYPE        'NONE' / 'RANDOM_CELLS' / 'NOISE' / 'IMAGE'
+#   SELECTOR_THRESHOLD   fraction of regions that glow (0..1)
+#   SELECTOR_SCALE       size of the random-region grid (higher = smaller)
+# RANDOM_CELLS at scale ~= panel_scale picks ~threshold * 100% of cells
+# at random and lets only those cells' seams emit.
+SELECTOR_TYPE            = 'RANDOM_CELLS'
+SELECTOR_THRESHOLD       = 0.25   # ~25% of cells are lit
+SELECTOR_SCALE           = 2.5    # bigger groups = larger lit zones
+SELECTOR_SEED            = 0.0    # change to re-roll the random selection
 
 # ── Layer opacities ──
 PANEL_OPACITY            = 1.0
 PANEL_VAR_OPACITY        = 0.50
 SCRATCH_OPACITY          = 0.30
-EMISSIVE_OPACITY         = 0.55   # let the dark panels read first — was 1.0
+EMISSIVE_OPACITY         = 1.0    # selective emission already limits the lit area
 ROUGH_BOOST_OPACITY      = 0.5
 COLOR_GRADE_OPACITY      = 0.3
 
@@ -302,6 +316,11 @@ def build_sci_fi_panel():
     l_emit.emission_strength = EMISSIVE_STRENGTH
     l_emit.proc_emission_threshold = EMISSIVE_THRESHOLD
     l_emit.proc_emission_falloff = EMISSIVE_FALLOFF
+    # Selective emission — only a subset of cells glow.
+    l_emit.emission_selector_type      = SELECTOR_TYPE
+    l_emit.emission_selector_scale     = SELECTOR_SCALE
+    l_emit.emission_selector_threshold = SELECTOR_THRESHOLD
+    l_emit.emission_selector_seed      = SELECTOR_SEED
 
     # ── 2: Roughness Boost — BRIGHT_CONTRAST on Roughness ──────────────────
     l_rough_boost = _add_adjustment(mat, "Roughness Boost", "BRIGHT_CONTRAST",

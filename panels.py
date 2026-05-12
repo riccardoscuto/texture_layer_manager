@@ -911,6 +911,23 @@ def _draw_pbr_channels(col, layer, tlm):
                 if layer.layer_type == "PROCEDURAL":
                     pc.prop(layer, "proc_emission_threshold", slider=True, text="Threshold")
                     pc.prop(layer, "proc_emission_falloff", slider=True, text="Falloff")
+                    # ── Selective emission ───────────────────────────
+                    # Gates the procedural emission to a subset of regions
+                    # (random cells / noise blobs / painted mask) instead
+                    # of lighting up the entire procedural pattern.
+                    pc.separator(factor=0.3)
+                    pc.prop(layer, "emission_selector_type", text="Lit Regions")
+                    sel_type = layer.emission_selector_type
+                    if sel_type in ('RANDOM_CELLS', 'NOISE'):
+                        sr = pc.row(align=True)
+                        sr.prop(layer, "emission_selector_scale",
+                                text="Scale" if sel_type == 'NOISE' else "Cells")
+                        sr.prop(layer, "emission_selector_threshold",
+                                text="Lit Frac", slider=True)
+                        pc.prop(layer, "emission_selector_seed", text="Seed")
+                    elif sel_type == 'IMAGE':
+                        pc.prop_search(layer, "emission_selector_image_name",
+                                       bpy.data, "images", text="Mask Image")
                 if layer.blend_mode == "ADD":
                     pc.label(text="ADD + Emission: use only one", icon='ERROR')
         else:

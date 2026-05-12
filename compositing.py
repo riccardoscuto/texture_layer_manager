@@ -2265,6 +2265,24 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
                 mr.inputs["To Max"].default_value   = 1.0
                 mask_out = mr.outputs.get("Result") or mr.outputs[0]
 
+                # ── Selective emission ───────────────────────────────────
+                # An optional second mask gates WHERE the procedural
+                # emission is allowed to light up — multiplied in here so
+                # the smoothstep above still shapes each lit region's
+                # falloff. Disabled by default (selector_type=NONE).
+                selector_out = _build_emission_selector(
+                    node_tree, layer, uv_map, x, y, name_tag=f"emis_{i}"
+                )
+                if selector_out is not None:
+                    sel_mul = node_tree.nodes.new("ShaderNodeMath")
+                    sel_mul.operation = 'MULTIPLY'
+                    sel_mul.use_clamp = True
+                    sel_mul.name = f"{TLM_PREFIX}emis_sel_mul_{i}"
+                    sel_mul.location = (x + 580, y - 120)
+                    node_tree.links.new(mask_out, sel_mul.inputs[0])
+                    node_tree.links.new(selector_out, sel_mul.inputs[1])
+                    mask_out = sel_mul.outputs["Value"]
+
                 # Mix: lerp(black, emission_color, mask) = emission_color * mask
                 emis_fill = _new_fill(node_tree, layer.emission_color, x + 160, y - 200)
                 emis_fill.name = f"{TLM_PREFIX}emis_color_{i}"
@@ -2817,6 +2835,154 @@ def _inject_vector_distortion(node_tree, layer, mapping_out, x, y, name_tag=""):
     node_tree.links.new(noise.outputs["Color"], b_sock)
 
     return _enabled_socket(mix.outputs, "Result")
+
+
+# ── Selective emission selector ──────────────────────────────────────────────
+
+def _build_emission_selector(node_tree, layer, uv_map, x, y, name_tag=""):
+    """Build a 0..1 mask that gates where a procedural emission can glow.
+
+    Returns a Value socket suitable for multiplying into the emission
+    mask, or None when the selector is disabled (or invalid). The
+    selector is applied AFTER the proc fac → invert → power → smoothstep
+    pipeline, so the original threshold/falloff still shape each glow's
+    falloff — the selector only decides which regions are allowed to
+    light up at all.
+
+    Three modes:
+      - RANDOM_CELLS: Voronoi(F1) → WhiteNoise hash on cell position →
+        threshold. Produces a per-cell on/off mask. The de-facto
+        sci-fi-panel mode: "30% of the cells glow".
+      - NOISE: Perlin noise → smoothstep threshold. Produces organic
+        blob-shaped glow regions, good for damage / weathering hotspots.
+      - IMAGE: sample a user-painted black/white image via UV. The R
+        channel is the mask (white = lit). Lets the artist hand-craft
+        an exact lighting pattern.
+    """
+    selector_type = getattr(layer, 'emission_selector_type', 'NONE')
+    if selector_type == 'NONE':
+        return None
+
+    threshold = getattr(layer, 'emission_selector_threshold', 0.3)
+    if threshold <= 0.0:
+        # User asked for nothing lit — short-circuit with a 0 constant
+        # so the multiplier produces an all-black emission mask.
+        zero = node_tree.nodes.new("ShaderNodeValue")
+        zero.name = f"{TLM_PREFIX}emis_sel_zero_{name_tag}_{_next_id()}"
+        zero.location = (x + 480, y - 240)
+        zero.outputs[0].default_value = 0.0
+        return zero.outputs[0]
+
+    scale = getattr(layer, 'emission_selector_scale', 4.0)
+    seed = getattr(layer, 'emission_selector_seed', 0.0)
+
+    if selector_type == 'IMAGE':
+        img_name = getattr(layer, 'emission_selector_image_name', '')
+        img = bpy.data.images.get(img_name) if img_name else None
+        if img is None:
+            return None  # no image assigned → treat as disabled
+        uv = node_tree.nodes.new("ShaderNodeUVMap")
+        uv.uv_map = uv_map
+        uv.name = f"{TLM_PREFIX}emis_sel_uv_{name_tag}_{_next_id()}"
+        uv.location = (x + 380, y - 260)
+
+        tex = node_tree.nodes.new("ShaderNodeTexImage")
+        tex.image = img
+        try:
+            if img.colorspace_settings.name != "Non-Color":
+                img.colorspace_settings.name = "Non-Color"
+        except Exception:
+            pass
+        tex.name = f"{TLM_PREFIX}emis_sel_tex_{name_tag}_{_next_id()}"
+        tex.location = (x + 540, y - 260)
+        node_tree.links.new(uv.outputs["UV"], tex.inputs["Vector"])
+
+        sep = node_tree.nodes.new("ShaderNodeSeparateColor")
+        sep.name = f"{TLM_PREFIX}emis_sel_sep_{name_tag}_{_next_id()}"
+        sep.location = (x + 720, y - 260)
+        node_tree.links.new(tex.outputs["Color"], sep.inputs["Color"])
+        return sep.outputs["Red"]
+
+    # For RANDOM_CELLS and NOISE we use the SAME UV/coord source as the
+    # rest of the layer (UVMap → optional seed offset → procedural).
+    uv = node_tree.nodes.new("ShaderNodeUVMap")
+    uv.uv_map = uv_map
+    uv.name = f"{TLM_PREFIX}emis_sel_uv_{name_tag}_{_next_id()}"
+    uv.location = (x + 380, y - 260)
+    vec_source = uv.outputs["UV"]
+    if seed != 0.0:
+        add = node_tree.nodes.new("ShaderNodeVectorMath")
+        add.operation = 'ADD'
+        add.name = f"{TLM_PREFIX}emis_sel_seed_{name_tag}_{_next_id()}"
+        add.location = (x + 460, y - 260)
+        add.inputs[1].default_value = (seed, seed * 1.7, seed * 2.3)
+        node_tree.links.new(uv.outputs["UV"], add.inputs[0])
+        vec_source = add.outputs["Vector"]
+
+    if selector_type == 'RANDOM_CELLS':
+        vor = node_tree.nodes.new("ShaderNodeTexVoronoi")
+        try:
+            vor.feature = 'F1'
+        except Exception:
+            pass
+        try:
+            vor.voronoi_dimensions = '3D'
+        except Exception:
+            pass
+        vor.name = f"{TLM_PREFIX}emis_sel_vor_{name_tag}_{_next_id()}"
+        vor.location = (x + 540, y - 260)
+        vor.inputs["Scale"].default_value = scale
+        if "Randomness" in vor.inputs:
+            vor.inputs["Randomness"].default_value = 1.0
+        node_tree.links.new(vec_source, vor.inputs["Vector"])
+
+        # Hash the per-cell Position into a [0,1] random scalar.
+        position_out = vor.outputs.get("Position") or vor.outputs[0]
+        wn = node_tree.nodes.new("ShaderNodeTexWhiteNoise")
+        wn.name = f"{TLM_PREFIX}emis_sel_wn_{name_tag}_{_next_id()}"
+        wn.location = (x + 720, y - 260)
+        node_tree.links.new(position_out, wn.inputs["Vector"])
+
+        # GREATER_THAN(wn.Value, 1 - threshold). With threshold=0.3,
+        # only cells whose hash > 0.7 light up → roughly 30% lit.
+        cmp = node_tree.nodes.new("ShaderNodeMath")
+        cmp.operation = 'GREATER_THAN'
+        cmp.name = f"{TLM_PREFIX}emis_sel_cmp_{name_tag}_{_next_id()}"
+        cmp.location = (x + 880, y - 260)
+        node_tree.links.new(wn.outputs["Value"], cmp.inputs[0])
+        cmp.inputs[1].default_value = 1.0 - threshold
+        return cmp.outputs["Value"]
+
+    if selector_type == 'NOISE':
+        noise = node_tree.nodes.new("ShaderNodeTexNoise")
+        noise.name = f"{TLM_PREFIX}emis_sel_noise_{name_tag}_{_next_id()}"
+        noise.location = (x + 540, y - 260)
+        noise.inputs["Scale"].default_value = scale
+        noise.inputs["Detail"].default_value = 2.0
+        if "Roughness" in noise.inputs:
+            noise.inputs["Roughness"].default_value = 0.5
+        node_tree.links.new(vec_source, noise.inputs["Vector"])
+
+        # Smoothstep around (1-threshold) so threshold=fraction lit.
+        # Fixed transition width keeps the blob edges soft.
+        mr = node_tree.nodes.new("ShaderNodeMapRange")
+        try:
+            mr.interpolation_type = 'SMOOTHSTEP'
+        except Exception:
+            pass
+        mr.clamp = True
+        mr.name = f"{TLM_PREFIX}emis_sel_mr_{name_tag}_{_next_id()}"
+        mr.location = (x + 720, y - 260)
+        lo = max(0.0, (1.0 - threshold) - 0.07)
+        hi = min(1.0, (1.0 - threshold) + 0.07)
+        mr.inputs["From Min"].default_value = lo
+        mr.inputs["From Max"].default_value = hi
+        mr.inputs["To Min"].default_value = 0.0
+        mr.inputs["To Max"].default_value = 1.0
+        node_tree.links.new(noise.outputs["Fac"], mr.inputs["Value"])
+        return mr.outputs.get("Result") or mr.outputs[0]
+
+    return None
 
 
 # ── Voronoi random-per-cell helper ───────────────────────────────────────────
