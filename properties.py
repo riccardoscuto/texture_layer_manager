@@ -1563,6 +1563,47 @@ class TLM_MaterialProperties(PropertyGroup):
         update=_on_layer_update,
     )
 
+    # Eevee/Material Preview transparency mode. Even when TLM wires
+    # BSDF.Alpha correctly, Eevee with mat.blend_method='OPAQUE' (the
+    # default) silently ignores the input and renders the surface
+    # opaque — a confusing UX where the user sees no effect from
+    # output_channel=ALPHA layers.
+    #
+    # AUTO: TLM decides based on what's connected. When any layer
+    # contributes to alpha (or use_base_color_alpha is on), use the
+    # picked-up 'HASHED' equivalent (=DITHERED on 4.2+) which is the
+    # best general default; otherwise OPAQUE for performance.
+    # Other modes let the artist override (e.g. force BLEND for glass).
+    #
+    # Blender 4.2 split the legacy `blend_method` enum into a new
+    # `surface_render_method` with just DITHERED / BLENDED. We map our
+    # legacy values onto the new API at rebuild time and set both for
+    # cross-version compatibility.
+    alpha_blend_method: EnumProperty(
+        name="Alpha Blend Method",
+        description=(
+            "How Eevee handles the BSDF.Alpha input. 'Auto' picks Hashed "
+            "when any alpha layer is present, Opaque otherwise. Override "
+            "manually for glass (Blend) / mask-cutout (Clip) workflows"
+        ),
+        items=[
+            ('AUTO',   "Auto",
+             "Hashed when alpha is wired, Opaque otherwise (recommended)"),
+            ('OPAQUE', "Opaque",
+             "Ignore alpha — no transparency"),
+            ('CLIP',   "Clip",
+             "Binary cutout — alpha < 0.5 is fully transparent (foliage masks)"),
+            ('HASHED', "Hashed",
+             "Stochastic dithering — supports smooth alpha, anti-aliased "
+             "edges (general-purpose default for decals / cutout)"),
+            ('BLEND',  "Blend",
+             "True alpha blending — needed for glass, ghosts, smoke. "
+             "Costs sorting and may have artefacts on overlapping faces"),
+        ],
+        default='AUTO',
+        update=_on_layer_update,
+    )
+
     # Resolution for new layers
     resolution: EnumProperty(
         name="New Layer Resolution",

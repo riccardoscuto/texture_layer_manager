@@ -2855,6 +2855,73 @@ def _inject_vector_distortion(node_tree, layer, mapping_out, x, y, name_tag=""):
     return _enabled_socket(mix.outputs, "Result")
 
 
+# ── Material-level alpha blend method ────────────────────────────────────────
+
+# Map TLM's alpha_blend_method enum to:
+#   - mat.blend_method (Blender ≤ 4.1, legacy enum)
+#   - mat.surface_render_method (Blender 4.2+, replaces blend_method with
+#     just DITHERED / BLENDED; CLIP and HASHED both collapse to DITHERED)
+# AUTO is resolved by the caller before we get here.
+_LEGACY_BLEND_METHOD = {
+    'OPAQUE': 'OPAQUE',
+    'CLIP':   'CLIP',
+    'HASHED': 'HASHED',
+    'BLEND':  'BLEND',
+}
+_NEW_RENDER_METHOD = {
+    'OPAQUE': 'DITHERED',   # 4.2+ renders alpha=1.0 fine in DITHERED — no perf loss when no alpha is driven
+    'CLIP':   'DITHERED',
+    'HASHED': 'DITHERED',
+    'BLEND':  'BLENDED',
+}
+
+
+def _sync_material_alpha_method(material, alpha_connected, tlm):
+    """Set the material's blend method based on the alpha pipeline state.
+
+    Even when TLM correctly wires something to BSDF.Alpha, Eevee with
+    mat.blend_method='OPAQUE' (the default for new materials) silently
+    ignores the input and renders the surface opaque. This was the
+    single biggest UX surprise for cutout / decal / foliage workflows —
+    "I set output_channel to Alpha but nothing happens".
+
+    Behaviour:
+      - tlm.alpha_blend_method == 'AUTO' (default):
+          * alpha_connected → HASHED (good general default — supports
+            smooth alpha, anti-aliased edges, no manual sorting)
+          * else → OPAQUE (no perf overhead when alpha isn't used)
+      - any other value: forced regardless of connection state. Users
+        who explicitly want BLEND for a glass material keep that even
+        when no alpha layer is present.
+
+    The Blender 4.2+ API replaced ``mat.blend_method`` with
+    ``mat.surface_render_method`` (only DITHERED / BLENDED — CLIP and
+    HASHED collapsed). We write to whichever attribute exists so the
+    same TLM addon works on 4.0 / 4.1 / 4.2 / 5.0 without branching at
+    install time.
+    """
+    requested = getattr(tlm, 'alpha_blend_method', 'AUTO')
+    if requested == 'AUTO':
+        resolved = 'HASHED' if alpha_connected else 'OPAQUE'
+    else:
+        resolved = requested
+
+    # Legacy attribute (Blender ≤ 4.1) — may still exist on 4.2+ as a
+    # deprecated alias. Writing it when it exists is harmless.
+    if hasattr(material, 'blend_method'):
+        try:
+            material.blend_method = _LEGACY_BLEND_METHOD.get(resolved, 'OPAQUE')
+        except (TypeError, AttributeError):
+            pass
+
+    # New attribute (Blender 4.2+).
+    if hasattr(material, 'surface_render_method'):
+        try:
+            material.surface_render_method = _NEW_RENDER_METHOD.get(resolved, 'DITHERED')
+        except (TypeError, AttributeError):
+            pass
+
+
 # ── Selective emission selector ──────────────────────────────────────────────
 
 def _build_emission_selector(node_tree, layer, uv_map, x, y, name_tag=""):
@@ -4018,8 +4085,16 @@ def rebuild_node_tree(material):
 
     if not root_layers:
         # Nothing to build — clear TLM nodes (no layers visible) but don't
-        # leave a half-built tree.
+        # leave a half-built tree. Sweep the shared TLM_maskblur_*
+        # NodeGroups too: without this, deleting/hiding all layers
+        # accumulated orphan groups in bpy.data.node_groups across
+        # save/reopen cycles (the cleanup at the end of the full rebuild
+        # path was being skipped).
         _clear_tlm_nodes(node_tree)
+        _cleanup_tlm_mask_blur_groups()
+        # Alpha can never be wired without layers — reset the material's
+        # Eevee blend method so the surface goes back to OPAQUE.
+        _sync_material_alpha_method(material, False, tlm)
         return
 
     # Guard: verify we can write to nodes before destroying anything.
@@ -4156,11 +4231,13 @@ def rebuild_node_tree(material):
         # transmission (which is volumetric). Useful for foliage cards, decals,
         # masks projected on a surface, etc.
         alpha_explicitly_routed = _channel_used(expanded, 'use_alpha')
+        alpha_was_connected = False
         if alpha_explicitly_routed:
             a_out = _build_channel(node_tree, expanded, 'alpha', uv_map, start_x, ch_y.get('alpha', 0), x_step)
             if a_out:
                 _link_to_bsdf(node_tree, a_out, bsdf,
                               ["Alpha", "alpha"], "alpha")
+                alpha_was_connected = True
         elif bc_alpha is not None and getattr(tlm, 'use_base_color_alpha', False):
             # Material-level opt-in: when the user wants the base color's
             # native alpha (typically the PAINT image alpha) to drive
@@ -4171,6 +4248,11 @@ def rebuild_node_tree(material):
             # explicitly-routed path.
             _link_to_bsdf(node_tree, bc_alpha, bsdf,
                           ["Alpha", "alpha"], "alpha-auto")
+            alpha_was_connected = True
+
+        # Sync the material's Eevee blend method so the BSDF.Alpha input
+        # is actually visible (default 'OPAQUE' silently ignores it).
+        _sync_material_alpha_method(material, alpha_was_connected, tlm)
 
         # ── Bump ──────────────────────────────────────────────────────────────────
         # Pass incoming_normal=normal_out so each per-layer Bump perturbs the

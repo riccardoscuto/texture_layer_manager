@@ -4,7 +4,7 @@ import os
 import json
 import bpy
 from bpy.types import Operator
-from ._common import _get_material, _ensure_nodes, compositing
+from ._common import _get_material, _ensure_nodes, compositing, _normalize_blend_mode
 
 
 # Built-in presets shipped with the addon
@@ -503,28 +503,9 @@ class TLM_OT_ApplyPreset(Operator):
             layer.blend_mode_transmission = ld.get("blend_mode_transmission", "INHERIT")
             layer.blend_mode_alpha        = ld.get("blend_mode_alpha",        "INHERIT")
 
-            # blend_mode: map UI names to internal enum values
-            bm_map = {
-                "Normal": "MIX", "MIX": "MIX",
-                "Screen": "SCREEN", "SCREEN": "SCREEN",
-                "Multiply": "MULTIPLY", "MULTIPLY": "MULTIPLY",
-                "Overlay": "OVERLAY", "OVERLAY": "OVERLAY",
-                "Add": "ADD", "ADD": "ADD",
-                "Subtract": "SUBTRACT", "SUBTRACT": "SUBTRACT",
-                "Difference": "DIFFERENCE", "DIFFERENCE": "DIFFERENCE",
-                "Darken": "DARKEN", "DARKEN": "DARKEN",
-                "Lighten": "LIGHTEN", "LIGHTEN": "LIGHTEN",
-                "Color Dodge": "COLOR_DODGE", "COLOR_DODGE": "COLOR_DODGE",
-                "Color Burn": "COLOR_BURN", "COLOR_BURN": "COLOR_BURN",
-                "Soft Light": "SOFT_LIGHT", "SOFT_LIGHT": "SOFT_LIGHT",
-                "Linear Light": "LINEAR_LIGHT", "LINEAR_LIGHT": "LINEAR_LIGHT",
-                "Exclusion": "EXCLUSION", "EXCLUSION": "EXCLUSION",
-                "Hue": "HUE", "HUE": "HUE",
-                "Saturation": "SATURATION", "SATURATION": "SATURATION",
-                "Color": "COLOR", "COLOR": "COLOR",
-                "Luminosity": "LUMINOSITY", "LUMINOSITY": "LUMINOSITY",
-            }
-            layer.blend_mode = bm_map.get(ld.get("blend_mode", "MIX"), "MIX")
+            # blend_mode: map UI names to internal enum values via the
+            # shared normaliser (kept in sync with operators/io.py).
+            layer.blend_mode = _normalize_blend_mode(ld.get("blend_mode"))
 
             if layer.layer_type == "FILL":
                 layer.fill_color = ld.get("fill_color", [1,1,1,1])

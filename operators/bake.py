@@ -195,35 +195,54 @@ class TLM_OT_BakePBR(Operator):
                     for lnk in surface_input.links:
                         orig_surface_links.append(lnk.from_socket)
 
-                # Create temp Emission shader
-                emit_node = node_tree.nodes.new("ShaderNodeEmission")
-                emit_node.name = "TLM_bake_emit"
-                emit_node.location = (400, 200)
-
-                # For scalar channels (Roughness, Metallic), we need to convert
-                # the value to color. Check if source is a color or value.
-                # If the BSDF input is a scalar type, route through a converter.
+                # Normal channel needs special handling — see below. For
+                # every other channel we go through the EMIT path: route
+                # the source socket through a temp Emission shader so
+                # the bake captures the raw value without lighting.
                 is_normal = (bsdf_input == "Normal")
 
+                # The Normal channel can be fed by three different shapes
+                # of upstream graph:
+                #   a) NORMAL_MAP node      → bake its Color input via
+                #      EMIT to preserve the exact tangent-space RGB
+                #      authored upstream.
+                #   b) BUMP node            → vector output; EMIT-baking
+                #      a vector encodes the world-space normal as raw
+                #      RGB which is wrong for an engine.
+                #   c) Mix(VECTOR) chain    → same as (b).
+                # Case (a) is the legacy path we kept. Cases (b) / (c)
+                # now switch to bake(type='NORMAL') which samples the
+                # surface shading normal and writes tangent-space RGB
+                # correctly without touching the shader graph.
+                use_normal_bake = False
+                emit_node = None
                 if is_normal:
-                    # Normal maps: bake the color data from the Normal Map node's input
-                    # Find the Normal Map node
                     normal_node = source_socket.node
                     if normal_node.type == 'NORMAL_MAP':
                         color_input = normal_node.inputs.get("Color")
                         if color_input and color_input.links:
                             source_socket = color_input.links[0].from_socket
+                            emit_node = node_tree.nodes.new("ShaderNodeEmission")
+                            emit_node.name = "TLM_bake_emit"
+                            emit_node.location = (400, 200)
+                            node_tree.links.new(source_socket, emit_node.inputs["Color"])
+                            node_tree.links.new(emit_node.outputs["Emission"], surface_input)
                         else:
-                            # No color input to normal map, skip
-                            node_tree.nodes.remove(emit_node)
-                            return None
-
-                    node_tree.links.new(source_socket, emit_node.inputs["Color"])
+                            # NORMAL_MAP node with no Color input → nothing
+                            # to bake. Fall through to NORMAL bake mode
+                            # so we at least produce a flat-blue normal.
+                            use_normal_bake = True
+                    else:
+                        # BUMP / vector Mix / anything else: use Blender's
+                        # native NORMAL bake. Leave the shader graph alone.
+                        use_normal_bake = True
                 else:
+                    # Standard EMIT path for color / scalar channels.
+                    emit_node = node_tree.nodes.new("ShaderNodeEmission")
+                    emit_node.name = "TLM_bake_emit"
+                    emit_node.location = (400, 200)
                     node_tree.links.new(source_socket, emit_node.inputs["Color"])
-
-                # Connect Emission → Material Output
-                node_tree.links.new(emit_node.outputs["Emission"], surface_input)
+                    node_tree.links.new(emit_node.outputs["Emission"], surface_input)
 
                 # Create bake target image — register as orphan in case bake fails.
                 img_name = f"{base}_{suffix}"
@@ -248,7 +267,17 @@ class TLM_OT_BakePBR(Operator):
 
                 bake_ok = False
                 try:
-                    bpy.ops.object.bake(type='EMIT', save_mode='INTERNAL')
+                    if use_normal_bake:
+                        # NORMAL bake samples the shading normal directly
+                        # — works regardless of whether the upstream is a
+                        # BUMP, a Mix(VECTOR), or a raw geometry normal.
+                        # Tangent space is Blender's default; the saved
+                        # PNG ends up engine-compatible.
+                        bpy.ops.object.bake(type='NORMAL',
+                                            save_mode='INTERNAL',
+                                            normal_space='TANGENT')
+                    else:
+                        bpy.ops.object.bake(type='EMIT', save_mode='INTERNAL')
                     filepath = os.path.join(out_dir, f"{img_name}.{ext}")
                     img.filepath_raw = filepath
                     img.file_format = self.file_format
@@ -262,10 +291,11 @@ class TLM_OT_BakePBR(Operator):
                     # Restore original connections (always)
                     if bake_node.name in node_tree.nodes:
                         node_tree.nodes.remove(bake_node)
-                    if emit_node.name in node_tree.nodes:
+                    if emit_node is not None and emit_node.name in node_tree.nodes:
                         node_tree.nodes.remove(emit_node)
-                    # Re-link original shader to Material Output
-                    if surface_input:
+                    # Re-link original shader to Material Output (only if
+                    # we actually rerouted it — NORMAL bake leaves it alone).
+                    if surface_input and emit_node is not None:
                         for orig_sock in orig_surface_links:
                             try:
                                 node_tree.links.new(orig_sock, surface_input)
