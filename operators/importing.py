@@ -143,72 +143,27 @@ class TLM_OT_ImportTextureAsLayer(Operator):
 
 # ─── PBR Texture Set Import ──────────────────────────────────────────────────
 
-# Keyword-to-channel mappings for auto-detection.
-#
-# Two iteration changes vs the original substring-only matcher:
-#   1. alpha / opacity / transparency now resolve to the ALPHA channel
-#      (formerly they were lumped together with transmission, which broke
-#      every foliage / decal / cutout asset where the user expects them
-#      to feed BSDF.Alpha not Transmission).
-#   2. Matching is WORD-BOUNDARY (regex \b...\b), not substring. Without
-#      this `col` matched `collage`, `metal` matched `gunmetal`, etc. —
-#      a bad import 30% of the time on real-world Substance / Quixel
-#      asset folder names. The token-level match below requires the
-#      keyword to sit between non-word characters (or at the start/end
-#      of the stem), so `metal_bronze.png` matches but `gunmetal.png`
-#      does not.
-#
-# Within the same channel, longer / more specific keywords are checked
-# first — `basecolor` beats `color`, `normalgl` beats `normal` — so a
-# file named `normalgl.png` is recognised as a normal map rather than
-# falling through.
+# Keyword-to-channel mappings for auto-detection
 PBR_KEYWORDS = {
-    'base_color':   ['basecolor', 'base_color', 'albedo', 'diffuse', 'diff', 'color', 'col'],
-    'roughness':    ['roughness', 'rough', 'gloss'],
-    'metallic':     ['metalness', 'metallic', 'metal'],
-    'normal':       ['normal_gl', 'normalgl', 'normal_dx', 'normaldx', 'normal', 'norm', 'nrm'],
-    'emission':     ['emission', 'emissive', 'emit', 'glow'],
-    'transmission': ['transmission', 'translucency', 'refraction'],
-    'alpha':        ['opacity', 'transparency', 'alpha', 'cutout', 'mask'],
+    'base_color':   {'basecolor', 'base_color', 'albedo', 'diffuse', 'diff', 'color', 'col'},
+    'roughness':    {'roughness', 'rough', 'gloss'},
+    'metallic':     {'metallic', 'metal', 'metalness'},
+    'normal':       {'normal', 'norm', 'nrm', 'normalgl', 'normal_gl', 'normaldx', 'normal_dx'},
+    'emission':     {'emission', 'emissive', 'emit', 'glow'},
+    'transmission': {'transmission', 'opacity', 'alpha', 'transparency'},
 }
 
-PBR_SKIP_KEYWORDS = ['ambient_occlusion', 'ambientocclusion', 'occlusion', 'ao',
-                     'displacement', 'disp', 'height', 'bump']
+PBR_SKIP_KEYWORDS = {'ao', 'ambient_occlusion', 'ambientocclusion', 'occlusion',
+                      'displacement', 'disp', 'height'}
 
 PBR_IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.tif', '.tiff', '.exr', '.bmp', '.tga'}
 
-PBR_NON_COLOR_CHANNELS = {'roughness', 'metallic', 'normal', 'transmission', 'alpha'}
-
-
-# Pre-compiled regexes with word boundaries. Built lazily so updates to
-# the keyword tables above are picked up automatically in dev iteration.
-_PBR_CHANNEL_RES = None
-_PBR_SKIP_RES = None
-
-
-def _build_pbr_regexes():
-    """Compile {channel_id: [(keyword, regex), ...]} keyed for word-boundary match."""
-    import re
-    global _PBR_CHANNEL_RES, _PBR_SKIP_RES
-    _PBR_CHANNEL_RES = {
-        ch: [(kw, re.compile(rf'(?:^|[\W_]){re.escape(kw)}(?:[\W_]|$)'))
-             for kw in keywords]
-        for ch, keywords in PBR_KEYWORDS.items()
-    }
-    _PBR_SKIP_RES = [(kw, re.compile(rf'(?:^|[\W_]){re.escape(kw)}(?:[\W_]|$)'))
-                     for kw in PBR_SKIP_KEYWORDS]
+PBR_NON_COLOR_CHANNELS = {'roughness', 'metallic', 'normal', 'transmission'}
 
 
 def _detect_pbr_channel(filename):
-    """Return (channel_id_or_skip_reason, is_skipped) from a texture filename.
-
-    Word-boundary matching: `metal` matches `metal_red.png` and
-    `red_metal.png` but NOT `gunmetal.png`. This stops substring noise
-    like `col` → base_color matching `collage.png`.
-    """
-    if _PBR_CHANNEL_RES is None:
-        _build_pbr_regexes()
-
+    """Return (channel_id, is_skipped) from a texture filename."""
+    import re
     name_lower = filename.lower()
     stem = os.path.splitext(name_lower)[0]
     ext = os.path.splitext(name_lower)[1]
@@ -216,18 +171,15 @@ def _detect_pbr_channel(filename):
     if ext not in PBR_IMAGE_EXTENSIONS:
         return (None, False)
 
-    # Skip keywords first (AO, displacement, height, bump — TLM doesn't
-    # accept these as direct channels; they're either ignored or used
-    # via dedicated workflows).
-    for kw, rx in _PBR_SKIP_RES:
-        if rx.search(stem):
+    # Check skip keywords first (ao, displacement, height)
+    for kw in PBR_SKIP_KEYWORDS:
+        if kw in stem:
             return (kw, True)
 
-    # Channel match: dict-insertion-ordered (base_color first), longer
-    # keyword first within each channel.
-    for channel_id, regexes in _PBR_CHANNEL_RES.items():
-        for _kw, rx in regexes:
-            if rx.search(stem):
+    # Check each channel — base_color first (dict is insertion-ordered)
+    for channel_id, keywords in PBR_KEYWORDS.items():
+        for kw in keywords:
+            if kw in stem:
                 return (channel_id, False)
 
     return (None, False)

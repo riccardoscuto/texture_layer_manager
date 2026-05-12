@@ -1006,10 +1006,6 @@ def _draw_composite_section(layout, tlm):
               icon=ac_icon, toggle=True)
     comp.prop(tlm, "use_base_color_alpha",
               text="Use Paint Alpha", icon='IMAGE_ALPHA', toggle=True)
-    # Eevee transparency mode. AUTO picks Hashed when an alpha layer
-    # exists, Opaque otherwise — the right default 95% of the time.
-    # Manual override for the rare glass / forced-cutout cases.
-    comp.prop(tlm, "alpha_blend_method", text="Alpha Mode")
     ops_row = comp.row(align=True)
     ops_row.operator("tlm.rebuild_composite", text="Rebuild", icon='FILE_REFRESH')
     ops_row.operator("tlm.flatten_layers",    text="Flatten", icon='IMAGE_ZDEPTH')

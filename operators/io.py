@@ -8,7 +8,7 @@ import struct
 import zlib
 import numpy as np
 from bpy.types import Operator
-from ._common import _get_material, _ensure_nodes, compositing, _normalize_blend_mode
+from ._common import _get_material, _ensure_nodes, compositing
 from .pbr import CHANNEL_INFO
 
 
@@ -275,10 +275,7 @@ def _dict_to_layer(d, tlm):
     layer.visible    = d.get("visible", True)
     layer.locked     = d.get("locked", False)
     layer.opacity    = d.get("opacity", 1.0)
-    # Use the shared blend-mode normaliser so legacy .tlm files saved
-    # in TLM ≤ 0.3 (title-case names like "Screen") don't silently
-    # collapse to MIX. operators/presets.py also goes through this.
-    layer.blend_mode = _normalize_blend_mode(d.get("blend_mode"))
+    layer.blend_mode = d.get("blend_mode", "MIX")
     # GROUP layers are always root-level — discard any stray parent to
     # block nested-group states from arriving via external files.
     _raw_group = d.get("group_name", "")
@@ -639,19 +636,14 @@ class TLM_OT_LayerFromClipboard(Operator):
         _ensure_nodes(mat)
         tlm = mat.tlm
 
-        # Try to get image from clipboard via bpy.ops.image.new + paste.
-        # `temp_img` and `committed` are tracked outside the try so the
-        # finally block can clean up if an exception fires after the
-        # blank image was created but before it gets renamed into a
-        # real Clipboard_N layer image. Without this, repeated failed
-        # paste attempts left TLM_Clipboard_Temp / .001 / .002 …
-        # accumulating in bpy.data.images.
-        temp_img = None
-        committed = False
+        # Try to get image from clipboard via bpy.ops.image.new + paste
+        # Blender 4.x+ supports bpy.ops.image.clipboard_paste
         try:
+            # Create a temp image and paste clipboard into it
             bpy.ops.image.new(name="TLM_Clipboard_Temp", width=1024, height=1024)
             temp_img = bpy.data.images.get("TLM_Clipboard_Temp")
 
+            # Try clipboard paste (Blender 4.x)
             if hasattr(bpy.ops.image, 'clipboard_paste'):
                 # Set the temp image as active in the image editor
                 img_area = None
@@ -660,6 +652,8 @@ class TLM_OT_LayerFromClipboard(Operator):
                         img_area = area
                         break
                 if img_area is None:
+                    if temp_img:
+                        bpy.data.images.remove(temp_img)
                     self.report({'ERROR'}, "Open an Image Editor area first")
                     return {'CANCELLED'}
                 img_area.spaces.active.image = temp_img
@@ -671,7 +665,6 @@ class TLM_OT_LayerFromClipboard(Operator):
                 self.report({'WARNING'}, "Clipboard paste richiede Blender 4.x+. Creato layer vuoto.")
 
             pasted_img.name = f"Clipboard_{len(tlm.layers)+1}"
-            committed = True  # temp_img has been adopted into the new name
 
             # Create layer
             layer = tlm.layers.add()
@@ -703,15 +696,6 @@ class TLM_OT_LayerFromClipboard(Operator):
         except Exception as e:
             self.report({'ERROR'}, f"Clipboard non disponibile: {e}")
             return {'CANCELLED'}
-        finally:
-            # Drop the temp image if it was never adopted into a layer
-            # (paste failed, image-editor missing, etc.). Safe to call
-            # even when temp_img is None.
-            if temp_img is not None and not committed:
-                try:
-                    bpy.data.images.remove(temp_img)
-                except Exception:
-                    pass
 
 
 classes = [

@@ -16,53 +16,6 @@ def _get_material(context):
     return None
 
 
-# ─── Blend mode normalisation (legacy import compat) ─────────────────────────
-#
-# Older .tlm files (TLM ≤ v0.3) saved blend modes as UI-style title-case
-# strings ("Screen", "Multiply", "Color Dodge"). The current schema is
-# all-caps enum identifiers ("SCREEN", "MULTIPLY", "COLOR_DODGE").
-#
-# operators/presets.py had this mapping inline; operators/io.py didn't,
-# so the same legacy .tlm imported via tlm.import_json silently fell
-# back to "MIX" (Blender's EnumProperty refuses invalid enum values).
-# Centralise here so both paths apply the same migration.
-_LEGACY_BLEND_MODE_MAP = {
-    "Normal": "MIX",          "MIX": "MIX",
-    "Screen": "SCREEN",       "SCREEN": "SCREEN",
-    "Multiply": "MULTIPLY",   "MULTIPLY": "MULTIPLY",
-    "Overlay": "OVERLAY",     "OVERLAY": "OVERLAY",
-    "Add": "ADD",             "ADD": "ADD",
-    "Subtract": "SUBTRACT",   "SUBTRACT": "SUBTRACT",
-    "Difference": "DIFFERENCE", "DIFFERENCE": "DIFFERENCE",
-    "Divide": "DIVIDE",       "DIVIDE": "DIVIDE",
-    "Darken": "DARKEN",       "DARKEN": "DARKEN",
-    "Lighten": "LIGHTEN",     "LIGHTEN": "LIGHTEN",
-    "Color Dodge": "COLOR_DODGE", "COLOR_DODGE": "COLOR_DODGE",
-    "Color Burn": "COLOR_BURN",   "COLOR_BURN": "COLOR_BURN",
-    "Soft Light": "SOFT_LIGHT",   "SOFT_LIGHT": "SOFT_LIGHT",
-    "Linear Light": "LINEAR_LIGHT", "LINEAR_LIGHT": "LINEAR_LIGHT",
-    "Exclusion": "EXCLUSION", "EXCLUSION": "EXCLUSION",
-    "Hue": "HUE",             "HUE": "HUE",
-    "Saturation": "SATURATION", "SATURATION": "SATURATION",
-    "Color": "COLOR",         "COLOR": "COLOR",
-    "Luminosity": "LUMINOSITY", "LUMINOSITY": "LUMINOSITY",
-}
-
-
-def _normalize_blend_mode(value, default="MIX"):
-    """Coerce a serialised blend_mode value into the current enum domain.
-
-    Accepts both the legacy UI-style title-case names and the current
-    all-caps identifiers. Unknown values fall back to ``default``
-    (which is also what Blender's EnumProperty would do silently — we
-    just make the migration explicit and consistent across the two
-    importers (io.py and presets.py)).
-    """
-    if not value:
-        return default
-    return _LEGACY_BLEND_MODE_MAP.get(value, default)
-
-
 # ─── Bake safety ──────────────────────────────────────────────────────────────
 
 def _bake_preflight(context):
