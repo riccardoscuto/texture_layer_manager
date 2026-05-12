@@ -929,8 +929,6 @@ def _hot_mask_blur(node_tree, layer, prop_name):
 
 # ── Image-swap hot path ───────────────────────────────────────────────────────
 # Maps image-name properties → (tag role to find the tex node, expected colorspace).
-# Triplanar layers don't tag (multi-tex), so the lookup miss falls back to a full
-# rebuild — correct, because triplanar mode rebuilds 3 tex nodes anyway.
 _IMAGE_HOT_MAP = {
     "image_name":              ("paint_tex",            "sRGB"),
     "roughness_image_name":    ("pbr_tex_roughness",    "Non-Color"),
@@ -950,7 +948,7 @@ def _hot_image_swap(node_tree, layer, prop_name):
     - the new image-name is empty (clearing → topology change, fill node needed)
     - the image datablock isn't found
     - no tagged tex node exists (first-time assignment after build → structural)
-    - any matched node isn't TEX_IMAGE (triplanar / unexpected → structural)
+    - any matched node isn't TEX_IMAGE (unexpected node type → structural)
     """
     info = _IMAGE_HOT_MAP.get(prop_name)
     if not info:
@@ -1087,18 +1085,19 @@ def hot_update_property(material, layer, prop_name):
 
 
 def _new_img_tex(node_tree, image, uv_map, x, y, colorspace="sRGB", layer=None, tag_role=None):
-    """Create an Image Texture node. If layer.use_triplanar, uses triplanar projection.
+    """Create an Image Texture node, configured from the layer's mapping
+    properties (interpolation / projection / source / extension /
+    location / rotation / scale).
 
-    If ``tag_role`` and ``layer`` are both provided, the (non-triplanar) tex
-    node is tagged with (layer.name, tag_role) so it can be located later by
-    the hot-update path (_hot_image_swap). Triplanar mode skips tagging on
-    purpose: the swap path detects the missing tag and falls back to a full
-    rebuild, which is correct because triplanar uses 3 independent tex nodes.
+    If ``tag_role`` and ``layer`` are both provided, the tex node is
+    tagged with (layer.name, tag_role) so it can be located later by
+    the hot-update path (_hot_image_swap).
+
+    Box projection (was a custom Triplanar implementation in an earlier
+    version) is now Blender's native projection mode on the same node —
+    cheaper (one tex node instead of three) and uniform across the rest
+    of the engine.
     """
-    if layer and getattr(layer, 'use_triplanar', False):
-        return _new_triplanar_tex(node_tree, image, x, y, colorspace,
-                                  layer.triplanar_scale, layer.triplanar_sharpness)
-
     node = node_tree.nodes.new("ShaderNodeTexImage")
     node.name = f"{TLM_PREFIX}img_{image.name}_{_next_id()}"
     node.image = image
@@ -1114,13 +1113,43 @@ def _new_img_tex(node_tree, image, uv_map, x, y, colorspace="sRGB", layer=None, 
             node.image.colorspace_settings.name = colorspace
     except Exception:
         pass
-    # Wrap mode (CLIP / REPEAT / EXTEND / MIRROR). Default 'CLIP' on the
-    # property side keeps decals from accidentally tiling.
+
+    # Apply per-layer Image Texture node configuration. All of these
+    # are mirrored straight from the layer property → node attribute
+    # because Blender's ShaderNodeTexImage uses the same enum values
+    # (FLAT/BOX/SPHERE/TUBE for projection, CLIP/REPEAT/EXTEND/MIRROR
+    # for extension, Linear/Cubic/Closest/Smart for interpolation,
+    # FILE/GENERATED/SEQUENCE/MOVIE for source).
     if layer is not None:
         try:
             node.extension = getattr(layer, 'paint_extension', 'CLIP')
         except Exception:
             pass
+        try:
+            node.interpolation = getattr(layer, 'paint_interpolation', 'Linear')
+        except Exception:
+            pass
+        try:
+            node.projection = getattr(layer, 'paint_projection', 'FLAT')
+        except Exception:
+            pass
+        # Source lives on the image datablock (image.source), not on the
+        # node. Only assign when actually different to avoid re-triggering
+        # the image reload path during a rebuild.
+        try:
+            src = getattr(layer, 'paint_source', 'FILE')
+            if node.image and node.image.source != src:
+                node.image.source = src
+        except Exception:
+            pass
+        # Projection Blend is an INPUT socket on the node — wired only
+        # for Box projection (the only mode that uses it).
+        if getattr(layer, 'paint_projection', 'FLAT') == 'BOX':
+            try:
+                node.projection_blend = getattr(layer, 'paint_projection_blend', 0.3)
+            except Exception:
+                pass
+
     uv = node_tree.nodes.new("ShaderNodeUVMap")
     uv.name = f"{TLM_PREFIX}uv_{_next_id()}"
     uv.uv_map = uv_map
@@ -1165,179 +1194,6 @@ def _new_img_tex(node_tree, image, uv_map, x, y, colorspace="sRGB", layer=None, 
     if tag_role and layer is not None:
         _tag(node, layer.name, tag_role)
     return node
-
-
-def _new_triplanar_tex(node_tree, image, x, y, colorspace="sRGB", scale=1.0, sharpness=2.0):
-    """
-    Triplanar projection: samples the image from X, Y, Z axes and blends
-    them based on the surface normal. Works on any mesh without UV unwrap.
-
-    Returns a node whose "Color" output is the blended triplanar result.
-    We use a frame node as a pseudo-container and return the final Mix node.
-    """
-    # Geometry node for normal and position
-    geo = node_tree.nodes.new("ShaderNodeNewGeometry")
-    geo.name = f"{TLM_PREFIX}tri_geo_{_next_id()}"
-    geo.location = (x - 700, y)
-    # Separate XYZ from normal for blending weights
-    sep_n = node_tree.nodes.new("ShaderNodeSeparateXYZ")
-    sep_n.name = f"{TLM_PREFIX}tri_sep_n_{_next_id()}"
-    sep_n.location = (x - 550, y)
-    node_tree.links.new(geo.outputs["Normal"], sep_n.inputs["Vector"])
-
-    # Separate XYZ from position for texture coords
-    sep_p = node_tree.nodes.new("ShaderNodeSeparateXYZ")
-    sep_p.name = f"{TLM_PREFIX}tri_sep_p_{_next_id()}"
-    sep_p.location = (x - 550, y - 150)
-    node_tree.links.new(geo.outputs["Position"], sep_p.inputs["Vector"])
-
-    def make_axis_sample(ax_u_out, ax_v_out, label, offset_x):
-        """Combine two position components into a UV vector and sample the image."""
-        combine = node_tree.nodes.new("ShaderNodeCombineXYZ")
-        combine.name = f"{TLM_PREFIX}tri_comb_{label}_{_next_id()}"
-        combine.location = (x - 400 + offset_x, y - 300)
-        combine.inputs["Z"].default_value = 0.0
-        node_tree.links.new(ax_u_out, combine.inputs["X"])
-        node_tree.links.new(ax_v_out, combine.inputs["Y"])
-
-        # Scale via Mapping
-        mapping = node_tree.nodes.new("ShaderNodeMapping")
-        mapping.name = f"{TLM_PREFIX}tri_map_{label}_{_next_id()}"
-        mapping.location = (x - 250 + offset_x, y - 300)
-        mapping.inputs["Scale"].default_value = (scale, scale, scale)
-        node_tree.links.new(combine.outputs["Vector"], mapping.inputs["Vector"])
-
-        tex = node_tree.nodes.new("ShaderNodeTexImage")
-        tex.name = f"{TLM_PREFIX}tri_tex_{label}_{_next_id()}"
-        tex.image = image
-        tex.location = (x - 80 + offset_x, y - 300)
-        if colorspace == "Non-Color":
-            try:
-                tex.image.colorspace_settings.name = "Non-Color"
-            except Exception:
-                pass
-        node_tree.links.new(mapping.outputs["Vector"], tex.inputs["Vector"])
-        return tex.outputs["Color"]
-
-    # Sample from X axis (use Y,Z as UV)
-    col_x = make_axis_sample(sep_p.outputs["Y"], sep_p.outputs["Z"], "X", 0)
-    # Sample from Y axis (use X,Z as UV)
-    col_y = make_axis_sample(sep_p.outputs["X"], sep_p.outputs["Z"], "Y", 20)
-    # Sample from Z axis (use X,Y as UV)
-    col_z = make_axis_sample(sep_p.outputs["X"], sep_p.outputs["Y"], "Z", 40)
-
-    # Compute blending weights: abs(normal) ^ sharpness, then normalize
-    def abs_pow(val_out, label, offset_x):
-        abs_node = node_tree.nodes.new("ShaderNodeMath")
-        abs_node.operation = 'ABSOLUTE'
-        abs_node.name = f"{TLM_PREFIX}tri_abs_{label}_{_next_id()}"
-        abs_node.location = (x + 100 + offset_x, y - 150)
-        node_tree.links.new(val_out, abs_node.inputs[0])
-        pow_node = node_tree.nodes.new("ShaderNodeMath")
-        pow_node.operation = 'POWER'
-        pow_node.name = f"{TLM_PREFIX}tri_pow_{label}_{_next_id()}"
-        pow_node.location = (x + 220 + offset_x, y - 150)
-        pow_node.inputs[1].default_value = sharpness
-        node_tree.links.new(abs_node.outputs["Value"], pow_node.inputs[0])
-        return pow_node.outputs["Value"]
-
-    w_x = abs_pow(sep_n.outputs["X"], "X", 0)
-    w_y = abs_pow(sep_n.outputs["Y"], "Y", 20)
-    w_z = abs_pow(sep_n.outputs["Z"], "Z", 40)
-
-    # Normalize weights: divide each by (wx + wy + wz)
-    add_xy = node_tree.nodes.new("ShaderNodeMath")
-    add_xy.operation = 'ADD'
-    add_xy.name = f"{TLM_PREFIX}tri_addxy_{_next_id()}"
-    add_xy.location = (x + 340, y - 150)
-    node_tree.links.new(w_x, add_xy.inputs[0])
-    node_tree.links.new(w_y, add_xy.inputs[1])
-
-    add_xyz = node_tree.nodes.new("ShaderNodeMath")
-    add_xyz.operation = 'ADD'
-    add_xyz.name = f"{TLM_PREFIX}tri_addxyz_{_next_id()}"
-    add_xyz.location = (x + 460, y - 150)
-    node_tree.links.new(add_xy.outputs["Value"], add_xyz.inputs[0])
-    node_tree.links.new(w_z, add_xyz.inputs[1])
-
-    def norm_weight(w_out, label, offset_x):
-        div = node_tree.nodes.new("ShaderNodeMath")
-        div.operation = 'DIVIDE'
-        div.name = f"{TLM_PREFIX}tri_div_{label}_{_next_id()}"
-        div.location = (x + 580 + offset_x, y - 150)
-        node_tree.links.new(w_out, div.inputs[0])
-        node_tree.links.new(add_xyz.outputs["Value"], div.inputs[1])
-        return div.outputs["Value"]
-
-    nw_x = norm_weight(w_x, "X", 0)
-    nw_y = norm_weight(w_y, "Y", 20)
-    nw_z = norm_weight(w_z, "Z", 40)
-
-    # Blend: result = col_x*nw_x + col_y*nw_y + col_z*nw_z
-    def weighted_color(col_out, w_out, label, offset_x):
-        mix = node_tree.nodes.new("ShaderNodeMixRGB") if not _USE_NEW_MIX else node_tree.nodes.new("ShaderNodeMix")
-        mix.name = f"{TLM_PREFIX}tri_wmix_{label}_{_next_id()}"
-        mix.location = (x + 700 + offset_x, y - 200)
-        if _USE_NEW_MIX:
-            mix.data_type = 'RGBA'
-            mix.blend_type = 'MIX'
-            node_tree.links.new(w_out, mix.inputs["Factor"])
-            _enabled_socket(mix.inputs, "A").default_value = (0, 0, 0, 1)
-            node_tree.links.new(col_out, _enabled_socket(mix.inputs, "B"))
-            return _enabled_socket(mix.outputs, "Result")
-        else:
-            node_tree.links.new(w_out, mix.inputs["Fac"])
-            mix.inputs["Color1"].default_value = (0, 0, 0, 1)
-            node_tree.links.new(col_out, mix.inputs["Color2"])
-            return mix.outputs["Color"]
-
-    wc_x = weighted_color(col_x, nw_x, "X", 0)
-    wc_y = weighted_color(col_y, nw_y, "Y", 20)
-    wc_z = weighted_color(col_z, nw_z, "Z", 40)
-
-    # Add the three weighted colors together
-    add1 = node_tree.nodes.new("ShaderNodeMixRGB") if not _USE_NEW_MIX else node_tree.nodes.new("ShaderNodeMix")
-    add1.name = f"{TLM_PREFIX}tri_add1_{_next_id()}"
-    add1.location = (x + 880, y - 200)
-    if _USE_NEW_MIX:
-        add1.data_type = 'RGBA'
-        add1.blend_type = 'ADD'
-        add1.inputs["Factor"].default_value = 1.0
-        node_tree.links.new(wc_x, _enabled_socket(add1.inputs, "A"))
-        node_tree.links.new(wc_y, _enabled_socket(add1.inputs, "B"))
-        add1_out = _enabled_socket(add1.outputs, "Result")
-    else:
-        add1.blend_type = 'ADD'
-        add1.inputs["Fac"].default_value = 1.0
-        node_tree.links.new(wc_x, add1.inputs["Color1"])
-        node_tree.links.new(wc_y, add1.inputs["Color2"])
-        add1_out = add1.outputs["Color"]
-
-    add2 = node_tree.nodes.new("ShaderNodeMixRGB") if not _USE_NEW_MIX else node_tree.nodes.new("ShaderNodeMix")
-    add2.name = f"{TLM_PREFIX}tri_add2_{_next_id()}"
-    add2.location = (x + 1000, y - 200)
-    if _USE_NEW_MIX:
-        add2.data_type = 'RGBA'
-        add2.blend_type = 'ADD'
-        add2.inputs["Factor"].default_value = 1.0
-        node_tree.links.new(add1_out, _enabled_socket(add2.inputs, "A"))
-        node_tree.links.new(wc_z, _enabled_socket(add2.inputs, "B"))
-        final_out = _enabled_socket(add2.outputs, "Result")
-    else:
-        add2.blend_type = 'ADD'
-        add2.inputs["Fac"].default_value = 1.0
-        node_tree.links.new(add1_out, add2.inputs["Color1"])
-        node_tree.links.new(wc_z, add2.inputs["Color2"])
-        final_out = add2.outputs["Color"]
-
-    # Return a fake "node" object with .outputs["Color"] interface.
-    # Alpha is None because triplanar projection has no per-pixel alpha —
-    # previously returning the Color output as "Alpha" caused the blend factor
-    # to be driven by the pixel color instead of a proper alpha mask.
-    class _FakeNode:
-        def __init__(self, color_out):
-            self.outputs = {"Color": color_out, "Alpha": None}
-    return _FakeNode(final_out)
 
 
 def _effective_blend_mode(layer, channel_id):

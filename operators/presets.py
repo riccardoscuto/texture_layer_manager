@@ -633,9 +633,16 @@ class TLM_OT_ApplyPreset(Operator):
                 layer.mask_gen_breakup       = ld.get("mask_gen_breakup", 0.3)
                 layer.mask_gen_breakup_scale = ld.get("mask_gen_breakup_scale", 15.0)
                 layer.mask_gen_sharpness     = ld.get("mask_gen_sharpness", 0.5)
-                layer.use_triplanar     = ld.get("use_triplanar", False)
-                layer.triplanar_scale   = ld.get("triplanar_scale", 1.0)
-                layer.triplanar_sharpness = ld.get("triplanar_sharpness", 1.0)
+                # Image texture mapping config — Triplanar removed in
+                # favour of paint_projection='BOX'. Legacy presets carry
+                # use_triplanar, auto-migrate them.
+                layer.paint_interpolation    = ld.get("paint_interpolation", "Linear")
+                legacy_triplanar = ld.get("use_triplanar", False)
+                layer.paint_projection       = ld.get(
+                    "paint_projection", "BOX" if legacy_triplanar else "FLAT"
+                )
+                layer.paint_projection_blend = ld.get("paint_projection_blend", 0.3)
+                layer.paint_source           = ld.get("paint_source", "FILE")
                 # PBR channels
                 layer.use_roughness        = ld.get("use_roughness", False)
                 layer.roughness_fill       = ld.get("roughness_fill", 0.5)
@@ -828,9 +835,11 @@ class TLM_OT_SavePreset(Operator):
                 d["mask_gen_breakup"]       = getattr(layer, 'mask_gen_breakup', 0.3)
                 d["mask_gen_breakup_scale"] = getattr(layer, 'mask_gen_breakup_scale', 15.0)
                 d["mask_gen_sharpness"]     = getattr(layer, 'mask_gen_sharpness', 0.5)
-                d["use_triplanar"]     = getattr(layer, 'use_triplanar', False)
-                d["triplanar_scale"]   = getattr(layer, 'triplanar_scale', 1.0)
-                d["triplanar_sharpness"] = getattr(layer, 'triplanar_sharpness', 1.0)
+                # Image texture mapping config
+                d["paint_interpolation"]    = getattr(layer, 'paint_interpolation', 'Linear')
+                d["paint_projection"]       = getattr(layer, 'paint_projection', 'FLAT')
+                d["paint_projection_blend"] = getattr(layer, 'paint_projection_blend', 0.3)
+                d["paint_source"]           = getattr(layer, 'paint_source', 'FILE')
                 # PBR channels
                 d["use_roughness"]        = layer.use_roughness
                 d["roughness_fill"]       = layer.roughness_fill

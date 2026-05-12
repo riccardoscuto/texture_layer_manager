@@ -218,9 +218,14 @@ def _layer_to_dict(layer):
         d["mask_gen_breakup"]        = round(getattr(layer, 'mask_gen_breakup', 0.3), 4)
         d["mask_gen_breakup_scale"]  = round(getattr(layer, 'mask_gen_breakup_scale', 15.0), 4)
         d["mask_gen_sharpness"]      = round(getattr(layer, 'mask_gen_sharpness', 0.5), 4)
-        d["use_triplanar"]     = getattr(layer, 'use_triplanar', False)
-        d["triplanar_scale"]   = round(getattr(layer, 'triplanar_scale', 1.0), 4)
-        d["triplanar_sharpness"] = round(getattr(layer, 'triplanar_sharpness', 1.0), 4)
+        # Image texture mapping config (Source / Interpolation /
+        # Projection / Extension + Box blend). Triplanar used to live
+        # here as a custom feature — now replaced by paint_projection
+        # = 'BOX' which uses Blender's native triplanar.
+        d["paint_interpolation"]    = getattr(layer, 'paint_interpolation', 'Linear')
+        d["paint_projection"]       = getattr(layer, 'paint_projection', 'FLAT')
+        d["paint_projection_blend"] = round(getattr(layer, 'paint_projection_blend', 0.3), 4)
+        d["paint_source"]           = getattr(layer, 'paint_source', 'FILE')
         # PBR channels
         d["use_roughness"]     = layer.use_roughness
         d["roughness_fill"]    = round(layer.roughness_fill, 4)
@@ -416,9 +421,16 @@ def _dict_to_layer(d, tlm):
         layer.mask_gen_breakup       = d.get("mask_gen_breakup", 0.3)
         layer.mask_gen_breakup_scale = d.get("mask_gen_breakup_scale", 15.0)
         layer.mask_gen_sharpness     = d.get("mask_gen_sharpness", 0.5)
-        layer.use_triplanar     = d.get("use_triplanar", False)
-        layer.triplanar_scale   = d.get("triplanar_scale", 1.0)
-        layer.triplanar_sharpness = d.get("triplanar_sharpness", 1.0)
+        # Image texture mapping config — Triplanar removed in favour
+        # of paint_projection='BOX'. Legacy files that still carry
+        # use_triplanar=True are auto-migrated below.
+        layer.paint_interpolation    = d.get("paint_interpolation", "Linear")
+        legacy_triplanar = d.get("use_triplanar", False)
+        layer.paint_projection       = d.get(
+            "paint_projection", "BOX" if legacy_triplanar else "FLAT"
+        )
+        layer.paint_projection_blend = d.get("paint_projection_blend", 0.3)
+        layer.paint_source           = d.get("paint_source", "FILE")
         # PBR channels
         layer.use_roughness        = d.get("use_roughness", False)
         layer.roughness_fill       = d.get("roughness_fill", 0.5)

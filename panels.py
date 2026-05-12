@@ -777,20 +777,17 @@ def _draw_paint_fill(col, active, tlm):
         fr.prop(active, "fresnel_ior", text="IOR")
         fr.prop(active, "fresnel_strength", text="Str", slider=True)
 
-    col.separator(factor=0.6)
-    tr = col.row(align=True)
-    tr.prop(active, "use_triplanar", text="Triplanar", icon='ORIENTATION_GLOBAL', toggle=True)
-    if active.use_triplanar:
-        ts = col.column(align=True)
-        ts.scale_y = 0.9
-        tsr = ts.row(align=True)
-        tsr.prop(active, "triplanar_scale",     text="Scale")
-        tsr.prop(active, "triplanar_sharpness", text="Sharp", slider=True)
-
     # ── Image Mapping (paint + PBR image layers) ────────────────────────────
-    # Collapsible: Extension + Location/Rotation/Scale (per-axis), only
-    # relevant for layers that produce image textures (PAINT) or use PBR
-    # channel images (FILL / Procedural with channel images).
+    # Collapsible: Source / Interpolation / Projection / Extension plus
+    # Location/Rotation/Scale (per-axis). Mirrors the layout of Blender's
+    # native ShaderNodeTexImage panel so users moving between addons
+    # already know where to look. Only meaningful for layers that
+    # produce image textures (PAINT) or use PBR channel images (FILL /
+    # Procedural with channel images).
+    #
+    # Box projection replaces the old custom Triplanar feature: it
+    # samples along the three world axes and blends them, parametrised
+    # by `paint_projection_blend` (= Blender's "Blend" socket).
     col.separator(factor=0.6)
     mr = col.row(align=True)
     mr.prop(active, "show_paint_mapping",
@@ -800,7 +797,16 @@ def _draw_paint_fill(col, active, tlm):
     if active.show_paint_mapping:
         mbox = col.box().column(align=True)
         mbox.scale_y = 0.9
-        mbox.prop(active, "paint_extension", text="Extension")
+        # Sampling configuration: 4 dropdowns matching Blender's native
+        # Image Texture node layout (Source / Interpolation / Projection /
+        # Extension).
+        mbox.prop(active, "paint_source",        text="Source")
+        mbox.prop(active, "paint_interpolation", text="Interpolation")
+        mbox.prop(active, "paint_projection",    text="Projection")
+        if active.paint_projection == 'BOX':
+            mbox.prop(active, "paint_projection_blend", text="Blend", slider=True)
+        mbox.prop(active, "paint_extension",     text="Extension")
+        mbox.separator(factor=0.4)
         mbox.label(text="Location:")
         lr = mbox.row(align=True)
         lr.prop(active, "paint_location_x", text="X")

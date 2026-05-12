@@ -599,23 +599,12 @@ class TLM_LayerItem(PropertyGroup):
         update=_on_layer_update,
     )
 
-    # Triplanar projection — no UV needed, projects from 3 axes
-    use_triplanar: BoolProperty(
-        name="Triplanar Projection",
-        description="Project texture from 3 axes — works without UV unwrap",
-        default=False,
-        update=_on_layer_update,
-    )
-    triplanar_scale: FloatProperty(
-        name="Scale", description="Scale of the triplanar projection",
-        default=1.0, min=0.001, max=100.0,
-        update=_on_layer_update,
-    )
-    triplanar_sharpness: FloatProperty(
-        name="Blend Sharpness", default=2.0, min=0.1, max=20.0,
-        description="Higher = harder transitions between axes",
-        update=_on_layer_update,
-    )
+    # NOTE: Triplanar used to be a custom feature (use_triplanar /
+    # triplanar_scale / triplanar_sharpness). It has been removed in
+    # favour of Blender's native 'BOX' projection on the Image Texture
+    # node, exposed via paint_projection below. Box projection is
+    # cheaper (one tex node instead of three), supported in both
+    # Cycles and Eevee, and uses Object/Generated coords automatically.
 
     # Internal: name of the node group we generate for this layer
     node_group_name: StringProperty(
@@ -637,6 +626,68 @@ class TLM_LayerItem(PropertyGroup):
             ('MIRROR', "Mirror", "Mirror at the boundary (no visible seam)"),
         ],
         default='CLIP',
+        update=_on_layer_update,
+    )
+
+    # Texture filter — how the sampler picks/blends pixels at sub-texel
+    # locations. 'Linear' is the sane default; 'Closest' gives a pixel-art
+    # look; 'Cubic' is smoother for normal maps & smooth-shaded surfaces;
+    # 'Smart' is Cycles-only and adaptive (falls back to Linear in Eevee).
+    paint_interpolation: EnumProperty(
+        name="Interpolation",
+        description="Pixel sampling filter used when the image is magnified or minified",
+        items=[
+            ('Linear',  "Linear",  "Standard bilinear filtering — smooth default"),
+            ('Cubic',   "Cubic",   "Smoother filtering (good for normal maps and gradients)"),
+            ('Closest', "Closest", "Nearest-neighbour — no blending (pixel-art / 1:1 stamps)"),
+            ('Smart',   "Smart",   "Cycles only — adaptive between Cubic and Linear"),
+        ],
+        default='Linear',
+        update=_on_layer_update,
+    )
+
+    # Projection — how the UV / vector input is interpreted to sample
+    # the image. 'Flat' is the typical UV-mapped case; 'Box' is
+    # triplanar built into Blender (replaces our custom triplanar);
+    # 'Sphere' and 'Tube' are for HDR / panoramic images.
+    paint_projection: EnumProperty(
+        name="Projection",
+        description="How the image is projected onto the surface",
+        items=[
+            ('FLAT',   "Flat",   "Standard UV mapping (default)"),
+            ('BOX',    "Box",    "Triplanar — sample along the three world axes and blend"),
+            ('SPHERE', "Sphere", "Equirectangular wrap (HDR / 360°)"),
+            ('TUBE',   "Tube",   "Cylindrical wrap (labels around bottles, etc.)"),
+        ],
+        default='FLAT',
+        update=_on_layer_update,
+    )
+
+    # Box projection blend distance — only meaningful when projection
+    # is 'BOX'. Width in UV units of the blend zone between adjacent
+    # world-axis projections. 0 = hard seam, 1 = fully blended.
+    paint_projection_blend: FloatProperty(
+        name="Projection Blend",
+        description="Blend width between projections (only used for Box projection)",
+        default=0.3, min=0.0, max=1.0, subtype='FACTOR',
+        update=_make_hot_callback("paint_projection_blend"),
+    )
+
+    # Image source — what kind of image data is sampled. 'Single Image'
+    # is the standard still texture. 'Generated' lets the image's
+    # generated_color show through. 'Sequence' and 'Movie' are for
+    # animated textures (frame range + offset + duration come from
+    # the image datablock itself, this just toggles the mode).
+    paint_source: EnumProperty(
+        name="Source",
+        description="Image source type — what kind of pixel data is sampled",
+        items=[
+            ('FILE',           "Single Image", "Still image from a file"),
+            ('GENERATED',      "Generated",    "Procedurally generated (uses the image's generated_color)"),
+            ('SEQUENCE',       "Image Sequence","Numbered frames driven by the scene timeline"),
+            ('MOVIE',          "Movie",        "Video file decoded per frame"),
+        ],
+        default='FILE',
         update=_on_layer_update,
     )
 
