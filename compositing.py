@@ -1136,10 +1136,28 @@ def _new_img_tex(node_tree, image, uv_map, x, y, colorspace="sRGB", layer=None, 
         # Source lives on the image datablock (image.source), not on the
         # node. Only assign when actually different to avoid re-triggering
         # the image reload path during a rebuild.
+        #
+        # CRITICAL: blindly setting source='FILE' on a GENERATED image
+        # (a freshly-painted canvas with no filepath on disk) causes
+        # Blender to try to load the missing file and ZERO OUT the
+        # in-memory pixel buffer. Symptom: paint pixels disappear the
+        # moment output_channel toggles. Guard against the destructive
+        # direction by only writing FILE when the image really has a
+        # filepath; user-explicit choices for non-FILE sources still
+        # pass through.
         try:
             src = getattr(layer, 'paint_source', 'FILE')
             if node.image and node.image.source != src:
-                node.image.source = src
+                if src == 'FILE':
+                    if node.image.filepath:
+                        node.image.source = src
+                    # else: leave source untouched (likely GENERATED
+                    # for a TLM-created paint canvas — switching it
+                    # to FILE would wipe the unsaved pixels).
+                else:
+                    # Non-FILE target (GENERATED / SEQUENCE / MOVIE) —
+                    # user explicitly picked it via paint_source.
+                    node.image.source = src
         except Exception:
             pass
         # Projection Blend is an INPUT socket on the node — wired only
