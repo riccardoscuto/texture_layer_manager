@@ -4254,6 +4254,11 @@ def rebuild_node_tree(material):
             _restore_custom_links(node_tree, _saved_custom_links)
             _restore_node_positions(node_tree, _saved_positions)
             return
+        # Restore BSDF→Surface link if the previous rebuild's alpha wrap
+        # (Mix Shader + Transparent) was just removed by _clear_tlm_nodes.
+        # If alpha is still needed, the wrap helper re-routes through
+        # Mix Shader later in this same rebuild.
+        _ensure_bsdf_to_output(node_tree, bsdf)
 
         # Calculate where the chain ends so BSDF + passthrough nodes go to the right
         # With grid layout, find the maximum x + width across ALL rows
@@ -4350,20 +4355,29 @@ def rebuild_node_tree(material):
         if alpha_explicitly_routed:
             a_out = _build_channel(node_tree, expanded, 'alpha', uv_map, start_x, ch_y.get('alpha', 0), x_step)
             if a_out:
-                _link_to_bsdf(node_tree, a_out, bsdf,
-                              ["Alpha", "alpha"], "alpha")
-                alpha_was_connected = True
+                # Wrap through Mix Shader + Transparent BSDF — see
+                # _wire_alpha_via_transparent_bsdf for the rationale.
+                # Cycles in Blender 5.0 doesn't honour Principled BSDF.Alpha
+                # alone; the wrap fixes engine-portable transparency.
+                if _wire_alpha_via_transparent_bsdf(node_tree, a_out, bsdf):
+                    alpha_was_connected = True
+                else:
+                    # Fallback if no Material Output present
+                    _link_to_bsdf(node_tree, a_out, bsdf,
+                                  ["Alpha", "alpha"], "alpha")
+                    alpha_was_connected = True
         elif bc_alpha is not None and getattr(tlm, 'use_base_color_alpha', False):
             # Material-level opt-in: when the user wants the base color's
             # native alpha (typically the PAINT image alpha) to drive
             # surface transparency / bake. OFF by default because an empty
             # PAINT layer (alpha=0 everywhere) would otherwise unintentionally
             # hide the whole cube the moment it's added on top of a Fill.
-            # Tagged "alpha-auto" so debug can tell it apart from the
-            # explicitly-routed path.
-            _link_to_bsdf(node_tree, bc_alpha, bsdf,
-                          ["Alpha", "alpha"], "alpha-auto")
-            alpha_was_connected = True
+            if _wire_alpha_via_transparent_bsdf(node_tree, bc_alpha, bsdf):
+                alpha_was_connected = True
+            else:
+                _link_to_bsdf(node_tree, bc_alpha, bsdf,
+                              ["Alpha", "alpha"], "alpha-auto")
+                alpha_was_connected = True
 
         # Sync the material's Eevee blend method so the BSDF.Alpha input
         # is actually visible (default 'OPAQUE' silently ignores it).
@@ -5223,6 +5237,99 @@ def _find_bsdf(node_tree):
     if out:
         node_tree.links.new(bsdf.outputs["BSDF"], out.inputs["Surface"])
     return bsdf
+
+
+def _ensure_bsdf_to_output(node_tree, bsdf):
+    """Make sure BSDF.BSDF → MaterialOutput.Surface is connected.
+
+    Called after _clear_tlm_nodes removes the alpha-wrap (Mix Shader +
+    Transparent BSDF). Without this, removing the wrap would leave
+    Material Output's Surface input dangling → solid black render.
+    Idempotent: no-op if already connected to the BSDF directly.
+    """
+    mat_out = next((n for n in node_tree.nodes
+                    if n.type == 'OUTPUT_MATERIAL'
+                    and not n.name.startswith(TLM_PREFIX)), None)
+    if mat_out is None:
+        return
+    surface_input = mat_out.inputs.get("Surface")
+    if surface_input is None:
+        return
+    # Skip if already connected to this BSDF
+    for link in surface_input.links:
+        if link.from_socket.node == bsdf:
+            return
+    try:
+        node_tree.links.new(bsdf.outputs["BSDF"], surface_input)
+    except Exception:
+        pass
+
+
+def _wire_alpha_via_transparent_bsdf(node_tree, alpha_out, bsdf):
+    """Route alpha through Mix Shader + Transparent BSDF for engine portability.
+
+    Why this exists:
+      Blender 5.0 Cycles doesn't reliably honour a value driven into
+      Principled BSDF.Alpha — the surface stays opaque even when the
+      alpha is meant to be 0 (user-reported: object placed behind the
+      cube is not visible through alpha=0 regions in Cycles, while
+      Eevee correctly shows the cutout). The portable, engine-agnostic
+      pattern is to wrap the surface output:
+
+          Principled BSDF ──┐
+                            ├── Mix Shader (factor = alpha) ── Output
+          Transparent BSDF ─┘
+
+      Mix Shader factor convention: 0 → input 1, 1 → input 2. So we
+      put Transparent in slot 1 and Principled in slot 2, giving
+      alpha = 0 → invisible, alpha = 1 → opaque. Works identically in
+      both Eevee and Cycles regardless of blend_method or
+      surface_render_method.
+
+    Also keeps the alpha → BSDF.Alpha connection (for Eevee bake paths
+    and for any external tool that reads BSDF.Alpha directly).
+    """
+    mat_out = next((n for n in node_tree.nodes
+                    if n.type == 'OUTPUT_MATERIAL'
+                    and not n.name.startswith(TLM_PREFIX)), None)
+    if mat_out is None:
+        return False
+    surface_input = mat_out.inputs.get("Surface")
+    if surface_input is None:
+        return False
+
+    # Connect alpha to BSDF.Alpha too — preserves the previous Eevee
+    # path and the bake operator's "read BSDF.Alpha to get alpha
+    # output" assumption.
+    if "Alpha" in bsdf.inputs:
+        try:
+            node_tree.links.new(alpha_out, bsdf.inputs["Alpha"])
+        except Exception:
+            pass
+
+    # Drop the existing BSDF → Surface link (so we can reroute through
+    # the Mix Shader). Only drop links coming from THIS bsdf — leave
+    # any unrelated upstream alone.
+    for link in list(surface_input.links):
+        if link.from_socket.node == bsdf:
+            node_tree.links.remove(link)
+
+    trans = node_tree.nodes.new("ShaderNodeBsdfTransparent")
+    trans.name = f"{TLM_PREFIX}alpha_transparent"
+    trans.location = (bsdf.location.x + 220, bsdf.location.y - 200)
+
+    mix = node_tree.nodes.new("ShaderNodeMixShader")
+    mix.name = f"{TLM_PREFIX}alpha_mix_shader"
+    mix.location = (bsdf.location.x + 440, bsdf.location.y)
+
+    try:
+        node_tree.links.new(trans.outputs["BSDF"], mix.inputs[1])
+        node_tree.links.new(bsdf.outputs["BSDF"], mix.inputs[2])
+        node_tree.links.new(alpha_out, mix.inputs[0])  # Fac
+        node_tree.links.new(mix.outputs["Shader"], surface_input)
+    except Exception:
+        return False
+    return True
 
 
 # ── Flatten ───────────────────────────────────────────────────────────────────
