@@ -3021,16 +3021,39 @@ def _sync_material_alpha_method(material, alpha_connected, tlm):
     else:
         resolved = requested
 
-    # Legacy attribute (Blender ≤ 4.1) — may still exist on 4.2+ as a
-    # deprecated alias. Writing it when it exists is harmless.
+    # ── CRITICAL ────────────────────────────────────────────────────────
+    # In Blender 5.0, writing `mat.surface_render_method = 'DITHERED'`
+    # affects Cycles too — the surface gets rendered with stochastic
+    # dithered transparency based on BSDF.Alpha. With BSDF.Alpha at its
+    # default 1.0 this *should* be visually opaque, but in practice
+    # Cycles 5.0 viewport renders the material as fully BLACK (cube
+    # silhouette but no surface shading). User-reported regression that
+    # only appears in rendered-Cycles, never in Eevee.
+    #
+    # Resolution: only touch the render-method attributes when alpha is
+    # actually being driven. When there's no alpha layer, leave the
+    # material's blend method alone — Blender's defaults render
+    # correctly in both engines. The Mix Shader + Transparent BSDF wrap
+    # built by _wire_alpha_via_transparent_bsdf handles transparency
+    # engine-portably without depending on these properties.
+    if not alpha_connected and requested == 'AUTO':
+        # The common case: no alpha routed, no manual override.
+        # Don't write either property; default behaviour is correct.
+        return
+
+    # Legacy attribute (Blender ≤ 4.1) — still respected on 4.2+ as a
+    # deprecated alias. Safe to write only when we have a non-default
+    # reason to (alpha actually wired, or user explicitly overrode).
     if hasattr(material, 'blend_method'):
         try:
             material.blend_method = _LEGACY_BLEND_METHOD.get(resolved, 'OPAQUE')
         except (TypeError, AttributeError):
             pass
 
-    # New attribute (Blender 4.2+).
-    if hasattr(material, 'surface_render_method'):
+    # New attribute (Blender 4.2+). Only set BLENDED for explicit BLEND
+    # mode; otherwise DITHERED is the right transparency style for
+    # cutout / hashed and is safe when alpha is genuinely driven.
+    if alpha_connected and hasattr(material, 'surface_render_method'):
         try:
             material.surface_render_method = _NEW_RENDER_METHOD.get(resolved, 'DITHERED')
         except (TypeError, AttributeError):
