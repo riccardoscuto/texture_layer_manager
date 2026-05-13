@@ -1104,13 +1104,35 @@ def _new_img_tex(node_tree, image, uv_map, x, y, colorspace="sRGB", layer=None, 
     node.location = (x, y)
     # Force the colorspace explicitly — keeps the image consistent with
     # how this layer uses it (sRGB for base color, Non-Color for data).
-    # IMPORTANT: only write when actually different. Writing the same
-    # value re-triggers Blender 5.0's internal image loader which can
-    # discard paint pixels that haven't been packed yet (user reports
-    # "I painted then changed Output channel and my paint disappeared").
+    #
+    # SPECIAL CASE for PAINT layers' MAIN canvas: lock to sRGB regardless
+    # of which channel the layer is currently routed to. Why:
+    #   - The paint canvas is bpy.data.images.new() = source='GENERATED'
+    #     with no filepath on disk.
+    #   - When output_channel changes (e.g. Base Color → Roughness),
+    #     this code wants the colorspace to flip (sRGB → Non-Color).
+    #   - Blender 5.0 flipping colorspace_settings.name on a GENERATED
+    #     image WITHOUT a backing file ZEROES the in-memory pixel
+    #     buffer (it tries to re-decode from the missing file).
+    #   - Symptom: paint pixels disappear every time the user toggles
+    #     output_channel.
+    # Accepting a small gamma-curve difference when a paint canvas is
+    # routed to a scalar channel is much better than losing the user's
+    # paint work. The user's paint already looked sRGB in the image
+    # editor anyway — the visual mapping stays intuitive.
+    # Other images (FILL's PBR slot, mask images, etc.) keep the
+    # standard behaviour because they're either FILE-sourced or only
+    # ever used in one role.
+    is_paint_main_image = (
+        layer is not None
+        and getattr(layer, 'layer_type', '') == "PAINT"
+        and image is not None
+        and image.name == getattr(layer, 'image_name', '')
+    )
+    target_cs = "sRGB" if is_paint_main_image else colorspace
     try:
-        if node.image.colorspace_settings.name != colorspace:
-            node.image.colorspace_settings.name = colorspace
+        if node.image.colorspace_settings.name != target_cs:
+            node.image.colorspace_settings.name = target_cs
     except Exception:
         pass
 
