@@ -2181,7 +2181,20 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
                         sep.location = (x + 220, y)
                         node_tree.links.new(tex.outputs["Color"], sep.inputs["Color"])
                         layer_out = sep.outputs["Red"]
-                    layer_alpha = None
+                    # Keep the image alpha as the Mix factor source for
+                    # scalar routing too. Without this, "unpainted" areas
+                    # (image alpha = 0) still override whatever was below
+                    # because the Mix factor stays at opacity = 1.0
+                    # everywhere → the paint's R value (typically 0 on
+                    # an unpainted canvas) drives the entire surface.
+                    # Symptom: paint→Roughness made the whole cube
+                    # behave smooth/mirror instead of only the painted
+                    # area. The alpha channel correctly says "this
+                    # layer contributes here / doesn't contribute here".
+                    # For channel_id='alpha' there's nothing to gate
+                    # (alpha IS the layer output), so we keep None.
+                    layer_alpha = (tex.outputs["Alpha"]
+                                   if channel_id != 'alpha' else None)
                 _routed_handled = True
 
             elif channel_id == 'base_color':
@@ -2460,8 +2473,13 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
             # Color channels also need a mix whenever a layer_alpha is present
             # — otherwise a PAINT layer that's mostly transparent renders its
             # raw RGB on the alpha=0 pixels (e.g. black for an empty canvas).
+            # A scalar paint with image alpha needs the modulator mix too,
+            # so unpainted pixels (alpha=0) pass through the channel's
+            # default value instead of being overwritten with the paint's
+            # R=0 → uniform smoothness / zero metallic / etc. on the
+            # whole surface.
             needs_modulator_mix = _layer_has_first_layer_modulator(layer) or (
-                not is_scalar and not is_emission and layer_alpha is not None
+                not is_emission and layer_alpha is not None
             )
             if is_emission:
                 black = _new_fill(node_tree, (0.0, 0.0, 0.0, 1.0),
@@ -2478,14 +2496,21 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
                 prev_alpha = layer_alpha
             elif needs_modulator_mix and is_scalar:
                 # Scalar channel first-layer (roughness/metallic/transmission/
-                # alpha): mix against a 0.0 baseline so mask/fresnel/opacity/
-                # alpha can all modulate where this value is written.
-                # Earlier this branch only set the Mix Factor's default to
-                # opacity and tagged it for hot updates — no mask, no fresnel,
-                # no clipping support. Now wired through _set_factor so the
-                # full coverage chain (alpha × mask × fresnel × opacity)
-                # applies, identical to the color first-layer path.
-                base_val = _new_value(node_tree, 0.0, x - 100, y - 20,
+                # alpha): mix against a CHANNEL-DEFAULT baseline so the
+                # unpainted pixels render with the BSDF's natural default
+                # for that channel rather than a forced zero.
+                #   roughness   → 0.5 (BSDF default)
+                #   metallic    → 0.0 (BSDF default, non-metal)
+                #   transmission→ 0.0 (BSDF default, opaque)
+                #   alpha       → 1.0 (BSDF default, fully opaque)
+                # Mask / fresnel / opacity / alpha all still modulate
+                # *between* the baseline and the layer's value.
+                _CHANNEL_DEFAULTS = {
+                    'roughness': 0.5, 'metallic': 0.0,
+                    'transmission': 0.0, 'alpha': 1.0,
+                }
+                _default = _CHANNEL_DEFAULTS.get(channel_id, 0.0)
+                base_val = _new_value(node_tree, _default, x - 100, y - 20,
                                       layer_name=layer.name,
                                       channel=channel_id).outputs["Value"]
                 mix_x = x + 280
