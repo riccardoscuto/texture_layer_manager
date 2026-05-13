@@ -2173,21 +2173,14 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
                 layer_out = tex.outputs["Color"]
                 layer_alpha = tex.outputs["Alpha"] if channel_id == 'base_color' else None
                 if is_scalar:
-                    # ALL scalar targets (roughness / metallic / transmission /
-                    # alpha) read the brush colour's R channel via SeparateColor.
-                    # Previously the alpha case used tex.outputs["Alpha"]
-                    # (the image's alpha), which made the paint COLOUR
-                    # irrelevant — black brush and white brush both
-                    # produced the same fully-opaque routed value, which
-                    # surprised every user coming from Photoshop's layer
-                    # mask convention (paint black = transparent). Using
-                    # Color.R uniformly across scalars gives the intuitive
-                    # mask behaviour and matches the rest of the channels.
-                    sep = node_tree.nodes.new("ShaderNodeSeparateColor")
-                    sep.name = f"{TLM_PREFIX}routed_sep_{_next_id()}"
-                    sep.location = (x + 220, y)
-                    node_tree.links.new(tex.outputs["Color"], sep.inputs["Color"])
-                    layer_out = sep.outputs["Red"]
+                    if channel_id == 'alpha':
+                        layer_out = tex.outputs["Alpha"]
+                    else:
+                        sep = node_tree.nodes.new("ShaderNodeSeparateColor")
+                        sep.name = f"{TLM_PREFIX}routed_sep_{_next_id()}"
+                        sep.location = (x + 220, y)
+                        node_tree.links.new(tex.outputs["Color"], sep.inputs["Color"])
+                        layer_out = sep.outputs["Red"]
                     layer_alpha = None
                 _routed_handled = True
 
