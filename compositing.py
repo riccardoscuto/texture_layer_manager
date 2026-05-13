@@ -1098,6 +1098,46 @@ def _new_img_tex(node_tree, image, uv_map, x, y, colorspace="sRGB", layer=None, 
     cheaper (one tex node instead of three) and uniform across the rest
     of the engine.
     """
+    # ── Paint-canvas pixel preservation (paranoid mode) ──────────────────
+    # Two earlier fixes (eed83d6, c5454bd) plugged the known mechanisms by
+    # which Blender 5.0's image cache wipes the buffer of a GENERATED
+    # paint canvas when output_channel toggles (source flip to FILE,
+    # colorspace_settings ping-pong). Reports of pixel loss persist on
+    # some flows we haven't isolated yet — maybe `node.image = image`
+    # itself triggers a re-decode under specific cache states.
+    #
+    # Snapshot pixels BEFORE any node attribute writes, then restore at
+    # the end if the buffer was zeroed. Only for PAINT layers' main
+    # canvas (GENERATED, no filepath) — the case that gets bitten.
+    # Other images (FILE-sourced, mask, etc.) skip the snapshot to keep
+    # rebuild cheap.
+    _is_paint_canvas = (
+        layer is not None
+        and getattr(layer, 'layer_type', '') == "PAINT"
+        and image is not None
+        and image.name == getattr(layer, 'image_name', '')
+        and image.source == 'GENERATED'
+        and not image.filepath
+    )
+    _saved_pixels = None
+    if _is_paint_canvas:
+        try:
+            import numpy as np
+            _w, _h = image.size
+            _n = _w * _h * 4
+            if _n > 0:
+                _saved_pixels = np.empty(_n, dtype=np.float32)
+                image.pixels.foreach_get(_saved_pixels)
+                # Guard against snapshotting an already-zeroed buffer:
+                # if a previous rebuild already wiped it, restoring zeros
+                # would be a no-op and we'd never recover. Detect via the
+                # "has any non-zero pixel" probe; treat all-zero as
+                # "nothing worth saving".
+                if not _saved_pixels.any():
+                    _saved_pixels = None
+        except Exception:
+            _saved_pixels = None
+
     node = node_tree.nodes.new("ShaderNodeTexImage")
     node.name = f"{TLM_PREFIX}img_{image.name}_{_next_id()}"
     node.image = image
@@ -1233,6 +1273,34 @@ def _new_img_tex(node_tree, image, uv_map, x, y, colorspace="sRGB", layer=None, 
     node_tree.links.new(vec_out, node.inputs["Vector"])
     if tag_role and layer is not None:
         _tag(node, layer.name, tag_role)
+
+    # Paint-canvas pixel preservation (paranoid restore). If the buffer
+    # was zeroed by any of the attribute writes above (Blender 5.0's
+    # image cache occasionally invalidates GENERATED images during
+    # node/image/colorspace assignment), put it back. The probe is
+    # cheap — read one pixel — and the restore only fires on a real
+    # wipe, so steady-state rebuilds aren't penalised.
+    if _saved_pixels is not None:
+        try:
+            import numpy as np
+            _probe = np.empty(4, dtype=np.float32)
+            image.pixels.foreach_get(_probe)
+            # If the first pixel matches what we saved, assume buffer
+            # survived intact. If it's all zero AND we know we saved
+            # non-zero content, restore.
+            if not _probe.any() and _saved_pixels.any():
+                image.pixels.foreach_set(_saved_pixels)
+                try:
+                    image.update()
+                except Exception:
+                    pass
+                try:
+                    image.update_tag()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
     return node
 
 
