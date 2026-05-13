@@ -1175,6 +1175,16 @@ def _new_img_tex(node_tree, image, uv_map, x, y, colorspace="sRGB", layer=None, 
             node.image.colorspace_settings.name = target_cs
     except Exception:
         pass
+    if is_paint_main_image:
+        # Paint layers use the Image Texture Alpha output as coverage for
+        # the layer mix. alpha_mode='NONE' makes Cycles treat transparent
+        # paint pixels like opaque black RGB in some paths, so existing
+        # generated canvases are repaired here on every rebuild.
+        try:
+            if node.image.alpha_mode == 'NONE':
+                node.image.alpha_mode = 'STRAIGHT'
+        except Exception:
+            pass
 
     # Apply per-layer Image Texture node configuration. All of these
     # are mirrored straight from the layer property → node attribute
@@ -2984,7 +2994,11 @@ _LEGACY_BLEND_METHOD = {
     'BLEND':  'BLEND',
 }
 _NEW_RENDER_METHOD = {
-    'OPAQUE': 'DITHERED',   # 4.2+ renders alpha=1.0 fine in DITHERED — no perf loss when no alpha is driven
+    # Blender 4.2+ no longer exposes an OPAQUE surface_render_method. When
+    # alpha is not connected, leave the new API untouched instead of writing
+    # DITHERED: Cycles 5.0 can render TLM paint/fill materials black when a
+    # dithered transparency mode is forced without a real alpha route.
+    'OPAQUE': 'DITHERED',
     'CLIP':   'DITHERED',
     'HASHED': 'DITHERED',
     'BLEND':  'BLENDED',
@@ -3021,24 +3035,16 @@ def _sync_material_alpha_method(material, alpha_connected, tlm):
     else:
         resolved = requested
 
-    # ── CRITICAL ────────────────────────────────────────────────────────
-    # In Blender 5.0, writing `mat.surface_render_method = 'DITHERED'`
-    # affects Cycles too — the surface gets rendered with stochastic
-    # dithered transparency based on BSDF.Alpha. With BSDF.Alpha at its
-    # default 1.0 this *should* be visually opaque, but in practice
-    # Cycles 5.0 viewport renders the material as fully BLACK (cube
-    # silhouette but no surface shading). User-reported regression that
-    # only appears in rendered-Cycles, never in Eevee.
-    #
-    # Resolution: only touch the render-method attributes when alpha is
-    # actually being driven. When there's no alpha layer, leave the
-    # material's blend method alone — Blender's defaults render
-    # correctly in both engines. The Mix Shader + Transparent BSDF wrap
-    # built by _wire_alpha_via_transparent_bsdf handles transparency
-    # engine-portably without depending on these properties.
+    # In Blender 5.0, forcing surface_render_method='DITHERED' while TLM has
+    # no alpha route can make Cycles show a black material. For AUTO/no-alpha,
+    # do not touch the new API. On legacy Blender versions that only expose
+    # blend_method, still reset to OPAQUE so Eevee leaves transparency mode.
     if not alpha_connected and requested == 'AUTO':
-        # The common case: no alpha routed, no manual override.
-        # Don't write either property; default behaviour is correct.
+        if not hasattr(material, 'surface_render_method') and hasattr(material, 'blend_method'):
+            try:
+                material.blend_method = 'OPAQUE'
+            except (TypeError, AttributeError):
+                pass
         return
 
     # Legacy attribute (Blender ≤ 4.1) — still respected on 4.2+ as a
@@ -4230,8 +4236,15 @@ def rebuild_node_tree(material):
         # path was being skipped).
         _clear_tlm_nodes(node_tree)
         _cleanup_tlm_mask_blur_groups()
-        # Alpha can never be wired without layers — reset the material's
-        # Eevee blend method so the surface goes back to OPAQUE.
+        # If the previous rebuild used the alpha wrap, _clear_tlm_nodes()
+        # just removed the Mix Shader that fed Material Output.Surface. Put
+        # the plain BSDF back when the Surface socket is now dangling.
+        bsdf = _find_bsdf(node_tree)
+        if bsdf:
+            _ensure_bsdf_to_output(node_tree, bsdf, only_if_surface_empty=True)
+        # Alpha can never be wired without layers. On legacy Blender this
+        # resets blend_method; on Blender 4.2+/5.0 it intentionally leaves
+        # surface_render_method alone to avoid the Cycles black-surface bug.
         _sync_material_alpha_method(material, False, tlm)
         return
 
@@ -5262,30 +5275,34 @@ def _find_bsdf(node_tree):
     return bsdf
 
 
-def _ensure_bsdf_to_output(node_tree, bsdf):
+def _ensure_bsdf_to_output(node_tree, bsdf, only_if_surface_empty=False):
     """Make sure BSDF.BSDF → MaterialOutput.Surface is connected.
 
     Called after _clear_tlm_nodes removes the alpha-wrap (Mix Shader +
     Transparent BSDF). Without this, removing the wrap would leave
     Material Output's Surface input dangling → solid black render.
-    Idempotent: no-op if already connected to the BSDF directly.
+    Idempotent: no-op if already connected to the BSDF directly. When
+    only_if_surface_empty is true, custom non-TLM Surface links are left alone.
     """
     mat_out = next((n for n in node_tree.nodes
                     if n.type == 'OUTPUT_MATERIAL'
                     and not n.name.startswith(TLM_PREFIX)), None)
     if mat_out is None:
-        return
+        return False
     surface_input = mat_out.inputs.get("Surface")
     if surface_input is None:
-        return
+        return False
     # Skip if already connected to this BSDF
     for link in surface_input.links:
         if link.from_socket.node == bsdf:
-            return
+            return True
+    if only_if_surface_empty and surface_input.links:
+        return False
     try:
         node_tree.links.new(bsdf.outputs["BSDF"], surface_input)
+        return True
     except Exception:
-        pass
+        return False
 
 
 def _wire_alpha_via_transparent_bsdf(node_tree, alpha_out, bsdf):
@@ -5330,27 +5347,36 @@ def _wire_alpha_via_transparent_bsdf(node_tree, alpha_out, bsdf):
         except Exception:
             pass
 
-    # Drop the existing BSDF → Surface link (so we can reroute through
-    # the Mix Shader). Only drop links coming from THIS bsdf — leave
-    # any unrelated upstream alone.
-    for link in list(surface_input.links):
-        if link.from_socket.node == bsdf:
-            node_tree.links.remove(link)
-
-    trans = node_tree.nodes.new("ShaderNodeBsdfTransparent")
-    trans.name = f"{TLM_PREFIX}alpha_transparent"
-    trans.location = (bsdf.location.x + 220, bsdf.location.y - 200)
-
-    mix = node_tree.nodes.new("ShaderNodeMixShader")
-    mix.name = f"{TLM_PREFIX}alpha_mix_shader"
-    mix.location = (bsdf.location.x + 440, bsdf.location.y)
-
+    trans = None
+    mix = None
     try:
+        trans = node_tree.nodes.new("ShaderNodeBsdfTransparent")
+        trans.name = f"{TLM_PREFIX}alpha_transparent"
+        trans.location = (bsdf.location.x + 220, bsdf.location.y - 200)
+
+        mix = node_tree.nodes.new("ShaderNodeMixShader")
+        mix.name = f"{TLM_PREFIX}alpha_mix_shader"
+        mix.location = (bsdf.location.x + 440, bsdf.location.y)
+
         node_tree.links.new(trans.outputs["BSDF"], mix.inputs[1])
         node_tree.links.new(bsdf.outputs["BSDF"], mix.inputs[2])
         node_tree.links.new(alpha_out, mix.inputs[0])  # Fac
+
+        # Drop the existing BSDF → Surface link only after the replacement
+        # shader is internally complete. If the final Surface link fails, the
+        # except block restores the plain BSDF route.
+        for link in list(surface_input.links):
+            if link.from_socket.node == bsdf:
+                node_tree.links.remove(link)
         node_tree.links.new(mix.outputs["Shader"], surface_input)
     except Exception:
+        _ensure_bsdf_to_output(node_tree, bsdf, only_if_surface_empty=True)
+        for node in (mix, trans):
+            if node is not None:
+                try:
+                    node_tree.nodes.remove(node)
+                except Exception:
+                    pass
         return False
     return True
 

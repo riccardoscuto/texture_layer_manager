@@ -258,14 +258,11 @@ def _add_layer_common(context, layer_type):
             img.generated_color = (0.0, 0.0, 0.0, 0.0)
         except Exception:
             pass
-        # alpha_mode='NONE' tells Blender's tex node to ignore the image's
-        # alpha as a colour-space-related straight/premultiplied flag.
-        # The compositor still reads tex.outputs["Alpha"] for layer
-        # coverage — that's a separate path. With STRAIGHT (default),
-        # Blender 5.0 sometimes auto-multiplies RGB by Alpha when
-        # sampling, which fights the routing logic for paint layers.
+        # Keep the canvas alpha readable by ShaderNodeTexImage.Alpha. Using
+        # alpha_mode='NONE' makes Cycles ignore coverage in some paint-over-fill
+        # paths, so transparent black pixels leak into the Base Color mix.
         try:
-            img.alpha_mode = 'NONE'
+            img.alpha_mode = 'STRAIGHT'
         except Exception:
             pass
 
