@@ -1613,15 +1613,15 @@ class TLM_MaterialProperties(PropertyGroup):
         default=False,
     )
 
-    use_custom_slots: BoolProperty(
-        name="Custom Slots",
-        description=(
-            "Insert stable pass-through node groups between TLM channels and "
-            "the shader so custom Shader Editor nodes can survive rebuilds"
-        ),
-        default=False,
-        update=_on_layer_update,
-    )
+    # use_custom_slots: BoolProperty(
+    #     name="Custom Slots",
+    #     description=(
+    #         "Insert stable pass-through node groups between TLM channels and "
+    #         "the shader so custom Shader Editor nodes can survive rebuilds"
+    #     ),
+    #     default=False,
+    #     update=_on_layer_update,
+    # )
 
     # When ON, the alpha output of the base color chain (typically the
     # alpha of a PAINT layer's image) is wired to BSDF.Alpha. Lets a
