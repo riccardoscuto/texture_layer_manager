@@ -3,7 +3,7 @@
 import bpy
 from bpy.types import Operator
 from bpy.props import StringProperty, IntProperty
-from ._common import _get_material, _ensure_nodes, compositing
+from ._common import _get_material, _can_edit_tlm_stack, _ensure_nodes, compositing
 
 
 class TLM_OT_AddGroup(Operator):
@@ -14,7 +14,7 @@ class TLM_OT_AddGroup(Operator):
 
     @classmethod
     def poll(cls, context):
-        return _get_material(context) is not None
+        return _can_edit_tlm_stack(context)
 
     def execute(self, context):
         mat = _get_material(context)
@@ -53,7 +53,7 @@ class TLM_OT_MoveToGroup(Operator):
     @classmethod
     def poll(cls, context):
         mat = _get_material(context)
-        if not mat:
+        if not mat or mat.tlm.shader_editable:
             return False
         active = mat.tlm.active_layer
         return active is not None and active.layer_type != "GROUP"
@@ -95,7 +95,7 @@ class TLM_OT_RemoveFromGroup(Operator):
     @classmethod
     def poll(cls, context):
         mat = _get_material(context)
-        if not mat:
+        if not mat or mat.tlm.shader_editable:
             return False
         active = mat.tlm.active_layer
         return active is not None and active.group_name != ""

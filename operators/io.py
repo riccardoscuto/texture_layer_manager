@@ -8,7 +8,7 @@ import struct
 import zlib
 import numpy as np
 from bpy.types import Operator
-from ._common import _get_material, _ensure_nodes, compositing, _normalize_blend_mode
+from ._common import _get_material, _can_edit_tlm_stack, _ensure_nodes, compositing, _normalize_blend_mode
 from .pbr import CHANNEL_INFO
 
 
@@ -64,7 +64,7 @@ def _image_to_png_b64(image):
     return base64.b64encode(png_bytes).decode('ascii')
 
 
-def _png_b64_to_image(b64_str, name, expected_w, expected_h):
+def _png_b64_to_image(b64_str, name, expected_w, expected_h, replace_existing=True):
     """
     Decode a base64 PNG string back into a bpy.data.images image.
     Uses Blender's built-in image loading via a temp file.
@@ -79,11 +79,16 @@ def _png_b64_to_image(b64_str, name, expected_w, expected_h):
         tmp_path = f.name
 
     try:
-        # Remove existing image with same name to avoid conflicts
-        if name in bpy.data.images:
+        # Remove existing image with same name only for explicit import/replace
+        # flows. Presets may be merged into an existing scene and must not
+        # delete unrelated paint canvases that happen to share a name.
+        if replace_existing and name in bpy.data.images:
             bpy.data.images.remove(bpy.data.images[name])
 
-        img = bpy.data.images.load(tmp_path)
+        try:
+            img = bpy.data.images.load(tmp_path, check_existing=False)
+        except TypeError:
+            img = bpy.data.images.load(tmp_path)
         img.name = name
         img.pack()  # embed in .blend so temp file can be deleted
     finally:
@@ -113,6 +118,7 @@ def _layer_to_dict(layer):
         "blend_mode_emission":     getattr(layer, 'blend_mode_emission',     'INHERIT'),
         "blend_mode_transmission": getattr(layer, 'blend_mode_transmission', 'INHERIT'),
         "blend_mode_alpha":        getattr(layer, 'blend_mode_alpha',        'INHERIT'),
+        "alpha_math_operation":    getattr(layer, 'alpha_math_operation',    'MULTIPLY'),
     }
 
     if layer.layer_type == "PAINT":
@@ -302,6 +308,10 @@ def _dict_to_layer(d, tlm):
     layer.blend_mode_emission     = d.get("blend_mode_emission",     "INHERIT")
     layer.blend_mode_transmission = d.get("blend_mode_transmission", "INHERIT")
     layer.blend_mode_alpha        = d.get("blend_mode_alpha",        "INHERIT")
+    try:
+        layer.alpha_math_operation = d.get("alpha_math_operation", "MULTIPLY")
+    except (TypeError, ValueError):
+        layer.alpha_math_operation = "MULTIPLY"
 
     if layer.layer_type == "PAINT":
         img_name = d.get("image_name", layer.name)
@@ -539,7 +549,7 @@ class TLM_OT_ImportJSON(Operator):
 
     @classmethod
     def poll(cls, context):
-        return _get_material(context) is not None
+        return _can_edit_tlm_stack(context)
 
     def invoke(self, context, event):
         context.window_manager.fileselect_add(self)
@@ -632,7 +642,7 @@ class TLM_OT_LayerFromClipboard(Operator):
 
     @classmethod
     def poll(cls, context):
-        return _get_material(context) is not None
+        return _can_edit_tlm_stack(context)
 
     def execute(self, context):
         mat = _get_material(context)

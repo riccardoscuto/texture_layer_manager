@@ -4,7 +4,8 @@ import os
 import json
 import bpy
 from bpy.types import Operator
-from ._common import _get_material, _ensure_nodes, compositing, _normalize_blend_mode
+from ._common import _get_material, _can_edit_tlm_stack, _ensure_nodes, compositing, _normalize_blend_mode
+from .io import _image_to_png_b64, _png_b64_to_image
 
 
 # Built-in presets shipped with the addon
@@ -437,7 +438,7 @@ class TLM_OT_ApplyPreset(Operator):
 
     @classmethod
     def poll(cls, context):
-        return _get_material(context) is not None
+        return _can_edit_tlm_stack(context)
 
     def execute(self, context):
         mat = _get_material(context)
@@ -502,12 +503,50 @@ class TLM_OT_ApplyPreset(Operator):
             layer.blend_mode_emission     = ld.get("blend_mode_emission",     "INHERIT")
             layer.blend_mode_transmission = ld.get("blend_mode_transmission", "INHERIT")
             layer.blend_mode_alpha        = ld.get("blend_mode_alpha",        "INHERIT")
+            try:
+                layer.alpha_math_operation = ld.get("alpha_math_operation", "MULTIPLY")
+            except (TypeError, ValueError):
+                layer.alpha_math_operation = "MULTIPLY"
 
             # blend_mode: map UI names to internal enum values via the
             # shared normaliser (kept in sync with operators/io.py).
             layer.blend_mode = _normalize_blend_mode(ld.get("blend_mode"))
 
-            if layer.layer_type == "FILL":
+            if layer.layer_type == "PAINT":
+                img_name = ld.get("image_name", layer.name) or layer.name
+                img_data = ld.get("image_data")
+                img = None
+                if img_data:
+                    try:
+                        img = _png_b64_to_image(
+                            img_data, img_name, 0, 0,
+                            replace_existing=False,
+                        )
+                    except Exception as e:
+                        print(f"[TLM] Could not restore paint image '{img_name}' from preset: {e}")
+                        img = None
+                if img is None:
+                    # Backward compatibility for older lightweight presets:
+                    # keep the PAINT layer alive with a transparent canvas
+                    # instead of importing a layer that cannot build nodes.
+                    res = int(tlm.resolution)
+                    img = bpy.data.images.new(img_name, width=res, height=res, alpha=True)
+                    try:
+                        img.pixels[:] = [0.0] * (res * res * 4)
+                    except Exception:
+                        pass
+                try:
+                    img.alpha_mode = 'STRAIGHT'
+                except Exception:
+                    pass
+                try:
+                    img.colorspace_settings.name = "sRGB"
+                except Exception:
+                    pass
+                img.use_fake_user = True
+                layer.image_name = img.name
+
+            elif layer.layer_type == "FILL":
                 layer.fill_color = ld.get("fill_color", [1,1,1,1])
             elif layer.layer_type == "PROCEDURAL":
                 # Back-compat: CLOUDS was merged into NOISE; proc_checker_scale
@@ -708,7 +747,8 @@ class TLM_OT_SavePreset(Operator):
         preset_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "presets")
         os.makedirs(preset_dir, exist_ok=True)
 
-        # Serialize layers (without image pixel data — presets are lightweight)
+        # Serialize layers. PAINT layers embed their image pixels so a preset
+        # loaded in a fresh .blend can actually rebuild the paint nodes.
         layers_data = []
         for layer in tlm.layers:
             d = {
@@ -727,8 +767,12 @@ class TLM_OT_SavePreset(Operator):
             d["blend_mode_emission"]     = getattr(layer, 'blend_mode_emission',     'INHERIT')
             d["blend_mode_transmission"] = getattr(layer, 'blend_mode_transmission', 'INHERIT')
             d["blend_mode_alpha"]        = getattr(layer, 'blend_mode_alpha',        'INHERIT')
+            d["alpha_math_operation"]    = getattr(layer, 'alpha_math_operation',    'MULTIPLY')
 
-            if layer.layer_type == "FILL":
+            if layer.layer_type == "PAINT":
+                d["image_name"] = layer.image_name or layer.name
+                d["image_data"] = _image_to_png_b64(layer.image)
+            elif layer.layer_type == "FILL":
                 d["fill_color"] = list(layer.fill_color)
             elif layer.layer_type == "REFERENCE":
                 d["reference_layer_name"] = getattr(layer, 'reference_layer_name', "")

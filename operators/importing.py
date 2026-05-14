@@ -3,7 +3,7 @@
 import os
 import bpy
 from bpy.types import Operator
-from ._common import _get_material, _ensure_nodes, compositing, previews
+from ._common import _get_material, _can_edit_tlm_stack, _ensure_nodes, compositing, previews
 from .pbr import CHANNEL_INFO
 
 
@@ -40,7 +40,7 @@ class TLM_OT_ImportTextureAsLayer(Operator):
 
     @classmethod
     def poll(cls, context):
-        return _get_material(context) is not None
+        return _can_edit_tlm_stack(context)
 
     def invoke(self, context, event):
         context.window_manager.fileselect_add(self)
@@ -247,7 +247,7 @@ class TLM_OT_ImportPBRSet(Operator):
 
     @classmethod
     def poll(cls, context):
-        return _get_material(context) is not None
+        return _can_edit_tlm_stack(context)
 
     def invoke(self, context, event):
         context.window_manager.fileselect_add(self)

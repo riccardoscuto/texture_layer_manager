@@ -106,6 +106,8 @@ class TLM_UL_LayerList(UIList):
             return
 
         row = layout.row(align=True)
+        if getattr(data, "shader_editable", False):
+            row.enabled = False
 
         is_child = layer.group_name != ""
         if is_child:
@@ -173,15 +175,12 @@ class TLM_UL_LayerList(UIList):
             op.layer_index = index
             clip_icon = 'CLIPUV_HLT' if layer.use_clipping_mask else 'CLIPUV_DEHLT'
             row.prop(layer, "use_clipping_mask", text="", icon=clip_icon, emboss=False)
-            # Blend mode is meaningless on an Alpha-routed layer (alpha
-            # is coverage, not a colour input — see _effective_blend_mode
-            # which forces 'MIX' for channel_id='alpha'). Grey the
-            # dropdown out instead of hiding it so the column layout
-            # stays aligned across rows.
-            bm_row = row.row(align=True)
+            # Alpha uses Shader Math operations instead of artistic colour
+            # blend modes.
             if getattr(layer, 'output_channel', 'BASE_COLOR') == 'ALPHA':
-                bm_row.enabled = False
-            bm_row.prop(layer, "blend_mode", text="")
+                row.prop(layer, "alpha_math_operation", text="")
+            else:
+                row.prop(layer, "blend_mode", text="")
             row.prop(layer, "opacity", text="", slider=True)
         elif layer.layer_type == "GROUP":
             row.prop(layer, "opacity", text="", slider=True)
@@ -225,13 +224,23 @@ def draw_tlm_main(layout, context):
     badge = header.row(align=True)
     badge.alignment = 'RIGHT'
     badge.label(text=f"{n} layer{'s' if n != 1 else ''}")
-    ac_icon = 'LINKED' if tlm.auto_composite else 'UNLINKED'
-    badge.prop(tlm, "auto_composite", text="", icon=ac_icon, toggle=True, emboss=True)
+    if tlm.shader_editable:
+        badge.label(text="Editable", icon='NODE_MATERIAL')
+    else:
+        ac_icon = 'LINKED' if tlm.auto_composite else 'UNLINKED'
+        badge.prop(tlm, "auto_composite", text="", icon=ac_icon, toggle=True, emboss=True)
 
     layout.separator(factor=0.5)
+    if tlm.shader_editable:
+        note = layout.box()
+        note.label(text="Editable Shader mode", icon='NODE_MATERIAL')
+        note.label(text="TLM rebuilds are disabled for this material.")
+        row = note.row(align=True)
+        row.operator("tlm.return_to_managed_shader", text="Return to TLM", icon='FILE_REFRESH')
 
     add_row = layout.row(align=True)
     add_row.scale_y = 1.1
+    add_row.enabled = not tlm.shader_editable
     # Layer-type buttons in alphabetical order (Adj / Fill / Paint /
     # Proc / Ref) so they're predictable to find regardless of which
     # type the user reaches for first.
@@ -246,6 +255,7 @@ def draw_tlm_main(layout, context):
     add_row.operator("tlm.layer_from_clipboard",    text="", icon='COPYDOWN')
 
     ops_row = layout.row(align=True)
+    ops_row.enabled = not tlm.shader_editable
     ops_row.operator("tlm.remove_layer",    text="", icon='TRASH')
     ops_row.separator()
     ops_row.operator("tlm.move_layer_to_end", text="", icon='TRIA_UP_BAR').direction = "TOP"
@@ -265,7 +275,9 @@ def draw_tlm_main(layout, context):
     active = tlm.active_layer
     if not active:
         return
-    _draw_active_layer(layout, active, tlm, mat)
+    layer_details = layout.column()
+    layer_details.enabled = not tlm.shader_editable
+    _draw_active_layer(layer_details, active, tlm, mat)
 
 
 def _draw_active_layer(layout, active, tlm, mat):
@@ -305,7 +317,9 @@ def _draw_active_layer(layout, active, tlm, mat):
         # Blend mode + opacity row — group treats its composited output as a
         # single layer, so these apply to the entire folder.
         br = col.row(align=True)
-        if getattr(active, 'output_channel', 'BASE_COLOR') != 'ALPHA':
+        if getattr(active, 'output_channel', 'BASE_COLOR') == 'ALPHA':
+            br.prop(active, "alpha_math_operation", text="")
+        else:
             br.prop(active, "blend_mode", text="")
         br.prop(active, "opacity", text="Opacity", slider=True)
         br.operator("tlm.keyframe_opacity", text="", icon='KEYFRAME_HLT',
@@ -330,10 +344,9 @@ def _draw_active_layer(layout, active, tlm, mat):
 def _draw_procedural(col, active, tlm):
     # Blend mode + Opacity at top (same position as Fill/Paint)
     br = col.row(align=True)
-    # Hide blend mode when the layer routes to Alpha — alpha is coverage,
-    # not a colour; artistic blend modes (Overlay/Hard Light/etc.) make no
-    # sense there. The compositor force-sets MIX for alpha regardless.
-    if getattr(active, 'output_channel', 'BASE_COLOR') != 'ALPHA':
+    if getattr(active, 'output_channel', 'BASE_COLOR') == 'ALPHA':
+        br.prop(active, "alpha_math_operation", text="")
+    else:
         br.prop(active, "blend_mode", text="")
     br.prop(active, "opacity",    text="Opacity", slider=True)
     br.operator("tlm.keyframe_opacity", text="", icon='KEYFRAME_HLT',
@@ -630,10 +643,10 @@ def _draw_mask_block(col, active):
 def _draw_reference(col, active, tlm):
     """Reference layer UI — reuses another layer's pattern with its own blend/mask/channels."""
     br = col.row(align=True)
-    # Hide blend mode when the layer routes to Alpha — alpha is coverage,
-    # not a colour; artistic blend modes (Overlay/Hard Light/etc.) make no
-    # sense there. The compositor force-sets MIX for alpha regardless.
-    if getattr(active, 'output_channel', 'BASE_COLOR') != 'ALPHA':
+    # Alpha uses Shader Math operations instead of artistic colour blends.
+    if getattr(active, 'output_channel', 'BASE_COLOR') == 'ALPHA':
+        br.prop(active, "alpha_math_operation", text="")
+    else:
         br.prop(active, "blend_mode", text="")
     br.prop(active, "opacity",    text="Opacity", slider=True)
     br.operator("tlm.keyframe_opacity", text="", icon='KEYFRAME_HLT',
@@ -741,7 +754,9 @@ def _draw_adjustment(col, active, tlm):
 
 def _draw_paint_fill(col, active, tlm):
     br = col.row(align=True)
-    if getattr(active, 'output_channel', 'BASE_COLOR') != 'ALPHA':
+    if getattr(active, 'output_channel', 'BASE_COLOR') == 'ALPHA':
+        br.prop(active, "alpha_math_operation", text="")
+    else:
         br.prop(active, "blend_mode", text="")
     br.prop(active, "opacity",    text="", slider=True)
     br.operator("tlm.keyframe_opacity", text="", icon='KEYFRAME_HLT',
@@ -930,6 +945,8 @@ def _draw_pbr_channels(col, layer, tlm):
                                        bpy.data, "images", text="Mask Image")
                 if layer.blend_mode == "ADD":
                     pc.label(text="ADD + Emission: use only one", icon='ERROR')
+            if ch_id == 'alpha' and enabled:
+                pc.prop(layer, "alpha_math_operation", text="Operation")
         else:
             op = ch_row.operator("tlm.add_channel_image", text="", icon='ADD', emboss=False)
             op.channel = ch_id
@@ -1001,11 +1018,21 @@ def _draw_canvas_section(layout, tlm):
 
 def _draw_composite_section(layout, tlm):
     comp = layout.column(align=True)
+    if tlm.shader_editable:
+        box = comp.box()
+        box.label(text="Editable Shader mode", icon='NODE_MATERIAL')
+        box.label(text="Layer changes will not rebuild the shader.")
+        box.operator("tlm.return_to_managed_shader",
+                     text="Return to TLM Managed", icon='FILE_REFRESH')
+        return
+
     ac_icon = 'LINKED' if tlm.auto_composite else 'UNLINKED'
     comp.prop(tlm, "auto_composite", text="Auto Composite",
               icon=ac_icon, toggle=True)
     comp.prop(tlm, "use_base_color_alpha",
               text="Use Paint Alpha", icon='IMAGE_ALPHA', toggle=True)
+    comp.prop(tlm, "use_custom_slots",
+              text="Custom Slots", icon='NODETREE', toggle=True)
     # Eevee transparency mode. AUTO picks Hashed when an alpha layer
     # exists, Opaque otherwise — the right default 95% of the time.
     # Manual override for the rare glass / forced-cutout cases.
@@ -1013,6 +1040,8 @@ def _draw_composite_section(layout, tlm):
     ops_row = comp.row(align=True)
     ops_row.operator("tlm.rebuild_composite", text="Rebuild", icon='FILE_REFRESH')
     ops_row.operator("tlm.flatten_layers",    text="Flatten", icon='IMAGE_ZDEPTH')
+    comp.operator("tlm.convert_to_editable_shader",
+                  text="Convert to Editable Shader", icon='NODE_MATERIAL')
     comp.operator("tlm.refresh_thumbnails",
                   text="Refresh Thumbnails", icon='FILE_REFRESH')
 

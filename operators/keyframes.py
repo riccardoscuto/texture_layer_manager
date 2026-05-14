@@ -3,7 +3,7 @@
 import bpy
 from bpy.types import Operator
 from bpy.props import EnumProperty
-from ._common import _get_material
+from ._common import _get_material, _can_edit_tlm_stack
 
 
 class TLM_OT_KeyframeOpacity(Operator):
@@ -23,7 +23,7 @@ class TLM_OT_KeyframeOpacity(Operator):
     @classmethod
     def poll(cls, context):
         mat = _get_material(context)
-        return mat is not None and mat.tlm.active_layer is not None
+        return _can_edit_tlm_stack(context) and mat.tlm.active_layer is not None
 
     def execute(self, context):
         mat = _get_material(context)

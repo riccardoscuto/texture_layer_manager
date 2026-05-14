@@ -2,7 +2,7 @@ import bpy
 from bpy.types import Operator
 from bpy.props import StringProperty, IntProperty, EnumProperty, BoolProperty
 
-from ._common import _get_material, _add_layer_common, compositing, previews
+from ._common import _get_material, _can_edit_tlm_stack, _add_layer_common, compositing, previews
 
 
 class TLM_OT_AddPaintLayer(Operator):
@@ -13,7 +13,7 @@ class TLM_OT_AddPaintLayer(Operator):
 
     @classmethod
     def poll(cls, context):
-        return _get_material(context) is not None
+        return _can_edit_tlm_stack(context)
 
     def execute(self, context):
         name = _add_layer_common(context, "PAINT")
@@ -92,7 +92,7 @@ class TLM_OT_AddFillLayer(Operator):
 
     @classmethod
     def poll(cls, context):
-        return _get_material(context) is not None
+        return _can_edit_tlm_stack(context)
 
     def execute(self, context):
         name = _add_layer_common(context, "FILL")
@@ -111,7 +111,7 @@ class TLM_OT_AddAdjustmentLayer(Operator):
 
     @classmethod
     def poll(cls, context):
-        return _get_material(context) is not None
+        return _can_edit_tlm_stack(context)
 
     def execute(self, context):
         name = _add_layer_common(context, "ADJUSTMENT")
@@ -130,7 +130,7 @@ class TLM_OT_AddProceduralLayer(Operator):
 
     @classmethod
     def poll(cls, context):
-        return _get_material(context) is not None
+        return _can_edit_tlm_stack(context)
 
     def execute(self, context):
         name = _add_layer_common(context, "PROCEDURAL")
@@ -156,7 +156,7 @@ class TLM_OT_AddReferenceLayer(Operator):
     def poll(cls, context):
         mat = _get_material(context)
         # Need at least one non-REFERENCE layer to reference
-        if mat is None:
+        if mat is None or mat.tlm.shader_editable:
             return False
         return any(l.layer_type != "REFERENCE" for l in mat.tlm.layers)
 
@@ -201,7 +201,7 @@ class TLM_OT_RemoveLayer(Operator):
     @classmethod
     def poll(cls, context):
         mat = _get_material(context)
-        return mat is not None and len(mat.tlm.layers) > 0
+        return mat is not None and not mat.tlm.shader_editable and len(mat.tlm.layers) > 0
 
     def execute(self, context):
         mat = _get_material(context)
@@ -248,7 +248,7 @@ class TLM_OT_MoveLayer(Operator):
     @classmethod
     def poll(cls, context):
         mat = _get_material(context)
-        return mat is not None and len(mat.tlm.layers) > 1
+        return mat is not None and not mat.tlm.shader_editable and len(mat.tlm.layers) > 1
 
     def execute(self, context):
         mat = _get_material(context)
@@ -286,7 +286,7 @@ class TLM_OT_DuplicateLayer(Operator):
     @classmethod
     def poll(cls, context):
         mat = _get_material(context)
-        return mat is not None and mat.tlm.active_layer is not None
+        return mat is not None and not mat.tlm.shader_editable and mat.tlm.active_layer is not None
 
     def execute(self, context):
         mat = _get_material(context)
@@ -352,7 +352,7 @@ class TLM_OT_MoveLayerToEnd(Operator):
     @classmethod
     def poll(cls, context):
         mat = _get_material(context)
-        return mat is not None and len(mat.tlm.layers) > 1
+        return mat is not None and not mat.tlm.shader_editable and len(mat.tlm.layers) > 1
 
     def execute(self, context):
         mat = _get_material(context)

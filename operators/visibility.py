@@ -3,7 +3,7 @@
 import bpy
 from bpy.types import Operator
 from bpy.props import IntProperty
-from ._common import _get_material, compositing
+from ._common import _get_material, _can_edit_tlm_stack, compositing
 
 
 class TLM_OT_SetActivePaintLayer(Operator):
@@ -16,7 +16,7 @@ class TLM_OT_SetActivePaintLayer(Operator):
 
     @classmethod
     def poll(cls, context):
-        return _get_material(context) is not None
+        return _can_edit_tlm_stack(context)
 
     def execute(self, context):
         mat = _get_material(context)
@@ -59,7 +59,7 @@ class TLM_OT_ToggleLayerVisibility(Operator):
 
     @classmethod
     def poll(cls, context):
-        return _get_material(context) is not None
+        return _can_edit_tlm_stack(context)
 
     def execute(self, context):
         mat = _get_material(context)
@@ -91,7 +91,7 @@ class TLM_OT_SoloLayer(Operator):
 
     @classmethod
     def poll(cls, context):
-        return _get_material(context) is not None
+        return _can_edit_tlm_stack(context)
 
     def execute(self, context):
         mat = _get_material(context)

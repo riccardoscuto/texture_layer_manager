@@ -16,6 +16,17 @@ def _get_material(context):
     return None
 
 
+def _is_shader_editable_material(mat):
+    """True when this material has been handed over to manual Shader Editor edits."""
+    return bool(mat and getattr(mat.tlm, "shader_editable", False))
+
+
+def _can_edit_tlm_stack(context):
+    """Return True when TLM layer-stack operators may mutate the material."""
+    mat = _get_material(context)
+    return mat is not None and not _is_shader_editable_material(mat)
+
+
 # ─── Blend mode normalisation (legacy import compat) ─────────────────────────
 #
 # Older .tlm files (TLM ≤ v0.3) saved blend modes as UI-style title-case
@@ -65,7 +76,7 @@ def _normalize_blend_mode(value, default="MIX"):
 
 # ─── Bake safety ──────────────────────────────────────────────────────────────
 
-def _bake_preflight(context):
+def _bake_preflight(context, material=None):
     """Validate pre-conditions for any bake operation.
 
     Returns (ok: bool, error_message: str).
@@ -81,6 +92,29 @@ def _bake_preflight(context):
         return False, f"Mesh '{obj.name}' has no UV map. Unwrap it first (U → Smart UV Project)."
     if len(mesh.polygons) == 0:
         return False, f"Mesh '{obj.name}' has no faces to bake onto."
+    if not obj.active_material:
+        return False, f"Object '{obj.name}' has no active material to bake."
+    if material is not None and obj.active_material != material:
+        return False, "Active material changed before bake. Select the material you want to bake."
+
+    # Blender bakes every face on the object. If other material slots are used,
+    # those slots also need an active bake image node, otherwise the operation
+    # can fail or produce partial maps. Keep the add-on path explicit: bake one
+    # TLM material at a time on geometry assigned to that active material.
+    active_index = obj.active_material_index
+    used_indices = {poly.material_index for poly in mesh.polygons}
+    if active_index not in used_indices:
+        return False, (
+            f"Active material '{obj.active_material.name}' is not assigned to any face on "
+            f"'{obj.name}'. Assign it to the mesh before baking."
+        )
+    other_indices = sorted(idx for idx in used_indices if idx != active_index)
+    if other_indices:
+        return False, (
+            f"Object '{obj.name}' uses multiple material slots on its faces. "
+            "Bake/export currently works on one active material at a time: isolate those faces "
+            "or assign the active material to the whole bake object first."
+        )
     return True, ""
 
 
@@ -89,10 +123,13 @@ class _BakeGuard:
 
     On entry:
       - Forces render engine to CYCLES (required by bpy.ops.object.bake).
+      - Switches the bake object to Object Mode and selects only that object.
+      - Disables selected-to-active baking while the add-on bakes its images.
       - Snapshots node-tree selection + active node.
 
     On exit:
       - Restores render engine.
+      - Restores bake settings, active object, object mode, and object selection.
       - Restores node selection + active node.
       - Removes every image still sitting in the `register_orphan()` queue,
         i.e. bake targets that were created but never `commit()`-ed.
@@ -119,22 +156,84 @@ class _BakeGuard:
             guard.commit()
     """
 
-    def __init__(self, context, node_tree):
+    _BAKE_SETTING_PROPS = (
+        "target",
+        "save_mode",
+        "use_selected_to_active",
+        "use_clear",
+    )
+
+    def __init__(self, context, node_tree, obj=None):
         self.context = context
         self.node_tree = node_tree
+        self.obj = obj or context.active_object
         self._engine_backup = None
+        self._bake_settings_backup = {}
+        self._active_object_backup = None
+        self._selected_objects_backup = []
+        self._object_mode_backup = None
+        self._active_material_index_backup = None
         self._active_node_backup = None
         self._node_selection_backup = {}
         self._orphans = []
 
     def __enter__(self):
         scene = self.context.scene
+        view_layer = self.context.view_layer
+        obj = self.obj
+
+        self._active_object_backup = view_layer.objects.active
+        self._selected_objects_backup = list(self.context.selected_objects)
+        if obj is not None and obj.name in bpy.data.objects:
+            self._object_mode_backup = getattr(obj, "mode", None)
+            self._active_material_index_backup = getattr(obj, "active_material_index", None)
+            try:
+                view_layer.objects.active = obj
+            except Exception:
+                pass
+            try:
+                if obj.mode != 'OBJECT':
+                    bpy.ops.object.mode_set(mode='OBJECT')
+            except Exception:
+                pass
+            try:
+                for ob in self.context.scene.objects:
+                    ob.select_set(False)
+                obj.select_set(True)
+                view_layer.objects.active = obj
+            except Exception:
+                pass
         self._engine_backup = scene.render.engine
         if self._engine_backup != 'CYCLES':
             try:
                 scene.render.engine = 'CYCLES'
             except Exception:
                 # Cycles unavailable — extremely rare in Blender 5.0, let caller fail naturally
+                pass
+
+        bake_settings = getattr(scene.render, "bake", None)
+        if bake_settings is not None:
+            for prop in self._BAKE_SETTING_PROPS:
+                if hasattr(bake_settings, prop):
+                    try:
+                        self._bake_settings_backup[prop] = getattr(bake_settings, prop)
+                    except Exception:
+                        pass
+            try:
+                bake_settings.use_selected_to_active = False
+            except Exception:
+                pass
+            try:
+                bake_settings.target = 'IMAGE_TEXTURES'
+            except Exception:
+                pass
+            try:
+                bake_settings.save_mode = 'INTERNAL'
+            except Exception:
+                pass
+            try:
+                bake_settings.use_clear = True
+            except Exception:
                 pass
 
         if self.node_tree:
@@ -166,11 +265,59 @@ class _BakeGuard:
             except Exception:
                 pass
 
+        # Restore bake settings
+        bake_settings = getattr(self.context.scene.render, "bake", None)
+        if bake_settings is not None:
+            for prop, value in self._bake_settings_backup.items():
+                try:
+                    setattr(bake_settings, prop, value)
+                except Exception:
+                    pass
+
         # Restore render engine
         try:
             self.context.scene.render.engine = self._engine_backup
         except Exception:
             pass
+
+        # Restore object selection / active material / active object / mode.
+        obj = self.obj
+        view_layer = self.context.view_layer
+        if obj is not None and obj.name in bpy.data.objects:
+            try:
+                if getattr(obj, "mode", None) != 'OBJECT':
+                    view_layer.objects.active = obj
+                    bpy.ops.object.mode_set(mode='OBJECT')
+            except Exception:
+                pass
+            if self._active_material_index_backup is not None:
+                try:
+                    obj.active_material_index = self._active_material_index_backup
+                except Exception:
+                    pass
+        try:
+            for ob in self.context.scene.objects:
+                ob.select_set(False)
+            for ob in self._selected_objects_backup:
+                if ob is not None and ob.name in bpy.data.objects:
+                    ob.select_set(True)
+        except Exception:
+            pass
+        try:
+            if (self._active_object_backup is not None
+                    and self._active_object_backup.name in bpy.data.objects):
+                view_layer.objects.active = self._active_object_backup
+        except Exception:
+            pass
+        if (obj is not None and obj.name in bpy.data.objects
+                and self._object_mode_backup
+                and self._object_mode_backup != 'OBJECT'):
+            try:
+                view_layer.objects.active = obj
+                obj.select_set(True)
+                bpy.ops.object.mode_set(mode=self._object_mode_backup)
+            except Exception:
+                pass
 
         return False  # never suppress exceptions
 
@@ -195,6 +342,8 @@ def _add_layer_common(context, layer_type):
     """Shared logic for all add-layer operators."""
     mat = _get_material(context)
     if not mat:
+        return None
+    if _is_shader_editable_material(mat):
         return None
     _ensure_nodes(mat)
     tlm = mat.tlm

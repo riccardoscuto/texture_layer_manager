@@ -2,7 +2,7 @@
 
 import bpy
 from bpy.types import Operator
-from ._common import _get_material, compositing, _BakeGuard, _bake_preflight
+from ._common import _get_material, _can_edit_tlm_stack, compositing, _BakeGuard, _bake_preflight
 
 
 class TLM_OT_AddLayerMask(Operator):
@@ -14,7 +14,7 @@ class TLM_OT_AddLayerMask(Operator):
     @classmethod
     def poll(cls, context):
         mat = _get_material(context)
-        return mat is not None and mat.tlm.active_layer is not None
+        return _can_edit_tlm_stack(context) and mat.tlm.active_layer is not None
 
     def execute(self, context):
         mat = _get_material(context)
@@ -78,7 +78,7 @@ class TLM_OT_AddSmartMask(Operator):
     @classmethod
     def poll(cls, context):
         mat = _get_material(context)
-        return mat is not None and mat.tlm.active_layer is not None
+        return _can_edit_tlm_stack(context) and mat.tlm.active_layer is not None
 
     def invoke(self, context, event):
         return context.window_manager.invoke_props_dialog(self, width=300)
@@ -104,7 +104,7 @@ class TLM_OT_AddSmartMask(Operator):
         # Pre-flight: UVs / mesh / active object. Smart masks use Cycles bake
         # ('AO' / 'DIFFUSE') which requires all of these — fail fast with a
         # useful message rather than a silent console error.
-        ok, err = _bake_preflight(context)
+        ok, err = _bake_preflight(context, mat)
         if not ok:
             self.report({'ERROR'}, err)
             return {'CANCELLED'}
@@ -127,7 +127,7 @@ class TLM_OT_AddSmartMask(Operator):
         bake_ok = False
         # _BakeGuard forces CYCLES, restores node selection, and auto-removes
         # the bake image on failure so bpy.data.images is left clean.
-        with _BakeGuard(context, node_tree) as guard:
+        with _BakeGuard(context, node_tree, context.active_object) as guard:
             img = bpy.data.images.new(img_name, width=res, height=res, alpha=False)
             guard.register_orphan(img)
             try:

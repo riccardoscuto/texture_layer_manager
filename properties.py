@@ -38,7 +38,7 @@ def _do_deferred_rebuild():
     try:
         for mat_name in mats_to_rebuild:
             mat = bpy.data.materials.get(mat_name)
-            if mat and mat.tlm.auto_composite:
+            if mat and mat.tlm.auto_composite and not mat.tlm.shader_editable:
                 compositing.rebuild_node_tree(mat)
         # Force shader editor redraw — timer callbacks don't
         # automatically trigger UI updates like operators do.
@@ -54,7 +54,7 @@ def _do_deferred_rebuild():
     return None  # returning None unregisters the timer
 
 
-def cancel_pending_rebuild():
+def cancel_pending_rebuild(material_name=None):
     """Cancel any pending deferred rebuild.
 
     Call this from operators that invoke compositing.rebuild_node_tree()
@@ -62,12 +62,20 @@ def cancel_pending_rebuild():
     that clears and recreates all nodes (which can fail to trigger a UI
     redraw in the shader editor).
 
-    Empties the pending set AND unregisters the timer. The previous version
-    only emptied the set — the timer still fired and was a no-op, but until
-    it fired (~200ms) it could race with the explicit rebuild.
+    When material_name is provided, only that material is removed from the
+    pending set. This prevents an explicit rebuild for Material A from
+    swallowing a queued rebuild for Material B in multi-material scenes.
+    With no material_name, empties the whole pending set and unregisters
+    the timer.
     """
     global _pending_materials
-    _pending_materials = set()
+    if material_name is None:
+        _pending_materials = set()
+    else:
+        _pending_materials.discard(material_name)
+        if _pending_materials:
+            return
+
     # bpy.app.timers identifies a registered timer by the function object,
     # so we can unregister _do_deferred_rebuild directly.
     try:
@@ -86,7 +94,7 @@ def _on_layer_update(self, context):
         if not context or not context.active_object:
             return
         mat = context.active_object.active_material
-        if not mat or not mat.tlm.auto_composite:
+        if not mat or not mat.tlm.auto_composite or mat.tlm.shader_editable:
             return
         need_timer = not _pending_materials  # first material in this batch
         _pending_materials.add(mat.name)
@@ -165,7 +173,7 @@ def _make_hot_callback(prop_name):
             if not context or not context.active_object:
                 return
             mat = context.active_object.active_material
-            if not mat or not mat.tlm.auto_composite:
+            if not mat or not mat.tlm.auto_composite or mat.tlm.shader_editable:
                 return
             if not compositing.hot_update_property(mat, self, prop_name):
                 _on_layer_update(self, context)
@@ -211,6 +219,50 @@ BLEND_MODES = [
 BLEND_MODES_OVERRIDE = [
     ("INHERIT", "Inherit (Layer)", "Use the layer's main blend mode", 0),
 ] + [(idt, nm, ds, i + 1) for (idt, nm, ds, i) in BLEND_MODES]
+
+ALPHA_MATH_OPERATIONS = [
+    ("ADD", "Add", "Current alpha plus this layer alpha", 0),
+    ("SUBTRACT", "Subtract", "Current alpha minus this layer alpha", 1),
+    ("MULTIPLY", "Multiply", "Current alpha multiplied by this layer alpha", 2),
+    ("DIVIDE", "Divide", "Current alpha divided by this layer alpha", 3),
+    ("MULTIPLY_ADD", "Multiply Add", "A * B + C", 4),
+    ("POWER", "Power", "Current alpha raised by this layer alpha", 5),
+    ("LOGARITHM", "Logarithm", "Logarithm math operation", 6),
+    ("SQRT", "Square Root", "Square root math operation", 7),
+    ("INVERSE_SQRT", "Inverse Square Root", "Inverse square root math operation", 8),
+    ("ABSOLUTE", "Absolute", "Absolute value math operation", 9),
+    ("EXPONENT", "Exponent", "Exponent math operation", 10),
+    ("MINIMUM", "Minimum", "Keep the lower alpha value", 11),
+    ("MAXIMUM", "Maximum", "Keep the higher alpha value", 12),
+    ("LESS_THAN", "Less Than", "Comparison math operation", 13),
+    ("GREATER_THAN", "Greater Than", "Comparison math operation", 14),
+    ("SIGN", "Sign", "Sign math operation", 15),
+    ("COMPARE", "Compare", "Compare math operation", 16),
+    ("SMOOTH_MIN", "Smooth Minimum", "Soft minimum between alpha values", 17),
+    ("SMOOTH_MAX", "Smooth Maximum", "Soft maximum between alpha values", 18),
+    ("ROUND", "Round", "Round alpha value", 19),
+    ("FLOOR", "Floor", "Floor alpha value", 20),
+    ("CEIL", "Ceil", "Ceil alpha value", 21),
+    ("TRUNC", "Truncate", "Truncate alpha value", 22),
+    ("FRACT", "Fraction", "Fraction math operation", 23),
+    ("MODULO", "Truncated Modulo", "Modulo math operation", 24),
+    ("FLOORED_MODULO", "Floored Modulo", "Floored modulo math operation", 25),
+    ("WRAP", "Wrap", "Wrap math operation", 26),
+    ("SNAP", "Snap", "Snap math operation", 27),
+    ("PINGPONG", "Ping-Pong", "Ping-pong math operation", 28),
+    ("SINE", "Sine", "Sine of this layer alpha", 29),
+    ("COSINE", "Cosine", "Cosine of this layer alpha", 30),
+    ("TANGENT", "Tangent", "Tangent of this layer alpha", 31),
+    ("ARCSINE", "Arcsine", "Arcsine of this layer alpha", 32),
+    ("ARCCOSINE", "Arccosine", "Arccosine of this layer alpha", 33),
+    ("ARCTANGENT", "Arctangent", "Arctangent of this layer alpha", 34),
+    ("ARCTAN2", "Arctan2", "Arctan2 math operation", 35),
+    ("SINH", "Hyperbolic Sine", "Hyperbolic sine of this layer alpha", 36),
+    ("COSH", "Hyperbolic Cosine", "Hyperbolic cosine of this layer alpha", 37),
+    ("TANH", "Hyperbolic Tangent", "Hyperbolic tangent of this layer alpha", 38),
+    ("RADIANS", "To Radians", "Convert alpha value to radians", 39),
+    ("DEGREES", "To Degrees", "Convert alpha value to degrees", 40),
+]
 
 LAYER_TYPES = [
     ("PAINT",       "Paint",       "Regular paint layer with an image texture",  0),
@@ -346,6 +398,13 @@ class TLM_LayerItem(PropertyGroup):
         name="Alpha Blend",
         description="Override blend mode on alpha channel only",
         items=BLEND_MODES_OVERRIDE, default="INHERIT",
+        update=_on_layer_update,
+    )
+    alpha_math_operation: EnumProperty(
+        name="Alpha Math",
+        description="Math operation used when this layer contributes to the Alpha channel",
+        items=ALPHA_MATH_OPERATIONS,
+        default="MULTIPLY",
         update=_on_layer_update,
     )
 
@@ -1354,7 +1413,6 @@ class TLM_LayerItem(PropertyGroup):
             ('CUSTOM',    "Custom",    "Manual coordinate settings",                          0),
             ('SPHERICAL', "Spherical", "Object coords + scale normalization + distortion",    1),
             ('SURFACE',   "Surface",   "Generated coords, no normalization",                  2),
-            ('UV_DRIVEN', "UV",        "UV map coordinates",                                  3),
         ],
         default='CUSTOM',
         update=_on_preset_change,
@@ -1543,6 +1601,26 @@ class TLM_MaterialProperties(PropertyGroup):
         name="Auto Composite",
         description="Rebuild node tree automatically when layers change",
         default=True,
+    )
+
+    shader_editable: BoolProperty(
+        name="Editable Shader",
+        description=(
+            "The current node tree has been converted to a normal Blender "
+            "shader. TLM layer rebuilds are disabled until you return to "
+            "TLM-managed mode"
+        ),
+        default=False,
+    )
+
+    use_custom_slots: BoolProperty(
+        name="Custom Slots",
+        description=(
+            "Insert stable pass-through node groups between TLM channels and "
+            "the shader so custom Shader Editor nodes can survive rebuilds"
+        ),
+        default=False,
+        update=_on_layer_update,
     )
 
     # When ON, the alpha output of the base color chain (typically the

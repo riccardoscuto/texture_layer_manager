@@ -18,6 +18,22 @@ TLM_PREFIX = "TLM_"
 # which are cleaned via `_cleanup_tlm_mask_blur_groups` instead.
 TLM_GROUP_PREFIX = "TLM_maskblur_"
 
+# Material-local, user-editable slot nodes. Intentionally does not start with
+# TLM_PREFIX: _clear_tlm_nodes removes generated nodes on every rebuild, while
+# these pass-through groups must survive and keep the user's internal edits.
+TLM_USER_SLOT_PREFIX = "TLMUser_"
+TLM_USER_SLOT_PROP = "tlm_user_slot"
+
+_USER_SLOT_DEFS = {
+    'base_color':   ("Base Color", "NodeSocketColor",  "Color"),
+    'roughness':    ("Roughness",  "NodeSocketFloat",  "Value"),
+    'metallic':     ("Metallic",   "NodeSocketFloat",  "Value"),
+    'emission':     ("Emission",   "NodeSocketColor",  "Color"),
+    'transmission': ("Transmission", "NodeSocketFloat", "Value"),
+    'alpha':        ("Alpha",      "NodeSocketFloat",  "Value"),
+    'normal':       ("Normal",     "NodeSocketVector", "Vector"),
+}
+
 # Deterministic node counter — resets each rebuild so names are stable
 _node_counter = 0
 
@@ -165,6 +181,144 @@ def _clear_tlm_nodes(node_tree):
             to_remove.append(n)
     for n in to_remove:
         node_tree.nodes.remove(n)
+
+
+def _make_user_slot_group(group_name, label, socket_type, socket_label):
+    """Create a pass-through node group that users can safely edit."""
+    tree = bpy.data.node_groups.new(group_name, "ShaderNodeTree")
+    tree.interface.new_socket(name="Input", in_out='INPUT', socket_type=socket_type)
+    tree.interface.new_socket(name="Output", in_out='OUTPUT', socket_type=socket_type)
+
+    gi = tree.nodes.new("NodeGroupInput")
+    gi.location = (-300, 0)
+    go = tree.nodes.new("NodeGroupOutput")
+    go.location = (300, 0)
+    tree.name = group_name
+    tree["tlm_user_slot_label"] = label
+    tree["tlm_user_slot_socket"] = socket_label
+    _ensure_user_slot_group_contents(tree, socket_type)
+    return tree
+
+
+def _ensure_user_slot_group_contents(tree, socket_type):
+    """Populate a fresh Custom Slot with one neutral, user-editable node.
+
+    The slot still behaves as a pass-through, but it no longer opens as an
+    empty Input -> Output wire. Artists immediately get a Math / Color /
+    Vector node they can tweak or replace.
+    """
+    if tree is None:
+        return
+    if any(n.type not in {'GROUP_INPUT', 'GROUP_OUTPUT'} for n in tree.nodes):
+        return
+
+    gi = next((n for n in tree.nodes if n.type == 'GROUP_INPUT'), None)
+    go = next((n for n in tree.nodes if n.type == 'GROUP_OUTPUT'), None)
+    if gi is None or go is None:
+        return
+
+    for link in list(tree.links):
+        try:
+            tree.links.remove(link)
+        except Exception:
+            pass
+
+    try:
+        if socket_type == "NodeSocketFloat":
+            edit = tree.nodes.new("ShaderNodeMath")
+            edit.operation = 'MULTIPLY'
+            edit.use_clamp = True
+            edit.inputs[1].default_value = 1.0
+            edit.label = "User Math"
+            edit.location = (0, 0)
+            tree.links.new(gi.outputs["Input"], edit.inputs[0])
+            tree.links.new(edit.outputs["Value"], go.inputs["Output"])
+        elif socket_type == "NodeSocketVector":
+            edit = tree.nodes.new("ShaderNodeVectorMath")
+            edit.operation = 'ADD'
+            edit.inputs[1].default_value = (0.0, 0.0, 0.0)
+            edit.label = "User Vector Math"
+            edit.location = (0, 0)
+            tree.links.new(gi.outputs["Input"], edit.inputs[0])
+            tree.links.new(edit.outputs["Vector"], go.inputs["Output"])
+        else:
+            edit = tree.nodes.new("ShaderNodeHueSaturation")
+            edit.label = "User Color Adjust"
+            edit.location = (0, 0)
+            if edit.inputs.get("Fac"):
+                edit.inputs["Fac"].default_value = 1.0
+            if edit.inputs.get("Hue"):
+                edit.inputs["Hue"].default_value = 0.5
+            if edit.inputs.get("Saturation"):
+                edit.inputs["Saturation"].default_value = 1.0
+            if edit.inputs.get("Value"):
+                edit.inputs["Value"].default_value = 1.0
+            tree.links.new(gi.outputs["Input"], edit.inputs["Color"])
+            tree.links.new(edit.outputs["Color"], go.inputs["Output"])
+    except Exception:
+        try:
+            tree.links.new(gi.outputs["Input"], go.inputs["Output"])
+        except Exception:
+            pass
+
+
+def _find_user_slot_node(node_tree, channel_id):
+    for node in node_tree.nodes:
+        if node.get(TLM_USER_SLOT_PROP) == channel_id:
+            return node
+    legacy_name = f"{TLM_USER_SLOT_PREFIX}{channel_id}"
+    return node_tree.nodes.get(legacy_name)
+
+
+def _get_or_create_user_slot_node(node_tree, material, channel_id, x, y):
+    slot_def = _USER_SLOT_DEFS.get(channel_id)
+    if slot_def is None:
+        return None
+    label, socket_type, socket_label = slot_def
+
+    node = _find_user_slot_node(node_tree, channel_id)
+    if node is not None and node.type == 'GROUP':
+        if node.node_tree is not None:
+            node[TLM_USER_SLOT_PROP] = channel_id
+            _ensure_user_slot_group_contents(node.node_tree, socket_type)
+            return node
+
+    group_name = f"{TLM_USER_SLOT_PREFIX}{material.name}_{channel_id}"
+    group = bpy.data.node_groups.get(group_name)
+    if group is None:
+        group = _make_user_slot_group(group_name, label, socket_type, socket_label)
+    else:
+        _ensure_user_slot_group_contents(group, socket_type)
+
+    node = node_tree.nodes.new("ShaderNodeGroup")
+    node.name = f"{TLM_USER_SLOT_PREFIX}{channel_id}"
+    node.label = f"TLM Custom {label}"
+    node.node_tree = group
+    node.location = (x, y)
+    node[TLM_USER_SLOT_PROP] = channel_id
+    return node
+
+
+def _route_through_user_slot(node_tree, material, channel_id, source_socket, x, y):
+    """Route a channel through a persistent user-editable pass-through group."""
+    if source_socket is None:
+        return None
+    tlm = getattr(material, "tlm", None)
+    if tlm is None or not getattr(tlm, "use_custom_slots", False):
+        return source_socket
+
+    slot = _get_or_create_user_slot_node(node_tree, material, channel_id, x, y)
+    if slot is None:
+        return source_socket
+    in_socket = slot.inputs.get("Input")
+    out_socket = slot.outputs.get("Output")
+    if in_socket is None or out_socket is None:
+        return source_socket
+    try:
+        node_tree.links.new(source_socket, in_socket)
+    except Exception:
+        return source_socket
+    return out_socket
 
 
 def _get_or_build_mask_blur_group(img):
@@ -1321,12 +1475,8 @@ def _effective_blend_mode(layer, channel_id):
     Only base_color / roughness / metallic / emission / transmission support
     override — normal and bump have their own math and are unaffected.
 
-    Alpha is always MIX. The channel is coverage / opacity, not a colour
-    input — artistic blend modes (Overlay, Hard Light, Color Dodge…)
-    don't have a meaningful interpretation when applied to a 0..1 alpha.
-    The UI hides the blend_mode dropdown when output_channel='ALPHA' for
-    the same reason; this enforces it on the compositor side too in case
-    a layer arrives at the alpha channel via use_alpha or older presets.
+    Alpha is handled by _new_alpha_math_composite instead of this blend
+    path. Returning MIX here is only a defensive fallback for legacy paths.
 
     INHERIT (or any channel without an override property) falls back to
     `layer.blend_mode`.
@@ -1390,6 +1540,58 @@ def _new_mix_scalar(node_tree, blend_mode, opacity, x, y, layer_name="", channel
     if layer_name:
         _tag(node, layer_name, f"mix_{channel}" if channel else "mix_scalar")
     return node
+
+
+def _new_alpha_math_composite(node_tree, layer, current, layer_out, layer_alpha,
+                              prev_alpha, x, y, i, uv_map="UVMap"):
+    """Composite an Alpha-channel layer with a ShaderNodeMath operation.
+
+    Alpha is scalar opacity, so artistic color blend modes are a poor fit.
+    We first calculate Math(current_alpha, layer_alpha), then mix from the
+    previous value to that result using the normal opacity/mask/fresnel factor.
+    """
+    if current is None:
+        current = _new_value(node_tree, 1.0, x - 100, y - 20,
+                             layer_name=layer.name,
+                             channel="alpha").outputs["Value"]
+
+    op = getattr(layer, "alpha_math_operation", "MULTIPLY") or "MULTIPLY"
+    math = node_tree.nodes.new("ShaderNodeMath")
+    try:
+        math.operation = op
+    except (TypeError, ValueError):
+        math.operation = 'MULTIPLY'
+    math.use_clamp = True
+    math.name = f"{TLM_PREFIX}alpha_math_{_next_id()}"
+    math.label = f"Alpha {math.operation.replace('_', ' ').title()}"
+    math.location = (x + 140, y - 40)
+    _tag(math, layer.name, "alpha_math")
+
+    _UNARY_ALPHA_MATH = {
+        'SQRT', 'INVERSE_SQRT', 'ABSOLUTE', 'EXPONENT', 'SIGN',
+        'ROUND', 'FLOOR', 'CEIL', 'TRUNC', 'FRACT',
+        'SINE', 'COSINE', 'TANGENT', 'ARCSINE', 'ARCCOSINE',
+        'ARCTANGENT', 'SINH', 'COSH', 'TANH', 'RADIANS', 'DEGREES',
+    }
+    try:
+        if math.operation in _UNARY_ALPHA_MATH:
+            node_tree.links.new(layer_out, math.inputs[0])
+        else:
+            node_tree.links.new(current, math.inputs[0])
+            node_tree.links.new(layer_out, math.inputs[1])
+            if len(math.inputs) > 2:
+                math.inputs[2].default_value = 0.0
+    except Exception:
+        return current
+
+    mix_x = x + 320
+    mix = _new_mix_scalar(node_tree, 'MIX', layer.opacity, mix_x, y - 40,
+                          layer_name=layer.name, channel="alpha")
+    node_tree.links.new(current, _a_socket_scalar(mix))
+    node_tree.links.new(math.outputs["Value"], _b_socket_scalar(mix))
+    _set_factor(node_tree, mix, layer, layer_alpha, prev_alpha,
+                mix_x, y, i, uv_map, channel="alpha")
+    return _result_socket_scalar(mix)
 
 
 def _new_mix_vector(node_tree, opacity, x, y, layer_name="", channel=""):
@@ -2086,6 +2288,12 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
             # First-layer: if the REFERENCE has modulators (mask / opacity<1 /
             # fresnel), mix against a channel-appropriate baseline so the
             # modulator isn't silently dropped. (Bug #4)
+            if channel_id == 'alpha':
+                current = _new_alpha_math_composite(
+                    node_tree, layer, current, layer_out, layer_alpha,
+                    prev_alpha, x, y, i, uv_map
+                )
+                continue
             if current is None:
                 if _layer_has_first_layer_modulator(layer):
                     mix_x = x + 280
@@ -2475,6 +2683,13 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
             continue
 
         # ── Mix with current ──────────────────────────────────────────────
+        if channel_id == 'alpha':
+            current = _new_alpha_math_composite(
+                node_tree, layer, current, layer_out, layer_alpha, prev_alpha,
+                x, y, i, uv_map
+            )
+            continue
+
         if current is None:
             # Emission always mixes against black so opacity=0 → zero emission,
             # even without explicit modulators. For every other channel, only
@@ -4103,13 +4318,17 @@ def _defer_rebuild(material):
 def rebuild_node_tree(material):
     # Cancel any pending deferred rebuild — this explicit call supersedes it.
     from . import properties
-    properties.cancel_pending_rebuild()
+    properties.cancel_pending_rebuild(material.name)
 
     # Reset deterministic counter so node names match between rebuilds
     global _node_counter
     _node_counter = 0
 
     tlm = material.tlm
+    if getattr(tlm, "shader_editable", False):
+        print(f"[TLM] Skipping rebuild for '{material.name}' — shader is in Editable mode")
+        return
+
     node_tree = material.node_tree
 
     if node_tree is None:
@@ -4323,6 +4542,10 @@ def rebuild_node_tree(material):
         # ── Base Color — built from root_layers to preserve GROUP alpha for clipping mask ─
         bc_out, bc_alpha = _build_base_color(node_tree, root_layers, group_children, uv_map, start_x, ch_y['base_color'], x_step)
         if bc_out:
+            bc_out = _route_through_user_slot(
+                node_tree, material, 'base_color', bc_out,
+                end_x, ch_y['base_color'],
+            )
             _link_to_bsdf(node_tree, bc_out, bsdf, ["Base Color", "base_color"], "base_color")
 
         # ── Roughness ─────────────────────────────────────────────────────────────
@@ -4334,6 +4557,10 @@ def rebuild_node_tree(material):
         if _channel_used(expanded, 'use_roughness'):
             r_out = _build_channel(node_tree, expanded, 'roughness', uv_map, start_x, ch_y['roughness'], x_step)
             if r_out:
+                r_out = _route_through_user_slot(
+                    node_tree, material, 'roughness', r_out,
+                    end_x, ch_y['roughness'],
+                )
                 _link_to_bsdf(node_tree, r_out, bsdf,
                               ["Roughness", "Specular Roughness"], "roughness")
 
@@ -4341,6 +4568,10 @@ def rebuild_node_tree(material):
         if _channel_used(expanded, 'use_metallic'):
             m_out = _build_channel(node_tree, expanded, 'metallic', uv_map, start_x, ch_y['metallic'], x_step)
             if m_out:
+                m_out = _route_through_user_slot(
+                    node_tree, material, 'metallic', m_out,
+                    end_x, ch_y['metallic'],
+                )
                 _link_to_bsdf(node_tree, m_out, bsdf,
                               ["Metallic", "Metalness"], "metallic")
 
@@ -4355,6 +4586,10 @@ def rebuild_node_tree(material):
         if _channel_used(expanded, 'use_emission'):
             e_out = _build_channel(node_tree, expanded, 'emission', uv_map, start_x, ch_y['emission'], x_step)
             if e_out:
+                e_out = _route_through_user_slot(
+                    node_tree, material, 'emission', e_out,
+                    end_x, ch_y['emission'],
+                )
                 _link_to_bsdf(node_tree, e_out, bsdf,
                               ["Emission Color", "Emission", "emission"], "emission")
                 # Use max emission strength weighted by opacity
@@ -4379,7 +4614,11 @@ def rebuild_node_tree(material):
                 passthrough.use_clamp = True
                 passthrough.location = (end_x, ch_y['transmission'])
                 node_tree.links.new(t_out, passthrough.inputs[0])
-                _link_to_bsdf(node_tree, passthrough.outputs["Value"], bsdf,
+                t_slot_out = _route_through_user_slot(
+                    node_tree, material, 'transmission', passthrough.outputs["Value"],
+                    end_x + 180, ch_y['transmission'],
+                )
+                _link_to_bsdf(node_tree, t_slot_out, bsdf,
                               ["Transmission Weight", "Transmission", "transmission"], "transmission")
 
         # ── Alpha ────────────────────────────────────────────────────────────────
@@ -4391,6 +4630,10 @@ def rebuild_node_tree(material):
         if alpha_explicitly_routed:
             a_out = _build_channel(node_tree, expanded, 'alpha', uv_map, start_x, ch_y.get('alpha', 0), x_step)
             if a_out:
+                a_out = _route_through_user_slot(
+                    node_tree, material, 'alpha', a_out,
+                    end_x, ch_y['alpha'],
+                )
                 # Wrap through Mix Shader + Transparent BSDF — see
                 # _wire_alpha_via_transparent_bsdf for the rationale.
                 # Cycles in Blender 5.0 doesn't honour Principled BSDF.Alpha
@@ -4408,6 +4651,10 @@ def rebuild_node_tree(material):
             # surface transparency / bake. OFF by default because an empty
             # PAINT layer (alpha=0 everywhere) would otherwise unintentionally
             # hide the whole cube the moment it's added on top of a Fill.
+            bc_alpha = _route_through_user_slot(
+                node_tree, material, 'alpha', bc_alpha,
+                end_x, ch_y['alpha'],
+            )
             if _wire_alpha_via_transparent_bsdf(node_tree, bc_alpha, bsdf):
                 alpha_was_connected = True
             else:
@@ -4437,6 +4684,10 @@ def rebuild_node_tree(material):
         # inside _build_bump_channel.
         final_normal = bump_out or normal_out
         if final_normal:
+            final_normal = _route_through_user_slot(
+                node_tree, material, 'normal', final_normal,
+                end_x, ch_y['normal'],
+            )
             _link_to_bsdf(node_tree, final_normal, bsdf, ["Normal", "normal"], "normal")
 
         # Position BSDF and Material Output to the right of all channels

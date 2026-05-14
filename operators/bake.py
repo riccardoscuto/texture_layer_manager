@@ -134,7 +134,7 @@ class TLM_OT_BakePBR(Operator):
 
         # Pre-flight: fail fast with a useful message rather than leaving the user
         # to read a silent bake error in the console.
-        ok, err = _bake_preflight(context)
+        ok, err = _bake_preflight(context, mat)
         if not ok:
             self.report({'ERROR'}, err)
             return {'CANCELLED'}
@@ -165,7 +165,7 @@ class TLM_OT_BakePBR(Operator):
 
         # _BakeGuard handles render-engine forcing (CYCLES), node-selection
         # save/restore, and orphan-image cleanup on failure.
-        with _BakeGuard(context, node_tree) as guard:
+        with _BakeGuard(context, node_tree, context.active_object) as guard:
             def _bake_channel(suffix, bsdf_input, colorspace="sRGB"):
                 """Bake a single PBR channel via temporary Emission shader (no lighting)."""
                 bsdf = next((n for n in node_tree.nodes
