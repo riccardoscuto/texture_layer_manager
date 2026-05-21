@@ -1,6 +1,7 @@
 """PBR bake and export operator."""
 
 import os
+import time as _time
 import bpy
 import numpy as np
 from bpy.types import Operator
@@ -131,6 +132,7 @@ class TLM_OT_BakePBR(Operator):
         mat = _get_material(context)
         if not mat:
             return {'CANCELLED'}
+        perf_started = _time.perf_counter() if compositing.performance_enabled(mat) else None
 
         # Pre-flight: fail fast with a useful message rather than leaving the user
         # to read a silent bake error in the console.
@@ -542,6 +544,13 @@ class TLM_OT_BakePBR(Operator):
             self.report({'INFO'}, f"Baked {len(baked)} maps to {out_dir}")
         else:
             self.report({'WARNING'}, "Nothing to bake — no PBR channels connected")
+
+        if perf_started is not None:
+            compositing.record_performance(
+                mat,
+                perf_last_bake_ms=(_time.perf_counter() - perf_started) * 1000.0,
+                perf_last_bake_maps=len(baked),
+            )
 
         return {'FINISHED'}
 

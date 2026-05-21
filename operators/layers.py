@@ -315,7 +315,9 @@ class TLM_OT_DuplicateLayer(Operator):
             except (AttributeError, TypeError):
                 pass
 
-        new_layer.name = src.name + " Copy"
+        new_layer.name = compositing.unique_layer_name(
+            tlm.layers, src.name + " Copy", current=new_layer
+        )
 
         if src.image:
             orig = src.image

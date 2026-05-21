@@ -570,19 +570,51 @@ class TLM_OT_ApplyPreset(Operator):
                 layer.proc_stripe_width    = ld.get("proc_stripe_width", 0.5)
                 layer.proc_stripe_sharpness = ld.get("proc_stripe_sharpness", 1.0)
                 layer.proc_hex_edge_width  = ld.get("proc_hex_edge_width", 0.05)
+                layer.proc_brick_offset    = ld.get("proc_brick_offset", 0.5)
+                layer.proc_brick_offset_freq = ld.get("proc_brick_offset_freq", 2)
+                layer.proc_brick_squash    = ld.get("proc_brick_squash", 1.0)
+                layer.proc_brick_squash_freq = ld.get("proc_brick_squash_freq", 2)
+                layer.proc_brick_mortar_size = ld.get("proc_brick_mortar_size", 0.02)
+                layer.proc_brick_mortar_smooth = ld.get("proc_brick_mortar_smooth", 0.1)
+                layer.proc_brick_bias      = ld.get("proc_brick_bias", 0.0)
+                layer.proc_brick_width     = ld.get("proc_brick_width", 0.5)
+                layer.proc_brick_row_height = ld.get("proc_brick_row_height", 0.25)
+                layer.proc_dots_radius     = ld.get("proc_dots_radius", 0.35)
+                layer.proc_dots_softness   = ld.get("proc_dots_softness", 0.15)
+                layer.proc_cracks_width    = ld.get("proc_cracks_width", 0.05)
+                layer.proc_cracks_sharpness = ld.get("proc_cracks_sharpness", 0.7)
+                layer.proc_ridged_offset   = ld.get("proc_ridged_offset", 1.0)
+                layer.proc_ridged_gain     = ld.get("proc_ridged_gain", 2.0)
+                layer.proc_gabor_anisotropy = ld.get("proc_gabor_anisotropy", 1.0)
+                layer.proc_gabor_orientation = ld.get("proc_gabor_orientation", 45.0)
+                layer.proc_gabor_frequency = ld.get("proc_gabor_frequency", 2.0)
                 layer.proc_lacunarity      = ld.get("proc_lacunarity", 2.0)
                 layer.proc_offset_x        = ld.get("proc_offset_x", 0.0)
                 layer.proc_offset_y        = ld.get("proc_offset_y", 0.0)
                 layer.proc_offset_z        = ld.get("proc_offset_z", 0.0)
+                layer.proc_rotation_x      = ld.get("proc_rotation_x", 0.0)
+                layer.proc_rotation_y      = ld.get("proc_rotation_y", 0.0)
+                layer.proc_rotation_z      = ld.get("proc_rotation_z", 0.0)
+                layer.proc_mapping_scale_x = ld.get("proc_mapping_scale_x", 1.0)
+                layer.proc_mapping_scale_y = ld.get("proc_mapping_scale_y", 1.0)
+                layer.proc_mapping_scale_z = ld.get("proc_mapping_scale_z", 1.0)
+                layer.proc_mapping_type    = ld.get("proc_mapping_type", "POINT")
                 layer.proc_wave_type       = ld.get("proc_wave_type", "BANDS")
                 layer.proc_wave_profile    = ld.get("proc_wave_profile", "SIN")
+                layer.proc_wave_bands_direction = ld.get("proc_wave_bands_direction", "X")
+                layer.proc_wave_rings_direction = ld.get("proc_wave_rings_direction", "X")
                 layer.proc_wave_detail_scale = ld.get("proc_wave_detail_scale", 1.0)
+                layer.proc_wave_detail_roughness = ld.get("proc_wave_detail_roughness", 0.5)
+                layer.proc_wave_phase_offset = ld.get("proc_wave_phase_offset", 0.0)
                 layer.proc_gradient_type   = ld.get("proc_gradient_type", "LINEAR")
                 layer.proc_voronoi_feature  = ld.get("proc_voronoi_feature", "F1")
                 layer.proc_voronoi_distance = ld.get("proc_voronoi_distance", "EUCLIDEAN")
                 layer.proc_randomness       = ld.get("proc_randomness", 1.0)
                 layer.proc_marble_distortion = ld.get("proc_marble_distortion", 5.0)
                 layer.proc_marble_wave_type  = ld.get("proc_marble_wave_type", "BANDS")
+                layer.proc_marble_wave_profile = ld.get("proc_marble_wave_profile", "SIN")
+                layer.proc_marble_bands_direction = ld.get("proc_marble_bands_direction", "X")
+                layer.proc_marble_rings_direction = ld.get("proc_marble_rings_direction", "X")
                 layer.proc_contrast         = ld.get("proc_contrast", 0.5)
                 layer.proc_vector_distortion= ld.get("proc_vector_distortion", 0.0)
                 layer.proc_coord_type       = ld.get("proc_coord_type", "GENERATED")
@@ -787,20 +819,52 @@ class TLM_OT_SavePreset(Operator):
                     "proc_stripe_width": getattr(layer, 'proc_stripe_width', 0.5),
                     "proc_stripe_sharpness": getattr(layer, 'proc_stripe_sharpness', 1.0),
                     "proc_hex_edge_width": getattr(layer, 'proc_hex_edge_width', 0.05),
+                    "proc_brick_offset": getattr(layer, 'proc_brick_offset', 0.5),
+                    "proc_brick_offset_freq": getattr(layer, 'proc_brick_offset_freq', 2),
+                    "proc_brick_squash": getattr(layer, 'proc_brick_squash', 1.0),
+                    "proc_brick_squash_freq": getattr(layer, 'proc_brick_squash_freq', 2),
+                    "proc_brick_mortar_size": getattr(layer, 'proc_brick_mortar_size', 0.02),
+                    "proc_brick_mortar_smooth": getattr(layer, 'proc_brick_mortar_smooth', 0.1),
+                    "proc_brick_bias": getattr(layer, 'proc_brick_bias', 0.0),
+                    "proc_brick_width": getattr(layer, 'proc_brick_width', 0.5),
+                    "proc_brick_row_height": getattr(layer, 'proc_brick_row_height', 0.25),
+                    "proc_dots_radius": getattr(layer, 'proc_dots_radius', 0.35),
+                    "proc_dots_softness": getattr(layer, 'proc_dots_softness', 0.15),
+                    "proc_cracks_width": getattr(layer, 'proc_cracks_width', 0.05),
+                    "proc_cracks_sharpness": getattr(layer, 'proc_cracks_sharpness', 0.7),
+                    "proc_ridged_offset": getattr(layer, 'proc_ridged_offset', 1.0),
+                    "proc_ridged_gain": getattr(layer, 'proc_ridged_gain', 2.0),
+                    "proc_gabor_anisotropy": getattr(layer, 'proc_gabor_anisotropy', 1.0),
+                    "proc_gabor_orientation": getattr(layer, 'proc_gabor_orientation', 45.0),
+                    "proc_gabor_frequency": getattr(layer, 'proc_gabor_frequency', 2.0),
                     "proc_roughness_proc": layer.proc_roughness_proc,
                     "proc_lacunarity": layer.proc_lacunarity,
                     "proc_offset_x": layer.proc_offset_x,
                     "proc_offset_y": layer.proc_offset_y,
                     "proc_offset_z": layer.proc_offset_z,
+                    "proc_rotation_x": getattr(layer, 'proc_rotation_x', 0.0),
+                    "proc_rotation_y": getattr(layer, 'proc_rotation_y', 0.0),
+                    "proc_rotation_z": getattr(layer, 'proc_rotation_z', 0.0),
+                    "proc_mapping_scale_x": getattr(layer, 'proc_mapping_scale_x', 1.0),
+                    "proc_mapping_scale_y": getattr(layer, 'proc_mapping_scale_y', 1.0),
+                    "proc_mapping_scale_z": getattr(layer, 'proc_mapping_scale_z', 1.0),
+                    "proc_mapping_type": getattr(layer, 'proc_mapping_type', 'POINT'),
                     "proc_wave_type": layer.proc_wave_type,
                     "proc_wave_profile": layer.proc_wave_profile,
+                    "proc_wave_bands_direction": getattr(layer, 'proc_wave_bands_direction', 'X'),
+                    "proc_wave_rings_direction": getattr(layer, 'proc_wave_rings_direction', 'X'),
                     "proc_wave_detail_scale": layer.proc_wave_detail_scale,
+                    "proc_wave_detail_roughness": getattr(layer, 'proc_wave_detail_roughness', 0.5),
+                    "proc_wave_phase_offset": getattr(layer, 'proc_wave_phase_offset', 0.0),
                     "proc_gradient_type": layer.proc_gradient_type,
                     "proc_voronoi_feature": layer.proc_voronoi_feature,
                     "proc_voronoi_distance": layer.proc_voronoi_distance,
                     "proc_randomness": layer.proc_randomness,
                     "proc_marble_distortion": layer.proc_marble_distortion,
                     "proc_marble_wave_type": layer.proc_marble_wave_type,
+                    "proc_marble_wave_profile": getattr(layer, 'proc_marble_wave_profile', 'SIN'),
+                    "proc_marble_bands_direction": getattr(layer, 'proc_marble_bands_direction', 'X'),
+                    "proc_marble_rings_direction": getattr(layer, 'proc_marble_rings_direction', 'X'),
                     "proc_contrast": layer.proc_contrast,
                     "proc_vector_distortion": layer.proc_vector_distortion,
                     "proc_coord_type": layer.proc_coord_type,

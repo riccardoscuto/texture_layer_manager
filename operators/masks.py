@@ -1,5 +1,6 @@
 """Mask operators (standard and smart masks)."""
 
+import time as _time
 import bpy
 from bpy.types import Operator
 from ._common import _get_material, _can_edit_tlm_stack, compositing, _BakeGuard, _bake_preflight
@@ -97,6 +98,7 @@ class TLM_OT_AddSmartMask(Operator):
     def execute(self, context):
         mat = _get_material(context)
         tlm = mat.tlm
+        perf_started = _time.perf_counter() if compositing.performance_enabled(mat) else None
         layer = tlm.active_layer
         if not layer:
             return {'CANCELLED'}
@@ -175,6 +177,13 @@ class TLM_OT_AddSmartMask(Operator):
 
         if tlm.auto_composite:
             compositing.rebuild_node_tree(mat)
+
+        if perf_started is not None:
+            compositing.record_performance(
+                mat,
+                perf_last_smart_mask_ms=(_time.perf_counter() - perf_started) * 1000.0,
+                perf_last_smart_mask_ok=bool(bake_ok),
+            )
 
         return {'FINISHED'} if bake_ok else {'CANCELLED'}
 

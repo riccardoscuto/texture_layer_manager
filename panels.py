@@ -368,10 +368,12 @@ def _draw_procedural(col, active, tlm):
     else:
         c3r.label(text="Color 3")
     col.separator(factor=0.5)
-    col.prop(active, "proc_scale", slider=False)
-    col.separator(factor=0.5)
 
     pt = active.proc_type
+    if pt != 'GRADIENT':
+        col.prop(active, "proc_scale", slider=False)
+        col.separator(factor=0.5)
+
     if pt == 'NOISE':
         col.prop(active, "proc_detail",         slider=True)
         col.prop(active, "proc_roughness_proc", slider=True, text="Roughness")
@@ -381,6 +383,9 @@ def _draw_procedural(col, active, tlm):
         col.prop(active, "proc_voronoi_feature")
         col.prop(active, "proc_voronoi_distance")
         col.prop(active, "proc_randomness", slider=True)
+        col.prop(active, "proc_detail", slider=True)
+        col.prop(active, "proc_roughness_proc", slider=True, text="Roughness")
+        col.prop(active, "proc_lacunarity", slider=True)
         vr = col.row(align=True)
         vr.prop(active, "proc_voronoi_random_color", text="Random Per Cell", toggle=True, icon='SEQ_CHROMA_SCOPE')
         if active.proc_voronoi_random_color:
@@ -389,9 +394,15 @@ def _draw_procedural(col, active, tlm):
         wr = col.row(align=True)
         wr.prop(active, "proc_wave_type",    text="")
         wr.prop(active, "proc_wave_profile", text="")
+        if active.proc_wave_type == 'RINGS':
+            col.prop(active, "proc_wave_rings_direction", text="Rings Direction")
+        else:
+            col.prop(active, "proc_wave_bands_direction", text="Bands Direction")
         col.prop(active, "proc_detail",            slider=True)
         col.prop(active, "proc_wave_detail_scale", slider=True, text="Detail Scale")
+        col.prop(active, "proc_wave_detail_roughness", slider=True, text="Detail Roughness")
         col.prop(active, "proc_distortion",        slider=True)
+        col.prop(active, "proc_wave_phase_offset", slider=True, text="Phase Offset")
     elif pt == 'GRADIENT':
         col.prop(active, "proc_gradient_type")
     elif pt == 'MUSGRAVE':
@@ -400,6 +411,11 @@ def _draw_procedural(col, active, tlm):
         col.prop(active, "proc_lacunarity",     slider=True)
     elif pt == 'MARBLE':
         col.prop(active, "proc_marble_wave_type", text="Pattern")
+        if active.proc_marble_wave_type == 'RINGS':
+            col.prop(active, "proc_marble_rings_direction", text="Rings Direction")
+        else:
+            col.prop(active, "proc_marble_bands_direction", text="Bands Direction")
+        col.prop(active, "proc_marble_wave_profile", text="Profile")
         col.prop(active, "proc_detail", slider=True)
         col.prop(active, "proc_roughness_proc", slider=True, text="Roughness")
         col.prop(active, "proc_distortion", slider=True, text="Wave Distortion")
@@ -411,15 +427,18 @@ def _draw_procedural(col, active, tlm):
         # surface the brick-specific layout knobs.
         offr = col.row(align=True)
         offr.prop(active, "proc_brick_offset",      text="Offset",  slider=True)
-        offr.prop(active, "proc_brick_offset_freq", text="Every")
+        offr.prop(active, "proc_brick_offset_freq", text="Frequency")
         sqr = col.row(align=True)
         sqr.prop(active, "proc_brick_squash",      text="Squash",  slider=True)
-        sqr.prop(active, "proc_brick_squash_freq", text="Every")
+        sqr.prop(active, "proc_brick_squash_freq", text="Frequency")
         col.separator(factor=0.3)
         mr = col.row(align=True)
         mr.prop(active, "proc_brick_mortar_size",   text="Mortar Size",   slider=True)
         mr.prop(active, "proc_brick_mortar_smooth", text="Mortar Smooth", slider=True)
-        col.prop(active, "proc_brick_bias", text="Color Bias", slider=True)
+        bw = col.row(align=True)
+        bw.prop(active, "proc_brick_width", text="Brick Width")
+        bw.prop(active, "proc_brick_row_height", text="Row Height")
+        col.prop(active, "proc_brick_bias", text="Bias", slider=True)
         if not active.use_proc_color3:
             col.label(text="Tip: enable Color 3 above to set mortar colour",
                       icon='INFO')
@@ -433,19 +452,77 @@ def _draw_procedural(col, active, tlm):
         col.prop(active, "proc_stripe_direction", text="Direction")
         col.prop(active, "proc_stripe_width",     slider=True)
         col.prop(active, "proc_stripe_sharpness", slider=True)
+        col.prop(active, "proc_distortion", text="Distortion", slider=True)
+        col.prop(active, "proc_detail", text="Detail", slider=True)
+        col.prop(active, "proc_wave_detail_scale", text="Detail Scale", slider=True)
+        col.prop(active, "proc_wave_detail_roughness", text="Detail Roughness", slider=True)
+        col.prop(active, "proc_wave_phase_offset", text="Phase Offset", slider=True)
     elif pt == 'HEX_GRID':
         col.prop(active, "proc_hex_edge_width", text="Edge Width", slider=True)
         col.prop(active, "proc_randomness",     text="Randomness", slider=True)
+        col.prop(active, "proc_detail",         text="Detail", slider=True)
         col.label(text="Tip: Randomness=0 gives the cleanest honeycomb",
+                  icon='INFO')
+    elif pt == 'GABOR':
+        # Anisotropic Gabor noise — directional streak generator.
+        # Brushed metal: high Anisotropy (0.9-1.0), Frequency 3-5.
+        col.prop(active, "proc_gabor_anisotropy", text="Anisotropy", slider=True)
+        col.prop(active, "proc_gabor_orientation", text="Orientation")
+        col.prop(active, "proc_gabor_frequency", text="Frequency", slider=True)
+        col.label(text="Tip: Anisotropy 1.0 = parallel streaks (brushed metal)",
+                  icon='INFO')
+    elif pt == 'DOTS':
+        # Packed circular dots in a jittered grid. proc_scale sets
+        # density (higher = more dots), proc_randomness jitters cell
+        # positions (1.0 = full natural look, 0.0 = perfect lattice).
+        col.prop(active, "proc_dots_radius",   text="Radius",   slider=True)
+        col.prop(active, "proc_dots_softness", text="Softness", slider=True)
+        col.prop(active, "proc_randomness",    text="Randomness", slider=True)
+        col.prop(active, "proc_detail",        text="Detail", slider=True)
+        col.label(text="Tip: Radius 0.30, Softness 0.05 = clean polkadots",
+                  icon='INFO')
+    elif pt == 'RIDGED':
+        # Ridged fractal noise — razor-like crests, ideal for mountains,
+        # rock veins, lightning, crackle. Detail / Lacunarity reuse the
+        # shared noise sliders shown above.
+        col.prop(active, "proc_detail", text="Detail", slider=True)
+        col.prop(active, "proc_roughness_proc", text="Roughness", slider=True)
+        col.prop(active, "proc_lacunarity", text="Lacunarity", slider=True)
+        col.prop(active, "proc_distortion", text="Distortion", slider=True)
+        col.prop(active, "proc_ridged_offset", text="Offset", slider=True)
+        col.prop(active, "proc_ridged_gain",   text="Gain",   slider=True)
+        col.label(text="Tip: Gain 3-4 + Detail 8 = razor-sharp ridges",
+                  icon='INFO')
+    elif pt == 'CRACKS':
+        # Voronoi distance-to-edge tuned for narrow organic veins.
+        # Combine with proc_distortion (vector distortion above) for
+        # the most natural-looking crack networks.
+        col.prop(active, "proc_cracks_width",     text="Width",     slider=True)
+        col.prop(active, "proc_cracks_sharpness", text="Sharpness", slider=True)
+        col.prop(active, "proc_randomness",       text="Randomness", slider=True)
+        col.prop(active, "proc_roughness_proc",   text="Roughness", slider=True)
+        col.label(text="Tip: add Vector Distortion above for organic cracks",
                   icon='INFO')
 
 
     col.separator(factor=0.5)
-    off_row = col.row(align=True)
-    off_row.label(text="Offset:", icon='OBJECT_ORIGIN')
-    off_row.prop(active, "proc_offset_x", text="X")
-    off_row.prop(active, "proc_offset_y", text="Y")
-    off_row.prop(active, "proc_offset_z", text="Z")
+    map_box = col.box()
+    map_box.prop(active, "proc_mapping_type", text="Mapping Type")
+    loc_row = map_box.row(align=True)
+    loc_row.label(text="Location", icon='OBJECT_ORIGIN')
+    loc_row.prop(active, "proc_offset_x", text="X")
+    loc_row.prop(active, "proc_offset_y", text="Y")
+    loc_row.prop(active, "proc_offset_z", text="Z")
+    rot_row = map_box.row(align=True)
+    rot_row.label(text="Rotation", icon='DRIVER_ROTATIONAL_DIFFERENCE')
+    rot_row.prop(active, "proc_rotation_x", text="X")
+    rot_row.prop(active, "proc_rotation_y", text="Y")
+    rot_row.prop(active, "proc_rotation_z", text="Z")
+    scl_row = map_box.row(align=True)
+    scl_row.label(text="Scale", icon='EMPTY_ARROWS')
+    scl_row.prop(active, "proc_mapping_scale_x", text="X")
+    scl_row.prop(active, "proc_mapping_scale_y", text="Y")
+    scl_row.prop(active, "proc_mapping_scale_z", text="Z")
 
     col.prop(active, "proc_coord_preset", text="Preset")
     col.prop(active, "proc_coord_type", text="Coords")
@@ -1016,6 +1093,12 @@ def _draw_canvas_section(layout, tlm):
     canvas.prop(tlm, "uv_map")
 
 
+def _perf_metric(layout, label, value, icon='BLANK1'):
+    row = layout.row(align=True)
+    row.label(text=label, icon=icon)
+    row.label(text=value)
+
+
 def _draw_composite_section(layout, tlm):
     comp = layout.column(align=True)
     if tlm.shader_editable:
@@ -1031,8 +1114,6 @@ def _draw_composite_section(layout, tlm):
               icon=ac_icon, toggle=True)
     comp.prop(tlm, "use_base_color_alpha",
               text="Use Paint Alpha", icon='IMAGE_ALPHA', toggle=True)
-    comp.prop(tlm, "use_custom_slots",
-              text="Custom Slots", icon='NODETREE', toggle=True)
     # Eevee transparency mode. AUTO picks Hashed when an alpha layer
     # exists, Opaque otherwise — the right default 95% of the time.
     # Manual override for the rare glass / forced-cutout cases.
@@ -1044,6 +1125,51 @@ def _draw_composite_section(layout, tlm):
                   text="Convert to Editable Shader", icon='NODE_MATERIAL')
     comp.operator("tlm.refresh_thumbnails",
                   text="Refresh Thumbnails", icon='FILE_REFRESH')
+
+
+def _draw_performance_section(layout, tlm):
+    perf = layout.column(align=True)
+    perf.prop(tlm, "performance_debug",
+              text="Performance Debug", icon='INFO', toggle=True)
+    if not tlm.performance_debug:
+        return
+
+    _perf_metric(perf, "Rebuild", f"{tlm.perf_last_rebuild_ms:.2f} ms", 'NODETREE')
+    hot_status = "OK" if tlm.perf_last_hot_update_ok else "Fallback"
+    hot_prop = tlm.perf_last_hot_update_prop or "-"
+    _perf_metric(
+        perf,
+        "Hot Update",
+        f"{tlm.perf_last_hot_update_ms:.2f} ms  {hot_prop}  {hot_status}",
+        'FILE_REFRESH',
+    )
+    _perf_metric(
+        perf,
+        "Bake",
+        f"{tlm.perf_last_bake_ms:.2f} ms  {tlm.perf_last_bake_maps} maps",
+        'RENDER_STILL',
+    )
+    smart_status = "OK" if tlm.perf_last_smart_mask_ok else "-"
+    _perf_metric(
+        perf,
+        "Smart Mask",
+        f"{tlm.perf_last_smart_mask_ms:.2f} ms  {smart_status}",
+        'SHADERFX',
+    )
+
+    perf.separator(factor=0.5)
+    _perf_metric(
+        perf,
+        "Graph",
+        f"{tlm.perf_last_node_count} nodes  {tlm.perf_last_visible_layer_count}/{tlm.perf_last_layer_count} layers",
+        'NODE_MATERIAL',
+    )
+    _perf_metric(
+        perf,
+        "Mesh",
+        f"{tlm.perf_last_mesh_vertices} verts  {tlm.perf_last_mesh_faces} faces  {tlm.perf_last_mesh_objects} obj",
+        'MESH_DATA',
+    )
 
 
 def _draw_bake_section(layout, tlm):
@@ -1165,6 +1291,11 @@ TLM_PT_PropsComposite = _make_section_panel(
     "TLM_PT_main_panel", _draw_composite_section,
     space='PROPERTIES', region='WINDOW',
 )
+TLM_PT_PropsPerformance = _make_section_panel(
+    "TLM_PT_props_performance", "Performance",   'INFO',
+    "TLM_PT_main_panel", _draw_performance_section,
+    space='PROPERTIES', region='WINDOW',
+)
 TLM_PT_PropsBake      = _make_section_panel(
     "TLM_PT_props_bake",      "Bake & Export",   'RENDER_STILL',
     "TLM_PT_main_panel", _draw_bake_section,
@@ -1209,6 +1340,11 @@ TLM_PT_ViewComposite = _make_section_panel(
     "TLM_PT_viewport_panel", _draw_composite_section,
     space='VIEW_3D', region='UI', category='TLM',
 )
+TLM_PT_ViewPerformance = _make_section_panel(
+    "TLM_PT_view_performance", "Performance",   'INFO',
+    "TLM_PT_viewport_panel", _draw_performance_section,
+    space='VIEW_3D', region='UI', category='TLM',
+)
 TLM_PT_ViewBake      = _make_section_panel(
     "TLM_PT_view_bake",      "Bake & Export",   'RENDER_STILL',
     "TLM_PT_viewport_panel", _draw_bake_section,
@@ -1231,12 +1367,14 @@ classes = [
     TLM_PT_MainPanel,
     TLM_PT_PropsCanvas,
     TLM_PT_PropsComposite,
+    TLM_PT_PropsPerformance,
     TLM_PT_PropsBake,
     TLM_PT_PropsPresets,
     TLM_PT_PropsIO,
     TLM_PT_ViewportPanel,
     TLM_PT_ViewCanvas,
     TLM_PT_ViewComposite,
+    TLM_PT_ViewPerformance,
     TLM_PT_ViewBake,
     TLM_PT_ViewPresets,
     TLM_PT_ViewIO,

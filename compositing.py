@@ -9,6 +9,7 @@ have at least one layer using them are built.
 """
 
 import bpy
+import time as _time
 
 TLM_PREFIX = "TLM_"
 
@@ -455,6 +456,46 @@ def _cleanup_tlm_mask_blur_groups():
 
 # ── Hot-update tagging infrastructure ────────────────────────────────────────
 
+def unique_layer_name(layers, base, current=None):
+    """Return a Blender-style unique layer name within a TLM layer collection."""
+    base = (base or "Layer").strip() or "Layer"
+    existing = {l.name for l in layers if l != current}
+    if base not in existing:
+        return base
+    idx = 2
+    while True:
+        candidate = f"{base} {idx}"
+        if candidate not in existing:
+            return candidate
+        idx += 1
+
+
+def _ensure_unique_layer_names(material):
+    """Deduplicate layer names so node tags/frame grouping stay unambiguous."""
+    tlm = getattr(material, "tlm", None)
+    if tlm is None:
+        return
+    seen = set()
+    if len({l.name for l in tlm.layers}) == len(tlm.layers):
+        for layer in tlm.layers:
+            layer["_name_prev"] = layer.name
+        return
+
+    from . import properties as _props
+    old_suppress = getattr(_props, "_suppress_layer_updates", False)
+    _props._suppress_layer_updates = True
+    try:
+        for layer in tlm.layers:
+            name = (layer.name or "Layer").strip() or "Layer"
+            if name in seen:
+                name = unique_layer_name(tlm.layers, name, current=layer)
+                layer.name = name
+            layer["_name_prev"] = name
+            seen.add(name)
+    finally:
+        _props._suppress_layer_updates = old_suppress
+
+
 def _tag(node, layer_name, role, **extra):
     """Stamp a node with layer identity and role for hot-update lookup."""
     node["tlm_layer"] = layer_name
@@ -517,7 +558,75 @@ _PROC_INPUT_MAP = {
     "proc_lacunarity": "Lacunarity",
     "proc_randomness": "Randomness",
     "proc_wave_detail_scale": "Detail Scale",
+    "proc_wave_detail_roughness": "Detail Roughness",
+    "proc_wave_phase_offset": "Phase Offset",
 }
+
+
+def _proc_mapping_scale(layer):
+    """Mapping scale used by procedural types without a native Scale input."""
+    return (
+        getattr(layer, 'proc_mapping_scale_x', 1.0),
+        getattr(layer, 'proc_mapping_scale_y', 1.0),
+        getattr(layer, 'proc_mapping_scale_z', 1.0),
+    )
+
+
+def _set_input_default(node, input_name, value):
+    sock = node.inputs.get(input_name)
+    if sock is None:
+        return False
+    try:
+        sock.default_value = value
+        return True
+    except Exception:
+        return False
+
+
+def _apply_mapping_settings(mapping, layer):
+    try:
+        mapping.vector_type = getattr(layer, 'proc_mapping_type', 'POINT')
+    except Exception:
+        pass
+    _set_input_default(mapping, "Location", (
+        getattr(layer, 'proc_offset_x', 0.0),
+        getattr(layer, 'proc_offset_y', 0.0),
+        getattr(layer, 'proc_offset_z', 0.0),
+    ))
+    _set_input_default(mapping, "Rotation", (
+        getattr(layer, 'proc_rotation_x', 0.0),
+        getattr(layer, 'proc_rotation_y', 0.0),
+        getattr(layer, 'proc_rotation_z', 0.0),
+    ))
+    _set_input_default(mapping, "Scale", _proc_mapping_scale(layer))
+
+
+def _set_wave_direction(wave, wave_type, bands_direction='X', rings_direction='X'):
+    if wave_type == 'RINGS':
+        try:
+            wave.rings_direction = rings_direction
+        except Exception:
+            pass
+    else:
+        try:
+            wave.bands_direction = bands_direction
+        except Exception:
+            pass
+
+
+def _set_voronoi_fractal_inputs(node, layer):
+    _set_input_default(node, "Detail", getattr(layer, 'proc_detail', 2.0))
+    _set_input_default(node, "Roughness", getattr(layer, 'proc_roughness_proc', 0.5))
+    _set_input_default(node, "Lacunarity", getattr(layer, 'proc_lacunarity', 2.0))
+
+
+def _set_wave_inputs(node, layer):
+    _set_input_default(node, "Scale", getattr(layer, 'proc_scale', 5.0))
+    _set_input_default(node, "Distortion", getattr(layer, 'proc_distortion', 0.0))
+    _set_input_default(node, "Detail", getattr(layer, 'proc_detail', 2.0))
+    _set_input_default(node, "Detail Scale", getattr(layer, 'proc_wave_detail_scale', 1.0))
+    _set_input_default(node, "Detail Roughness", getattr(layer, 'proc_wave_detail_roughness', 0.5))
+    _set_input_default(node, "Phase Offset", getattr(layer, 'proc_wave_phase_offset', 0.0))
 
 _ALL_CHANNELS = ("base_color", "roughness", "metallic", "normal",
                  "emission", "transmission", "alpha", "bump")
@@ -544,11 +653,38 @@ def _hot_opacity(node_tree, layer, prop_name):
 
 
 def _hot_blend_mode(node_tree, layer, prop_name):
-    node = _find_tagged(node_tree, layer.name, "mix_base_color")
-    if not node:
-        return False
-    node.blend_type = BLEND_TO_MIX_MODE.get(layer.blend_mode, "MIX")
-    return True
+    found = False
+    for node in node_tree.nodes:
+        if node.get("tlm_layer") != layer.name:
+            continue
+        if not node.name.startswith(f"{TLM_PREFIX}mix_"):
+            continue
+        if not hasattr(node, "blend_type"):
+            continue
+
+        # Scalar mixes must be RGBA Mix + RGBToBW to make artistic blend
+        # modes behave like Base Color. Older node trees built before this
+        # fix need a full rebuild so the converter node is inserted.
+        if node.name.startswith(f"{TLM_PREFIX}mix_scalar_"):
+            if _USE_NEW_MIX and getattr(node, "data_type", None) != 'RGBA':
+                return False
+            if not node.get("tlm_scalar_result_node"):
+                return False
+
+        role = node.get("tlm_role", "")
+        channel = "base_color"
+        if role.startswith("opacity_target_"):
+            channel = role[len("opacity_target_"):]
+        elif role.startswith("mix_"):
+            channel = role[len("mix_"):]
+        try:
+            node.blend_type = BLEND_TO_MIX_MODE.get(
+                _effective_blend_mode(layer, channel), "MIX"
+            )
+        except (TypeError, AttributeError):
+            node.blend_type = "MIX"
+        found = True
+    return found
 
 
 def _hot_fill_color(node_tree, layer, prop_name):
@@ -559,6 +695,38 @@ def _hot_fill_color(node_tree, layer, prop_name):
         return False
     node.outputs[0].default_value = layer.fill_color
     return True
+
+
+def _ensure_scalar_fill_value_node(node_tree, layer, channel, prop_name):
+    """Recover pre-fix Fill scalar graphs that used color luminance by mistake."""
+    if getattr(layer, 'layer_type', '') != "FILL":
+        return None
+
+    out_ch = getattr(layer, 'output_channel', 'BASE_COLOR') or 'BASE_COLOR'
+    if out_ch == 'AUTO':
+        out_ch = 'BASE_COLOR'
+    fill_target = _OUTPUT_CHANNEL_TO_TARGET.get(out_ch, 'base_color')
+    if fill_target == channel:
+        return None
+
+    lum = _find_tagged(node_tree, layer.name, f"fill_lum_{channel}")
+    if not lum:
+        return None
+    old_socket = lum.outputs.get("Val") or lum.outputs[0]
+    old_links = list(old_socket.links)
+    if not old_links:
+        return None
+
+    node = node_tree.nodes.new("ShaderNodeValue")
+    node.name = f"{TLM_PREFIX}val_{_next_id()}"
+    node.location = (lum.location.x, lum.location.y)
+    node.outputs[0].default_value = getattr(layer, prop_name, 0.0)
+    _tag(node, layer.name, f"val_{channel}")
+    for link in old_links:
+        to_socket = link.to_socket
+        node_tree.links.remove(link)
+        node_tree.links.new(node.outputs[0], to_socket)
+    return node
 
 
 def _hot_scalar_fill(node_tree, layer, prop_name):
@@ -572,6 +740,8 @@ def _hot_scalar_fill(node_tree, layer, prop_name):
     if not ch:
         return False
     node = _find_tagged(node_tree, layer.name, f"val_{ch}")
+    if not node:
+        node = _ensure_scalar_fill_value_node(node_tree, layer, ch, prop_name)
     if not node:
         return False
     node.outputs[0].default_value = getattr(layer, prop_name, 0.0)
@@ -608,6 +778,8 @@ def _hot_proc_tex_input(node_tree, layer, prop_name):
     if not nodes:
         return False
     val = getattr(layer, prop_name, 0.0)
+    if prop_name == "proc_scale" and getattr(layer, 'proc_type', '') == 'GRADIENT':
+        return True
     for n in nodes:
         if input_name in n.inputs:
             n.inputs[input_name].default_value = val
@@ -635,10 +807,93 @@ def _hot_proc_offset(node_tree, layer, prop_name):
     nodes = _find_all_tagged(node_tree, layer.name, "proc_map")
     if not nodes:
         return False
-    loc = (layer.proc_offset_x, layer.proc_offset_y, layer.proc_offset_z)
     for n in nodes:
-        n.inputs["Location"].default_value = loc
+        _apply_mapping_settings(n, layer)
     return True
+
+
+def _hot_proc_brick(node_tree, layer, prop_name):
+    nodes = _find_all_tagged(node_tree, layer.name, "proc_tex")
+    if not nodes:
+        return False
+    found = False
+    for n in nodes:
+        if hasattr(n, 'offset'):
+            n.offset = getattr(layer, 'proc_brick_offset', 0.5)
+            found = True
+        if hasattr(n, 'offset_frequency'):
+            n.offset_frequency = getattr(layer, 'proc_brick_offset_freq', 2)
+            found = True
+        if hasattr(n, 'squash'):
+            n.squash = getattr(layer, 'proc_brick_squash', 1.0)
+            found = True
+        if hasattr(n, 'squash_frequency'):
+            n.squash_frequency = getattr(layer, 'proc_brick_squash_freq', 2)
+            found = True
+        found = _set_input_default(n, "Mortar Size", getattr(layer, 'proc_brick_mortar_size', 0.02)) or found
+        found = _set_input_default(n, "Mortar Smooth", getattr(layer, 'proc_brick_mortar_smooth', 0.1)) or found
+        found = _set_input_default(n, "Bias", getattr(layer, 'proc_brick_bias', 0.0)) or found
+        found = _set_input_default(n, "Brick Width", getattr(layer, 'proc_brick_width', 0.5)) or found
+        found = _set_input_default(n, "Row Height", getattr(layer, 'proc_brick_row_height', 0.25)) or found
+    return found
+
+
+def _hot_proc_dots(node_tree, layer, prop_name):
+    nodes = _find_all_tagged(node_tree, layer.name, "proc_dots_mr")
+    if not nodes:
+        return False
+    radius = getattr(layer, 'proc_dots_radius', 0.35)
+    softness = getattr(layer, 'proc_dots_softness', 0.15)
+    half_band = max(0.005, softness * 0.5)
+    for n in nodes:
+        n.inputs["From Min"].default_value = max(0.0, radius - half_band)
+        n.inputs["From Max"].default_value = min(1.0, radius + half_band)
+    return True
+
+
+def _hot_proc_cracks(node_tree, layer, prop_name):
+    nodes = _find_all_tagged(node_tree, layer.name, "proc_cracks_mr")
+    if not nodes:
+        return False
+    width = getattr(layer, 'proc_cracks_width', 0.05)
+    sharpness = getattr(layer, 'proc_cracks_sharpness', 0.7)
+    band = max(0.003, (1.0 - sharpness) * width * 0.8)
+    for n in nodes:
+        n.inputs["From Min"].default_value = max(0.0, width - band)
+        n.inputs["From Max"].default_value = min(1.0, width + band)
+    return True
+
+
+def _hot_proc_ridged(node_tree, layer, prop_name):
+    tags = {
+        "proc_ridged_gain": "proc_ridge_pow",
+        "proc_ridged_offset": "proc_ridge_mul",
+    }
+    node_tag = tags.get(prop_name)
+    if not node_tag:
+        return False
+    nodes = _find_all_tagged(node_tree, layer.name, node_tag)
+    if not nodes:
+        return False
+    value = getattr(layer, prop_name, 1.0)
+    for n in nodes:
+        n.inputs[1].default_value = value
+    return True
+
+
+def _hot_proc_gabor(node_tree, layer, prop_name):
+    nodes = _find_all_tagged(node_tree, layer.name, "proc_tex")
+    if not nodes:
+        return False
+    import math as _math
+    found = False
+    for n in nodes:
+        found = _set_input_default(n, "Frequency", getattr(layer, 'proc_gabor_frequency', 2.0)) or found
+        found = _set_input_default(n, "Anisotropy", getattr(layer, 'proc_gabor_anisotropy', 1.0)) or found
+        found = _set_input_default(
+            n, "Orientation", _math.radians(getattr(layer, 'proc_gabor_orientation', 45.0))
+        ) or found
+    return found
 
 
 def _hot_proc_stripe(node_tree, layer, prop_name):
@@ -702,23 +957,29 @@ def _hot_proc_hex(node_tree, layer, prop_name):
     return True
 
 
+def _clamped_ramp_position(value):
+    return min(max(float(value), 0.001), 0.999)
+
+
 def _hot_proc_color(node_tree, layer, prop_name):
     nodes = _find_all_tagged(node_tree, layer.name, "proc_cr")
     if nodes:
         for cr in nodes:
             elems = cr.color_ramp.elements
+            elems = sorted((elem for elem in elems), key=lambda elem: elem.position)
+            if getattr(layer, 'use_proc_color3', False) and len(elems) >= 3:
+                elems[1], elems[2] = elems[-1], elems[1]
             contrast = getattr(layer, 'proc_contrast', 0.5)
-            # Contrast is hidden in the UI for GRADIENT — force default so a
-            # leftover value from a previous proc_type doesn't bite the ramp.
+            # Gradient uses the full ramp so Color 3 Position stays meaningful.
             if layer.proc_type == 'GRADIENT':
-                contrast = 0.5
+                contrast = 0.0
             half = contrast * 0.49
             elems[0].position = half
             elems[0].color = layer.proc_color1
             elems[1].position = 1.0 - half
             elems[1].color = layer.proc_color2
             if getattr(layer, 'use_proc_color3', False) and len(elems) >= 3:
-                elems[2].position = layer.proc_color3_position
+                elems[2].position = _clamped_ramp_position(layer.proc_color3_position)
                 elems[2].color = layer.proc_color3
             elif getattr(layer, 'use_proc_color3', False) and len(elems) < 3:
                 return False  # element count mismatch — need rebuild
@@ -888,21 +1149,58 @@ def _hot_normal_strength(node_tree, layer, prop_name):
     return True
 
 
+def _ensure_normal_mapping_node(node_tree, layer):
+    """Return/create the Mapping node between a layer's normal UV and texture."""
+    node = _find_tagged(node_tree, layer.name, "normal_mapping")
+    if node:
+        return node
+
+    tex = _find_tagged(node_tree, layer.name, "normal_tex")
+    if not tex:
+        return None
+
+    vec_input = tex.inputs.get("Vector")
+    if vec_input is None:
+        return None
+
+    source_socket = None
+    if vec_input.links:
+        link = vec_input.links[0]
+        if link.from_node.type == 'MAPPING':
+            _tag(link.from_node, layer.name, "normal_mapping")
+            return link.from_node
+        source_socket = link.from_socket
+        node_tree.links.remove(link)
+    else:
+        uv_node = _find_tagged(node_tree, layer.name, "normal_uv")
+        if uv_node:
+            source_socket = uv_node.outputs.get("UV")
+
+    if source_socket is None:
+        return None
+
+    mapping = node_tree.nodes.new("ShaderNodeMapping")
+    mapping.name = f"{TLM_PREFIX}normal_mapping_{_next_id()}"
+    mapping.location = (tex.location.x - 150, tex.location.y)
+    _tag(mapping, layer.name, "normal_mapping")
+    node_tree.links.new(source_socket, mapping.inputs["Vector"])
+    node_tree.links.new(mapping.outputs["Vector"], vec_input)
+    return mapping
+
+
 def _hot_normal_mapping(node_tree, layer, prop_name):
     """Update per-layer Normal Mapping node (tile scale + rotation).
 
-    The Mapping node exists ONLY when tile_scale != 1.0 OR rotation != 0.0.
-    If the user crosses those thresholds, topology changes → fallback to rebuild.
+    Normal layers always own a Mapping node, even at default values. That keeps
+    tile/rotation sliders hot-updatable instead of rebuilding the whole graph
+    when the value crosses the 1.0 / 0.0 defaults.
     """
     import math
     tile = getattr(layer, 'normal_tile_scale', 1.0)
     rot  = getattr(layer, 'normal_rotation', 0.0)
-    needs_mapping = (abs(tile - 1.0) > 1e-4) or (abs(rot) > 1e-4)
-    node = _find_tagged(node_tree, layer.name, "normal_mapping")
-    if needs_mapping != bool(node):
-        return False  # topology change: rebuild will add/remove the Mapping node
+    node = _ensure_normal_mapping_node(node_tree, layer)
     if not node:
-        return True  # neither needed nor present → already correct
+        return False
     node.inputs["Scale"].default_value = (tile, tile, 1.0)
     node.inputs["Rotation"].default_value = (0.0, 0.0, math.radians(rot))
     return True
@@ -1148,9 +1446,36 @@ _HOT_DISPATCH = {
     "proc_lacunarity": _hot_proc_tex_input,
     "proc_randomness": _hot_proc_tex_input,
     "proc_wave_detail_scale": _hot_proc_tex_input,
+    "proc_wave_detail_roughness": _hot_proc_tex_input,
+    "proc_wave_phase_offset": _hot_proc_tex_input,
     "proc_offset_x": _hot_proc_offset,
     "proc_offset_y": _hot_proc_offset,
     "proc_offset_z": _hot_proc_offset,
+    "proc_rotation_x": _hot_proc_offset,
+    "proc_rotation_y": _hot_proc_offset,
+    "proc_rotation_z": _hot_proc_offset,
+    "proc_mapping_scale_x": _hot_proc_offset,
+    "proc_mapping_scale_y": _hot_proc_offset,
+    "proc_mapping_scale_z": _hot_proc_offset,
+    "proc_mapping_type": _hot_proc_offset,
+    "proc_brick_offset": _hot_proc_brick,
+    "proc_brick_offset_freq": _hot_proc_brick,
+    "proc_brick_squash": _hot_proc_brick,
+    "proc_brick_squash_freq": _hot_proc_brick,
+    "proc_brick_mortar_size": _hot_proc_brick,
+    "proc_brick_mortar_smooth": _hot_proc_brick,
+    "proc_brick_bias": _hot_proc_brick,
+    "proc_brick_width": _hot_proc_brick,
+    "proc_brick_row_height": _hot_proc_brick,
+    "proc_dots_radius": _hot_proc_dots,
+    "proc_dots_softness": _hot_proc_dots,
+    "proc_cracks_width": _hot_proc_cracks,
+    "proc_cracks_sharpness": _hot_proc_cracks,
+    "proc_ridged_offset": _hot_proc_ridged,
+    "proc_ridged_gain": _hot_proc_ridged,
+    "proc_gabor_frequency": _hot_proc_gabor,
+    "proc_gabor_anisotropy": _hot_proc_gabor,
+    "proc_gabor_orientation": _hot_proc_gabor,
     "proc_stripe_width":     _hot_proc_stripe,
     "proc_stripe_sharpness": _hot_proc_stripe,
     "proc_hex_edge_width":   _hot_proc_hex,
@@ -1214,6 +1539,62 @@ _HOT_DISPATCH = {
 
 _hot_updating = False
 
+
+def performance_enabled(material):
+    """True when the material should collect lightweight timing metrics."""
+    try:
+        return bool(material and getattr(material.tlm, "performance_debug", False))
+    except Exception:
+        return False
+
+
+def record_performance(material, **values):
+    """Store performance metrics without affecting normal rebuild behavior."""
+    if not performance_enabled(material):
+        return
+    tlm = material.tlm
+    for attr, value in values.items():
+        try:
+            setattr(tlm, attr, value)
+        except Exception:
+            pass
+
+
+def _material_mesh_stats(material):
+    """Count mesh users of a material. Runs only while performance debug is on."""
+    objects = 0
+    vertices = 0
+    faces = 0
+    try:
+        for obj in bpy.data.objects:
+            if obj.type != 'MESH':
+                continue
+            if not any(slot.material == material for slot in obj.material_slots):
+                continue
+            objects += 1
+            mesh = obj.data
+            vertices += len(mesh.vertices)
+            faces += len(mesh.polygons)
+    except Exception:
+        return 0, 0, 0
+    return vertices, faces, objects
+
+
+def _record_rebuild_performance(material, started_at, node_tree, visible_layers):
+    if started_at is None:
+        return
+    vertices, faces, objects = _material_mesh_stats(material)
+    record_performance(
+        material,
+        perf_last_rebuild_ms=(_time.perf_counter() - started_at) * 1000.0,
+        perf_last_node_count=len(node_tree.nodes) if node_tree else 0,
+        perf_last_layer_count=len(material.tlm.layers),
+        perf_last_visible_layer_count=len(visible_layers or []),
+        perf_last_mesh_vertices=vertices,
+        perf_last_mesh_faces=faces,
+        perf_last_mesh_objects=objects,
+    )
+
 def hot_update_property(material, layer, prop_name):
     """Attempt to hot-update a single property without full rebuild.
     Returns True on success, False if fallback rebuild is needed."""
@@ -1226,6 +1607,8 @@ def hot_update_property(material, layer, prop_name):
     handler = _HOT_DISPATCH.get(prop_name)
     if not handler:
         return False
+    perf_started = _time.perf_counter() if performance_enabled(material) else None
+    ok = False
     try:
         _hot_updating = True
         ok = handler(node_tree, layer, prop_name)
@@ -1235,6 +1618,13 @@ def hot_update_property(material, layer, prop_name):
         traceback.print_exc()
         return False
     finally:
+        if perf_started is not None:
+            record_performance(
+                material,
+                perf_last_hot_update_ms=(_time.perf_counter() - perf_started) * 1000.0,
+                perf_last_hot_update_prop=prop_name,
+                perf_last_hot_update_ok=bool(ok),
+            )
         _hot_updating = False
 
 
@@ -1520,9 +1910,9 @@ def _new_mix_scalar(node_tree, blend_mode, opacity, x, y, layer_name="", channel
     """
     if _USE_NEW_MIX:
         node = node_tree.nodes.new("ShaderNodeMix")
-        node.data_type = 'FLOAT'
+        node.data_type = 'RGBA'
         try:
-            node.blend_type = blend_mode
+            node.blend_type = BLEND_TO_MIX_MODE.get(blend_mode, "MIX")
         except (TypeError, AttributeError):
             node.blend_type = 'MIX'  # safety: fall back if Blender rejects
         node.inputs["Factor"].default_value = opacity
@@ -1531,7 +1921,7 @@ def _new_mix_scalar(node_tree, blend_mode, opacity, x, y, layer_name="", channel
         # output goes through SeparateColor downstream to extract the float.
         node = node_tree.nodes.new("ShaderNodeMixRGB")
         try:
-            node.blend_type = blend_mode
+            node.blend_type = BLEND_TO_MIX_MODE.get(blend_mode, "MIX")
         except (TypeError, AttributeError):
             node.blend_type = 'MIX'
         node.inputs["Fac"].default_value = opacity
@@ -1539,6 +1929,14 @@ def _new_mix_scalar(node_tree, blend_mode, opacity, x, y, layer_name="", channel
     node.location = (x, y)
     if layer_name:
         _tag(node, layer_name, f"mix_{channel}" if channel else "mix_scalar")
+    to_scalar = node_tree.nodes.new("ShaderNodeRGBToBW")
+    to_scalar.name = f"{TLM_PREFIX}mix_scalar_bw_{_next_id()}"
+    to_scalar.location = (x + 190, y)
+    if layer_name:
+        _tag(to_scalar, layer_name,
+             f"mix_scalar_result_{channel}" if channel else "mix_scalar_result")
+    node_tree.links.new(_result_socket(node), to_scalar.inputs["Color"])
+    node["tlm_scalar_result_node"] = to_scalar.name
     return node
 
 
@@ -1659,6 +2057,11 @@ def _b_socket_scalar(node):
 
 
 def _result_socket_scalar(node):
+    result_node_name = node.get("tlm_scalar_result_node")
+    if result_node_name:
+        result_node = node.id_data.nodes.get(result_node_name)
+        if result_node:
+            return result_node.outputs.get("Val") or result_node.outputs[0]
     if _USE_NEW_MIX:
         return _enabled_socket(node.outputs, "Result")
     return node.outputs["Color"]
@@ -2115,37 +2518,94 @@ def _apply_mask(node_tree, mix_node, layer, uv_map, x, y, layer_alpha=None):
 
 # ── Layer width helper ────────────────────────────────────────────────────────
 
-_LAYER_WIDTH = {
-    # Width = full span of sub-nodes + padding.  Mix nodes now at x+280,
-    # sub-nodes extend LEFT of x (UV at x-220, TC at x-500).
-    'PAINT':       750,   # UV(-220)…Mix(+480) ≈ 700 + pad
-    'FILL':        600,   # Fill(0)…Mix(+480)  ≈ 480 + next-layer left margin
-    'ADJUSTMENT':  650,   # Adj node chains up to ~440 wide + pad
-    'PROCEDURAL': 1200,   # TC(-500)…CR(+380)  ≈ 880 + pad
-    'GROUP':       700,
+_BASE_LAYER_WIDTH = {
+    # Width = full span of sub-nodes + padding. These are intentionally tight:
+    # the graph should keep the lane style without leaving giant blank gaps.
+    'PAINT':        900,
+    'FILL':         720,
+    'ADJUSTMENT':   820,
+    'PROCEDURAL':   980,
+    'REFERENCE':    980,
+    'GROUP':        900,
+}
+
+_PROC_LAYER_WIDTH = {
+    # Most procedural types are a compact tex -> ramp chain.  Only the
+    # hand-built math topologies need extra horizontal room.
+    'GRADIENT':     900,
+    'WHITE_NOISE':  900,
+    'CHECKER':      940,
+    'MAGIC':        980,
+    'NOISE':       1020,
+    'VORONOI':     1020,
+    'WAVE':        1020,
+    'MUSGRAVE':    1020,
+    'BRICK':       1120,
+    'DOTS':        1120,
+    'CRACKS':      1120,
+    'GABOR':       1120,
+    'STRIPES':     1180,
+    'HEX_GRID':    1180,
+    'RIDGED':      1260,
+    'MARBLE':      1360,
 }
 
 
-_COLS_PER_ROW = 4     # layers per row before wrapping to next line
-_ROW_HEIGHT   = 400   # vertical drop between rows
+_CHANNEL_LAYOUT_ORDER = (
+    'base_color',
+    'roughness',
+    'metallic',
+    'normal',
+    'emission',
+    'transmission',
+    'alpha',
+    'bump',
+)
+_CHANNEL_Y_GAP = 560
+_CHANNEL_ROUTE_OFFSET = 160
+_LAYER_COLUMN_GAP = 90
+
+
+def _layer_width(layer):
+    """Estimate the horizontal space a generated layer block needs."""
+    layer_type = getattr(layer, 'layer_type', '')
+    width = _BASE_LAYER_WIDTH.get(layer_type, 1200)
+    if layer_type == 'PROCEDURAL':
+        width = _PROC_LAYER_WIDTH.get(getattr(layer, 'proc_type', ''), width)
+
+    if getattr(layer, 'use_mask', False):
+        width = max(width, 1180)
+        source_a = getattr(layer, 'mask_source', 'IMAGE')
+        source_b = getattr(layer, 'mask_source_b', 'IMAGE')
+        if (source_a in {'EDGE_WEAR', 'DIRT', 'CURVATURE_SMART'}
+                or (getattr(layer, 'use_mask_b', False)
+                    and source_b in {'EDGE_WEAR', 'DIRT', 'CURVATURE_SMART'})):
+            width = max(width, 1500)
+        if getattr(layer, 'use_mask_b', False):
+            width = max(width, 1320)
+
+    if layer_type == 'PROCEDURAL':
+        if getattr(layer, 'proc_vector_distortion', 0.0) > 1e-4:
+            width = max(width, 1220)
+        if getattr(layer, 'use_emission', False):
+            width = max(width, 1260)
+        if getattr(layer, 'emission_selector_type', 'NONE') != 'NONE':
+            width = max(width, 1460)
+    return width + _LAYER_COLUMN_GAP
 
 
 def _layer_positions(layers, x0, y0):
-    """Return list of (x, y) positions, one per layer, wrapping into rows."""
+    """Return left-to-right layer positions for readable shader-editor graphs.
+
+    Keep the stack flowing left-to-right and use channel lanes top-to-bottom.
+    Width estimates are deliberately compact so many layers stay readable
+    without collapsing into the same area or leaving excessive empty space.
+    """
     positions = []
     x = x0
-    y = y0
-    col = 0
     for layer in layers:
-        positions.append((x, y))
-        col += 1
-        if col >= _COLS_PER_ROW:
-            # Wrap: new row below, reset x
-            col = 0
-            x = x0
-            y -= _ROW_HEIGHT
-        else:
-            x += _LAYER_WIDTH.get(layer.layer_type, 300)
+        positions.append((x, y0))
+        x += _layer_width(layer)
     return positions
 
 
@@ -2295,34 +2755,39 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
                 )
                 continue
             if current is None:
-                if _layer_has_first_layer_modulator(layer):
+                if is_scalar:
                     mix_x = x + 280
-                    if is_scalar:
-                        base_val = _new_value(node_tree, 0.0, x - 160, y - 20,
-                                              layer_name=layer.name,
-                                              channel=channel_id).outputs["Value"]
-                        mix = _new_mix_scalar(node_tree,
-                                               _effective_blend_mode(layer, channel_id),
-                                               layer.opacity, mix_x, y - 40,
-                                               layer_name=layer.name, channel=channel_id)
-                        node_tree.links.new(base_val, _a_socket_scalar(mix))
-                        node_tree.links.new(layer_out, _b_socket_scalar(mix))
-                        _tag(mix, layer.name, f"opacity_target_{channel_id}",
-                             opacity_input_idx=-1)
-                        current = _result_socket_scalar(mix)
-                    else:
-                        bg = _new_fill(node_tree, (0.0, 0.0, 0.0, 1.0),
-                                       x - 160, y + 120,
-                                       layer_name=layer.name, channel=channel_id)
-                        mix = _new_mix(node_tree,
-                                       _effective_blend_mode(layer, channel_id),
-                                       layer.opacity, mix_x, y - 40,
-                                       layer_name=layer.name, channel=channel_id)
-                        node_tree.links.new(bg.outputs["Color"], _a_socket(mix))
-                        node_tree.links.new(layer_out, _b_socket(mix))
-                        _set_factor(node_tree, mix, layer, layer_alpha, None,
-                                    mix_x, y, i, uv_map, channel=channel_id)
-                        current = _result_socket(mix)
+                    base_val = _new_value(
+                        node_tree,
+                        _scalar_channel_default(channel_id),
+                        x - 160,
+                        y - 20,
+                        layer_name=layer.name,
+                        channel=channel_id,
+                    ).outputs["Value"]
+                    mix = _new_mix_scalar(node_tree,
+                                           _effective_blend_mode(layer, channel_id),
+                                           layer.opacity, mix_x, y - 40,
+                                           layer_name=layer.name, channel=channel_id)
+                    node_tree.links.new(base_val, _a_socket_scalar(mix))
+                    node_tree.links.new(layer_out, _b_socket_scalar(mix))
+                    _set_factor(node_tree, mix, layer, layer_alpha, None,
+                                mix_x, y, i, uv_map, channel=channel_id)
+                    current = _result_socket_scalar(mix)
+                elif _layer_has_first_layer_modulator(layer):
+                    mix_x = x + 280
+                    bg = _new_fill(node_tree, (0.0, 0.0, 0.0, 1.0),
+                                   x - 160, y + 120,
+                                   layer_name=layer.name, channel=channel_id)
+                    mix = _new_mix(node_tree,
+                                   _effective_blend_mode(layer, channel_id),
+                                   layer.opacity, mix_x, y - 40,
+                                   layer_name=layer.name, channel=channel_id)
+                    node_tree.links.new(bg.outputs["Color"], _a_socket(mix))
+                    node_tree.links.new(layer_out, _b_socket(mix))
+                    _set_factor(node_tree, mix, layer, layer_alpha, None,
+                                mix_x, y, i, uv_map, channel=channel_id)
+                    current = _result_socket(mix)
                 else:
                     current = layer_out
                 prev_alpha = layer_alpha if not is_scalar else None
@@ -2488,7 +2953,10 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
         elif layer.layer_type == "FILL":
             layer_alpha = None
             fill_out_ch = getattr(layer, 'output_channel', 'AUTO')
-            fill_routed = fill_out_ch != 'AUTO'
+            if fill_out_ch == 'AUTO':
+                fill_out_ch = 'BASE_COLOR'
+            fill_target = _OUTPUT_CHANNEL_TO_TARGET.get(fill_out_ch, 'base_color')
+            fill_routed = fill_target == channel_id and channel_id != 'base_color'
 
             if channel_id == 'base_color':
                 fn = _new_fill(node_tree, layer.fill_color, x, y, layer_name=layer.name, channel="base_color")
@@ -2636,7 +3104,10 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
                 layer_alpha = None
             elif is_scalar:
                 # Drive roughness/metallic/transmission/alpha from the
-                # procedural Fac output.
+                # same procedural colour graph used by Base Color, then
+                # convert that colour to a scalar. This keeps ColorRamp,
+                # Color 3, Contrast and custom procedural colour topology
+                # consistent across every routed output.
                 #
                 # When this channel is the layer's PRIMARY routing target
                 # (output_channel matches), the user expects the procedural
@@ -2647,9 +3118,17 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
                 # symmetrical: roughness_fill=0.5, metallic_fill=0.0,
                 # alpha_fill=1.0. A PROCEDURAL routed to METALLIC with
                 # default fill_val=0.0 was multiplying the noise by zero.
-                fac_out = _build_proc_fac_node(node_tree, layer, f"scalar_{channel_id}_{i}", x, y, uv_map)
-                if fac_out is None:
+                proc_color, _proc_alpha = _build_procedural_node(
+                    node_tree, layer, uv_map, x, y
+                )
+                if proc_color is None:
                     continue
+                to_scalar = node_tree.nodes.new("ShaderNodeRGBToBW")
+                to_scalar.name = f"{TLM_PREFIX}proc_scalar_lum_{channel_id}_{i}"
+                to_scalar.location = (x + 520, y)
+                _tag(to_scalar, layer.name, f"proc_scalar_lum_{channel_id}")
+                node_tree.links.new(proc_color, to_scalar.inputs["Color"])
+                scalar_out = to_scalar.outputs["Val"]
 
                 _routing_target = {
                     'BASE_COLOR': 'base_color', 'ROUGHNESS': 'roughness',
@@ -2657,8 +3136,8 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
                 }.get(getattr(layer, 'output_channel', 'BASE_COLOR'), 'base_color')
 
                 if _routing_target == channel_id:
-                    # Primary target: pass the procedural Fac through directly.
-                    layer_out = fac_out
+                    # Primary target: pass the procedural value through directly.
+                    layer_out = scalar_out
                 else:
                     # Additional channel (use_X toggle on top of the routing
                     # target). Multiply by the per-channel fill slider so the
@@ -2671,8 +3150,8 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
                     scale.operation = 'MULTIPLY'
                     scale.use_clamp = True
                     scale.name = f"{TLM_PREFIX}proc_scalar_{channel_id}_{i}"
-                    scale.location = (x + 120, y)
-                    node_tree.links.new(fac_out, scale.inputs[0])
+                    scale.location = (x + 700, y)
+                    node_tree.links.new(scalar_out, scale.inputs[0])
                     scale.inputs[1].default_value = fill_val
                     layer_out = scale.outputs["Value"]
                 layer_alpha = None
@@ -2719,7 +3198,7 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
                             mix_x, y, i, uv_map, channel=channel_id)
                 current = _result_socket(mix)
                 prev_alpha = layer_alpha
-            elif needs_modulator_mix and is_scalar:
+            elif is_scalar:
                 # Scalar channel first-layer (roughness/metallic/transmission/
                 # alpha): mix against a CHANNEL-DEFAULT baseline so the
                 # unpainted pixels render with the BSDF's natural default
@@ -2730,12 +3209,8 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
                 #   alpha       → 1.0 (BSDF default, fully opaque)
                 # Mask / fresnel / opacity / alpha all still modulate
                 # *between* the baseline and the layer's value.
-                _CHANNEL_DEFAULTS = {
-                    'roughness': 0.5, 'metallic': 0.0,
-                    'transmission': 0.0, 'alpha': 1.0,
-                }
-                _default = _CHANNEL_DEFAULTS.get(channel_id, 0.0)
-                base_val = _new_value(node_tree, _default, x - 100, y - 20,
+                base_val = _new_value(node_tree, _scalar_channel_default(channel_id),
+                                      x - 100, y - 20,
                                       layer_name=layer.name,
                                       channel=channel_id).outputs["Value"]
                 mix_x = x + 280
@@ -3524,9 +3999,7 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
     mapping = node_tree.nodes.new("ShaderNodeMapping")
     mapping.name = f"{TLM_PREFIX}proc_map_{_next_id()}"
     mapping.location = (x - 300, y)
-    mapping.inputs["Location"].default_value = (
-        layer.proc_offset_x, layer.proc_offset_y, layer.proc_offset_z
-    )
+    _apply_mapping_settings(mapping, layer)
     _tag(mapping, layer.name, "proc_map")
     # Select coordinate space based on layer setting
     coord_type = getattr(layer, 'proc_coord_type', 'GENERATED')
@@ -3574,6 +4047,7 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
         tex_node.distance  = layer.proc_voronoi_distance
         tex_node.inputs["Scale"].default_value      = layer.proc_scale
         tex_node.inputs["Randomness"].default_value = layer.proc_randomness
+        _set_voronoi_fractal_inputs(tex_node, layer)
         # Normalize Distance output to 0-1 range (critical for ColorRamp mapping)
         if hasattr(tex_node, 'normalize'):
             tex_node.normalize = True
@@ -3583,15 +4057,17 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
     elif pt == 'WAVE':
         tex_node = node_tree.nodes.new("ShaderNodeTexWave")
         tex_node.wave_type    = layer.proc_wave_type
-        tex_node.bands_direction = 'X'
+        _set_wave_direction(
+            tex_node,
+            layer.proc_wave_type,
+            getattr(layer, 'proc_wave_bands_direction', 'X'),
+            getattr(layer, 'proc_wave_rings_direction', 'X'),
+        )
         try:
             tex_node.wave_profile = layer.proc_wave_profile
         except Exception:
             pass
-        tex_node.inputs["Scale"].default_value        = layer.proc_scale
-        tex_node.inputs["Distortion"].default_value   = layer.proc_distortion
-        tex_node.inputs["Detail"].default_value       = layer.proc_detail
-        tex_node.inputs["Detail Scale"].default_value = layer.proc_wave_detail_scale
+        _set_wave_inputs(tex_node, layer)
         fac_out = tex_node.outputs["Fac"]
 
     elif pt == 'GRADIENT':
@@ -3647,6 +4123,8 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
         tex_node.inputs["Mortar Size"].default_value   = layer.proc_brick_mortar_size
         tex_node.inputs["Mortar Smooth"].default_value = layer.proc_brick_mortar_smooth
         tex_node.inputs["Bias"].default_value          = layer.proc_brick_bias
+        _set_input_default(tex_node, "Brick Width", getattr(layer, 'proc_brick_width', 0.5))
+        _set_input_default(tex_node, "Row Height", getattr(layer, 'proc_brick_row_height', 0.25))
         tex_node.name = f"{TLM_PREFIX}proc_tex_{_next_id()}"
         tex_node.location = (x - 100, y)
         _tag(tex_node, layer.name, "proc_tex")
@@ -3679,6 +4157,225 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
         tex_node.noise_dimensions = '3D'
         fac_out = tex_node.outputs["Value"]
 
+    elif pt == 'DOTS':
+        # Packed circles: Voronoi F1 distance thresholded into discs.
+        # The Distance output is the Euclidean distance to the nearest
+        # cell centre, normalized; a smoothstep around `radius` carves
+        # out circular dots inside each cell. `softness` is the half-
+        # width of the smoothstep, so 0 = hard, 1 = full halo.
+        vor = node_tree.nodes.new("ShaderNodeTexVoronoi")
+        try:
+            vor.feature = 'F1'
+        except Exception:
+            pass
+        try:
+            vor.voronoi_dimensions = '3D'
+        except Exception:
+            pass
+        if hasattr(vor, 'normalize'):
+            vor.normalize = True
+        vor.inputs["Scale"].default_value      = layer.proc_scale
+        vor.inputs["Randomness"].default_value = layer.proc_randomness
+        _set_voronoi_fractal_inputs(vor, layer)
+        vor.name = f"{TLM_PREFIX}proc_tex_{_next_id()}"
+        vor.location = (x - 100, y)
+        _tag(vor, layer.name, "proc_tex")
+        node_tree.links.new(vec_out, vor.inputs["Vector"])
+
+        radius = getattr(layer, 'proc_dots_radius', 0.35)
+        softness = getattr(layer, 'proc_dots_softness', 0.15)
+        half_band = max(0.005, softness * 0.5)
+
+        mr = node_tree.nodes.new("ShaderNodeMapRange")
+        try:
+            mr.interpolation_type = 'SMOOTHSTEP'
+        except Exception:
+            pass
+        mr.clamp = True
+        # Inside dot (distance < radius) → 1.0; outside (> radius) → 0.0.
+        mr.inputs["From Min"].default_value = max(0.0, radius - half_band)
+        mr.inputs["From Max"].default_value = min(1.0, radius + half_band)
+        mr.inputs["To Min"].default_value   = 1.0
+        mr.inputs["To Max"].default_value   = 0.0
+        mr.location = (x + 50, y)
+        mr.name = f"{TLM_PREFIX}proc_dots_mr_{_next_id()}"
+        _tag(mr, layer.name, "proc_dots_mr")
+        node_tree.links.new(vor.outputs["Distance"], mr.inputs["Value"])
+        # The post-elif code (line ~4336) does:
+        #   if tex_node is None: return None, None
+        # so we MUST point tex_node at the source texture or the whole
+        # branch silently fails to produce a color output. The post-elif
+        # then re-renames/relocates/links the texture (idempotent with
+        # what we already did) and builds the ColorRamp around fac_out.
+        tex_node = vor
+        fac_out = mr.outputs["Result"]
+
+    elif pt == 'RIDGED':
+        # Classic ridged fractal: 1 - |2*noise - 1|, raised to a power,
+        # multiplied by an intensity offset. Produces clean razor-like
+        # crests — ideal for mountain ridges, rock veins, lightning,
+        # crackle. Five-stage math chain; idempotent under tweaks.
+        noise = node_tree.nodes.new("ShaderNodeTexNoise")
+        noise.inputs["Scale"].default_value      = layer.proc_scale
+        noise.inputs["Detail"].default_value     = layer.proc_detail
+        noise.inputs["Roughness"].default_value  = layer.proc_roughness_proc
+        noise.inputs["Lacunarity"].default_value = layer.proc_lacunarity
+        noise.inputs["Distortion"].default_value = layer.proc_distortion
+        noise.name = f"{TLM_PREFIX}proc_tex_{_next_id()}"
+        noise.location = (x - 100, y)
+        _tag(noise, layer.name, "proc_tex")
+        node_tree.links.new(vec_out, noise.inputs["Vector"])
+
+        fold = node_tree.nodes.new("ShaderNodeMath")
+        fold.operation = 'MULTIPLY_ADD'
+        fold.name = f"{TLM_PREFIX}proc_ridge_fold_{_next_id()}"
+        fold.location = (x + 60, y)
+        fold.inputs[1].default_value = 2.0   # *2
+        fold.inputs[2].default_value = -1.0  # -1 → range -1..1
+        node_tree.links.new(noise.outputs["Fac"], fold.inputs[0])
+        _tag(fold, layer.name, "proc_ridge_fold")
+
+        abs_n = node_tree.nodes.new("ShaderNodeMath")
+        abs_n.operation = 'ABSOLUTE'
+        abs_n.name = f"{TLM_PREFIX}proc_ridge_abs_{_next_id()}"
+        abs_n.location = (x + 160, y)
+        node_tree.links.new(fold.outputs[0], abs_n.inputs[0])
+        _tag(abs_n, layer.name, "proc_ridge_abs")
+
+        inv = node_tree.nodes.new("ShaderNodeMath")
+        inv.operation = 'SUBTRACT'
+        inv.use_clamp = True
+        inv.name = f"{TLM_PREFIX}proc_ridge_inv_{_next_id()}"
+        inv.location = (x + 260, y)
+        inv.inputs[0].default_value = 1.0   # 1 - |…|
+        node_tree.links.new(abs_n.outputs[0], inv.inputs[1])
+        _tag(inv, layer.name, "proc_ridge_inv")
+
+        pow_n = node_tree.nodes.new("ShaderNodeMath")
+        pow_n.operation = 'POWER'
+        pow_n.use_clamp = True
+        pow_n.name = f"{TLM_PREFIX}proc_ridge_pow_{_next_id()}"
+        pow_n.location = (x + 360, y)
+        pow_n.inputs[1].default_value = getattr(layer, 'proc_ridged_gain', 2.0)
+        node_tree.links.new(inv.outputs[0], pow_n.inputs[0])
+        _tag(pow_n, layer.name, "proc_ridge_pow")
+
+        mult = node_tree.nodes.new("ShaderNodeMath")
+        mult.operation = 'MULTIPLY'
+        mult.use_clamp = True
+        mult.name = f"{TLM_PREFIX}proc_ridge_mul_{_next_id()}"
+        mult.location = (x + 460, y)
+        mult.inputs[1].default_value = getattr(layer, 'proc_ridged_offset', 1.0)
+        node_tree.links.new(pow_n.outputs[0], mult.inputs[0])
+        _tag(mult, layer.name, "proc_ridge_mul")
+
+        # See DOTS branch for the tex_node-must-be-set rationale.
+        tex_node = noise
+        fac_out = mult.outputs[0]
+
+    elif pt == 'CRACKS':
+        # Crack / vein network = Voronoi distance-to-edge thresholded
+        # into narrow lines. Reuses the same primitive as HEX_GRID but
+        # with sharpness control and irregular cells via proc_randomness
+        # (HEX_GRID defaults to Randomness 0 for clean honeycomb; CRACKS
+        # defaults higher for organic veins).
+        vor = node_tree.nodes.new("ShaderNodeTexVoronoi")
+        try:
+            vor.feature = 'DISTANCE_TO_EDGE'
+        except Exception:
+            pass
+        try:
+            vor.voronoi_dimensions = '3D'
+        except Exception:
+            pass
+        vor.inputs["Scale"].default_value = layer.proc_scale
+        if "Randomness" in vor.inputs:
+            vor.inputs["Randomness"].default_value = layer.proc_randomness
+        _set_voronoi_fractal_inputs(vor, layer)
+        vor.name = f"{TLM_PREFIX}proc_tex_{_next_id()}"
+        vor.location = (x - 100, y)
+        _tag(vor, layer.name, "proc_tex")
+        node_tree.links.new(vec_out, vor.inputs["Vector"])
+
+        width = getattr(layer, 'proc_cracks_width', 0.05)
+        sharpness = getattr(layer, 'proc_cracks_sharpness', 0.7)
+        # sharpness=1.0 → minimum smoothstep band (razor edge).
+        # sharpness=0.0 → full-width gradient (soft fissure).
+        band = max(0.003, (1.0 - sharpness) * width * 0.8)
+
+        mr = node_tree.nodes.new("ShaderNodeMapRange")
+        try:
+            mr.interpolation_type = 'SMOOTHSTEP'
+        except Exception:
+            pass
+        mr.clamp = True
+        # Inside crack (distance < width) → 1.0; outside → 0.0.
+        mr.inputs["From Min"].default_value = max(0.0, width - band)
+        mr.inputs["From Max"].default_value = min(1.0, width + band)
+        mr.inputs["To Min"].default_value   = 1.0
+        mr.inputs["To Max"].default_value   = 0.0
+        mr.location = (x + 50, y)
+        mr.name = f"{TLM_PREFIX}proc_cracks_mr_{_next_id()}"
+        _tag(mr, layer.name, "proc_cracks_mr")
+        node_tree.links.new(vor.outputs["Distance"], mr.inputs["Value"])
+        # See DOTS branch for the tex_node-must-be-set rationale.
+        tex_node = vor
+        fac_out = mr.outputs["Result"]
+
+    elif pt == 'GABOR':
+        # ShaderNodeTexGabor (Blender 4.3+) — anisotropic Gabor noise.
+        # Produces directional streaks: brushed metal, fiber weaves,
+        # hairline scratches, anisotropic surfaces. Falls back to a
+        # Wave-bands texture on older Blender that doesn't expose the
+        # node, so .tlm presets stay portable.
+        import math as _math
+        try:
+            tex_node = node_tree.nodes.new("ShaderNodeTexGabor")
+        except RuntimeError:
+            # Fallback: a single-direction Wave(BANDS) with detail and
+            # distortion gives a passable brushed-metal look.
+            tex_node = node_tree.nodes.new("ShaderNodeTexWave")
+            try:
+                tex_node.wave_type = 'BANDS'
+                tex_node.bands_direction = 'X'
+                tex_node.wave_profile = 'SIN'
+            except Exception:
+                pass
+            tex_node.inputs["Scale"].default_value      = layer.proc_scale
+            tex_node.inputs["Detail"].default_value     = layer.proc_detail
+            tex_node.inputs["Distortion"].default_value = layer.proc_distortion
+            fac_out = tex_node.outputs["Fac"]
+        else:
+            # 2D Gabor — orientation is a single angle in radians.
+            # On 3D the orientation socket is a vector; we keep 2D for
+            # the simpler UI (single rotation slider).
+            try:
+                tex_node.gabor_type = '2D'
+            except (AttributeError, TypeError):
+                pass
+            tex_node.inputs["Scale"].default_value = layer.proc_scale
+            # Some inputs may rename across Blender minor versions;
+            # guard each setter individually so a rename doesn't abort
+            # the whole branch.
+            def _set_in(node, name, value):
+                sock = node.inputs.get(name)
+                if sock is not None:
+                    try:
+                        sock.default_value = value
+                    except Exception:
+                        pass
+            _set_in(tex_node, "Frequency",
+                    getattr(layer, 'proc_gabor_frequency', 2.0))
+            _set_in(tex_node, "Anisotropy",
+                    getattr(layer, 'proc_gabor_anisotropy', 1.0))
+            _set_in(tex_node, "Orientation",
+                    _math.radians(getattr(layer, 'proc_gabor_orientation', 45.0)))
+            # Output socket name: typically "Value" (4.3-5.0) but
+            # protect against future renames.
+            fac_out = (tex_node.outputs.get("Value")
+                       or tex_node.outputs.get("Fac")
+                       or tex_node.outputs[0])
+
     elif pt == 'STRIPES':
         # Hard stripes = Wave(BANDS, SAW) thresholded by Map Range.
         # SAW gives a clean 0→1 ramp per period; Map Range with a
@@ -3706,6 +4403,7 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
         wave.inputs["Detail"].default_value     = 0.0
         wave.name = f"{TLM_PREFIX}proc_tex_{_next_id()}"
         wave.location = (x - 100, y)
+        _set_wave_inputs(wave, layer)
         _tag(wave, layer.name, "proc_tex")
         node_tree.links.new(vec_out, wave.inputs["Vector"])
 
@@ -3806,6 +4504,7 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
         vor.inputs["Scale"].default_value      = layer.proc_scale
         if "Randomness" in vor.inputs:
             vor.inputs["Randomness"].default_value = layer.proc_randomness
+        _set_voronoi_fractal_inputs(vor, layer)
         vor.name = f"{TLM_PREFIX}proc_tex_{_next_id()}"
         vor.location = (x - 100, y)
         _tag(vor, layer.name, "proc_tex")
@@ -3883,7 +4582,12 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
         # Marble = Wave base + Noise turbulence on phase
         wave = node_tree.nodes.new("ShaderNodeTexWave")
         wave.wave_type = layer.proc_marble_wave_type
-        wave.bands_direction = 'X'
+        _set_wave_direction(
+            wave,
+            layer.proc_marble_wave_type,
+            getattr(layer, 'proc_marble_bands_direction', 'X'),
+            getattr(layer, 'proc_marble_rings_direction', 'X'),
+        )
         wave.name = f"{TLM_PREFIX}proc_marble_wave_{_next_id()}"
         wave.location = (x - 100, y)
         wave.inputs["Scale"].default_value = layer.proc_scale
@@ -3891,7 +4595,7 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
         wave.inputs["Distortion"].default_value = layer.proc_distortion
         _tag(wave, layer.name, "proc_tex")
         try:
-            wave.wave_profile = 'SIN'
+            wave.wave_profile = getattr(layer, 'proc_marble_wave_profile', 'SIN')
         except Exception:
             pass
         node_tree.links.new(vec_out, wave.inputs["Vector"])
@@ -3935,17 +4639,16 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
         _tag(cr, layer.name, "proc_cr")
 
         contrast = getattr(layer, 'proc_contrast', 0.5)
-        # Contrast hidden in UI for GRADIENT — force default to avoid
-        # a residual non-default leaking into the ramp.
+        # Gradient uses the full ramp so Color 3 Position stays meaningful.
         if layer.proc_type == 'GRADIENT':
-            contrast = 0.5
+            contrast = 0.0
         half = contrast * 0.49
         cr.color_ramp.elements[0].position = half
         cr.color_ramp.elements[0].color = layer.proc_color1
         cr.color_ramp.elements[1].position = 1.0 - half
         cr.color_ramp.elements[1].color = layer.proc_color2
         if getattr(layer, 'use_proc_color3', False):
-            el = cr.color_ramp.elements.new(layer.proc_color3_position)
+            el = cr.color_ramp.elements.new(_clamped_ramp_position(layer.proc_color3_position))
             el.color = layer.proc_color3
         node_tree.links.new(fac_out, cr.inputs["Fac"])
         return cr.outputs["Color"], None
@@ -3970,6 +4673,8 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
     # contrast=0.5 → stops at (0.25, 0.75) = moderate
     # contrast=1.0 → stops at (0.49, 0.51) = razor-sharp edge
     contrast = getattr(layer, 'proc_contrast', 0.5)
+    if layer.proc_type == 'GRADIENT':
+        contrast = 0.0
     half = contrast * 0.49  # max half-range = 0.49 (never fully collapse)
     stop_lo = half
     stop_hi = 1.0 - half
@@ -3979,7 +4684,7 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
     cr.color_ramp.elements[1].position = stop_hi
     cr.color_ramp.elements[1].color = layer.proc_color2
     if getattr(layer, 'use_proc_color3', False):
-        el = cr.color_ramp.elements.new(layer.proc_color3_position)
+        el = cr.color_ramp.elements.new(_clamped_ramp_position(layer.proc_color3_position))
         el.color = layer.proc_color3
     node_tree.links.new(fac_out, cr.inputs["Fac"])
 
@@ -4306,6 +5011,25 @@ def _link_to_bsdf(node_tree, output_socket, bsdf, input_names, channel_label):
           f"tried {input_names}, BSDF inputs: {[i.name for i in bsdf.inputs]}")
 
 
+def _add_channel_reroute(node_tree, output_socket, channel_label, x, y):
+    """Add a material-level reroute so long channel links stay horizontal."""
+    rr = node_tree.nodes.new("NodeReroute")
+    rr.name = f"{TLM_PREFIX}route_{channel_label}_{_next_id()}"
+    rr.label = channel_label.replace("_", " ").title()
+    rr.location = (x, y)
+    _tag(rr, "__material__", f"route_{channel_label}")
+    node_tree.links.new(output_socket, rr.inputs[0])
+    return rr.outputs[0]
+
+
+def _link_channel_to_bsdf(node_tree, output_socket, bsdf, input_names,
+                          channel_label, route_x, route_y):
+    routed = _add_channel_reroute(
+        node_tree, output_socket, channel_label, route_x, route_y
+    )
+    _link_to_bsdf(node_tree, routed, bsdf, input_names, channel_label)
+
+
 def _defer_rebuild(material):
     """Schedule a rebuild via timer when we can't do it right now."""
     from . import properties
@@ -4325,9 +5049,11 @@ def rebuild_node_tree(material):
     _node_counter = 0
 
     tlm = material.tlm
+    perf_started = _time.perf_counter() if performance_enabled(material) else None
     if getattr(tlm, "shader_editable", False):
         print(f"[TLM] Skipping rebuild for '{material.name}' — shader is in Editable mode")
         return
+    _ensure_unique_layer_names(material)
 
     node_tree = material.node_tree
 
@@ -4465,6 +5191,7 @@ def rebuild_node_tree(material):
         # resets blend_method; on Blender 4.2+/5.0 it intentionally leaves
         # surface_render_method alone to avoid the Cycles black-surface bug.
         _sync_material_alpha_method(material, False, tlm)
+        _record_rebuild_performance(material, perf_started, node_tree, root_layers)
         return
 
     # Guard: verify we can write to nodes before destroying anything.
@@ -4484,7 +5211,9 @@ def rebuild_node_tree(material):
         _defer_rebuild(material)
         return
 
-    _saved_positions = _save_node_positions(node_tree)
+    # Generated TLM nodes are laid out deterministically every rebuild. Restoring
+    # old name-based positions after layer insertions/removals can collapse
+    # different generated nodes onto stale coordinates.
     _saved_custom_links = _save_custom_links(node_tree)
     _clear_tlm_nodes(node_tree)
 
@@ -4507,7 +5236,7 @@ def rebuild_node_tree(material):
         if not bsdf:
             print("[TLM] WARNING: No Principled BSDF found — skipping rebuild")
             _restore_custom_links(node_tree, _saved_custom_links)
-            _restore_node_positions(node_tree, _saved_positions)
+            _record_rebuild_performance(material, perf_started, node_tree, expanded)
             return
         # Restore BSDF→Surface link if the previous rebuild's alpha wrap
         # (Mix Shader + Transparent) was just removed by _clear_tlm_nodes.
@@ -4521,7 +5250,7 @@ def rebuild_node_tree(material):
             if not layers:
                 return x0
             positions = _layer_positions(layers, x0, 0)
-            return max(px + _LAYER_WIDTH.get(layers[j].layer_type, 300)
+            return max(px + _layer_width(layers[j])
                        for j, (px, _py) in enumerate(positions))
 
         end_x = max(_max_end_x(root_layers, start_x),
@@ -4529,15 +5258,33 @@ def rebuild_node_tree(material):
 
         # ── Channel y positions — spaced 400px apart ──
         ch_y = {
-            'base_color': 400,
-            'roughness':    0,
-            'metallic':  -400,
-            'normal':    -800,
-            'emission':     -1200,
-            'transmission': -1600,
-            'alpha':        -2000,
-            'bump':         -2400,
+            channel: -idx * _CHANNEL_Y_GAP
+            for idx, channel in enumerate(_CHANNEL_LAYOUT_ORDER)
         }
+        route_x = end_x + _CHANNEL_ROUTE_OFFSET
+        active_channels = ['base_color']
+        if _channel_used(expanded, 'use_roughness'):
+            active_channels.append('roughness')
+        if _channel_used(expanded, 'use_metallic'):
+            active_channels.append('metallic')
+        if _channel_used(expanded, 'use_normal') or _channel_used(expanded, 'use_bump'):
+            active_channels.append('normal')
+        if _channel_used(expanded, 'use_emission'):
+            active_channels.append('emission')
+        if _channel_used(expanded, 'use_transmission'):
+            active_channels.append('transmission')
+        if (_channel_used(expanded, 'use_alpha')
+                or getattr(tlm, 'use_base_color_alpha', False)):
+            active_channels.append('alpha')
+        lane_values = [ch_y[ch] for ch in active_channels]
+        shader_y = (max(lane_values) + min(lane_values)) * 0.5
+        shader_x = end_x + 540
+        output_x = end_x + 900
+
+        bsdf.location = (shader_x, shader_y)
+        mat_out = next((n for n in node_tree.nodes if n.type == 'OUTPUT_MATERIAL'), None)
+        if mat_out:
+            mat_out.location = (output_x, shader_y)
 
         # ── Base Color — built from root_layers to preserve GROUP alpha for clipping mask ─
         bc_out, bc_alpha = _build_base_color(node_tree, root_layers, group_children, uv_map, start_x, ch_y['base_color'], x_step)
@@ -4546,7 +5293,10 @@ def rebuild_node_tree(material):
                 node_tree, material, 'base_color', bc_out,
                 end_x, ch_y['base_color'],
             )
-            _link_to_bsdf(node_tree, bc_out, bsdf, ["Base Color", "base_color"], "base_color")
+            _link_channel_to_bsdf(
+                node_tree, bc_out, bsdf, ["Base Color", "base_color"],
+                "base_color", route_x, ch_y['base_color'],
+            )
 
         # ── Roughness ─────────────────────────────────────────────────────────────
         # Same architecture as Base Color: a per-layer Mix chain ending in
@@ -4561,8 +5311,11 @@ def rebuild_node_tree(material):
                     node_tree, material, 'roughness', r_out,
                     end_x, ch_y['roughness'],
                 )
-                _link_to_bsdf(node_tree, r_out, bsdf,
-                              ["Roughness", "Specular Roughness"], "roughness")
+                _link_channel_to_bsdf(
+                    node_tree, r_out, bsdf,
+                    ["Roughness", "Specular Roughness"], "roughness",
+                    route_x, ch_y['roughness'],
+                )
 
         # ── Metallic ──────────────────────────────────────────────────────────────
         if _channel_used(expanded, 'use_metallic'):
@@ -4572,8 +5325,11 @@ def rebuild_node_tree(material):
                     node_tree, material, 'metallic', m_out,
                     end_x, ch_y['metallic'],
                 )
-                _link_to_bsdf(node_tree, m_out, bsdf,
-                              ["Metallic", "Metalness"], "metallic")
+                _link_channel_to_bsdf(
+                    node_tree, m_out, bsdf,
+                    ["Metallic", "Metalness"], "metallic",
+                    route_x, ch_y['metallic'],
+                )
 
         # ── Normal ────────────────────────────────────────────────────────────────
         normal_out = None
@@ -4590,8 +5346,11 @@ def rebuild_node_tree(material):
                     node_tree, material, 'emission', e_out,
                     end_x, ch_y['emission'],
                 )
-                _link_to_bsdf(node_tree, e_out, bsdf,
-                              ["Emission Color", "Emission", "emission"], "emission")
+                _link_channel_to_bsdf(
+                    node_tree, e_out, bsdf,
+                    ["Emission Color", "Emission", "emission"], "emission",
+                    route_x, ch_y['emission'],
+                )
                 # Use max emission strength weighted by opacity
                 strengths = [(l.emission_strength * l.opacity) for l in expanded if l.use_emission]
                 if strengths:
@@ -4600,8 +5359,11 @@ def rebuild_node_tree(material):
                     val.outputs[0].default_value = max(strengths)
                     val.location = (end_x, ch_y['emission'])
                     _tag(val, "__material__", "emission_strength")
-                    _link_to_bsdf(node_tree, val.outputs[0], bsdf,
-                                  ["Emission Strength", "emission_strength"], "emission_strength")
+                    _link_channel_to_bsdf(
+                        node_tree, val.outputs[0], bsdf,
+                        ["Emission Strength", "emission_strength"],
+                        "emission_strength", route_x, ch_y['emission'] - 140,
+                    )
 
         # ── Transmission ─────────────────────────────────────────────────────────
         if _channel_used(expanded, 'use_transmission'):
@@ -4618,8 +5380,11 @@ def rebuild_node_tree(material):
                     node_tree, material, 'transmission', passthrough.outputs["Value"],
                     end_x + 180, ch_y['transmission'],
                 )
-                _link_to_bsdf(node_tree, t_slot_out, bsdf,
-                              ["Transmission Weight", "Transmission", "transmission"], "transmission")
+                _link_channel_to_bsdf(
+                    node_tree, t_slot_out, bsdf,
+                    ["Transmission Weight", "Transmission", "transmission"],
+                    "transmission", route_x, ch_y['transmission'],
+                )
 
         # ── Alpha ────────────────────────────────────────────────────────────────
         # Drives the BSDF Alpha input (surface opacity / cutout). Distinct from
@@ -4638,6 +5403,9 @@ def rebuild_node_tree(material):
                 # _wire_alpha_via_transparent_bsdf for the rationale.
                 # Cycles in Blender 5.0 doesn't honour Principled BSDF.Alpha
                 # alone; the wrap fixes engine-portable transparency.
+                a_out = _add_channel_reroute(
+                    node_tree, a_out, "alpha", route_x, ch_y['alpha']
+                )
                 if _wire_alpha_via_transparent_bsdf(node_tree, a_out, bsdf):
                     alpha_was_connected = True
                 else:
@@ -4654,6 +5422,9 @@ def rebuild_node_tree(material):
             bc_alpha = _route_through_user_slot(
                 node_tree, material, 'alpha', bc_alpha,
                 end_x, ch_y['alpha'],
+            )
+            bc_alpha = _add_channel_reroute(
+                node_tree, bc_alpha, "alpha_auto", route_x, ch_y['alpha']
             )
             if _wire_alpha_via_transparent_bsdf(node_tree, bc_alpha, bsdf):
                 alpha_was_connected = True
@@ -4688,13 +5459,16 @@ def rebuild_node_tree(material):
                 node_tree, material, 'normal', final_normal,
                 end_x, ch_y['normal'],
             )
-            _link_to_bsdf(node_tree, final_normal, bsdf, ["Normal", "normal"], "normal")
+            _link_channel_to_bsdf(
+                node_tree, final_normal, bsdf, ["Normal", "normal"],
+                "normal", route_x, ch_y['normal'],
+            )
 
         # Position BSDF and Material Output to the right of all channels
-        bsdf.location = (end_x + 300, 0)
+        bsdf.location = (shader_x, shader_y)
         mat_out = next((n for n in node_tree.nodes if n.type == 'OUTPUT_MATERIAL'), None)
         if mat_out:
-            mat_out.location = (end_x + 600, 0)
+            mat_out.location = (output_x, shader_y)
 
     except AttributeError as e:
         if "Writing to ID classes in this context is not allowed" in str(e):
@@ -4716,13 +5490,11 @@ def rebuild_node_tree(material):
         print("[TLM] ERROR during node tree rebuild:")
         traceback.print_exc()
 
-    # Always restore custom links and positions, even if build partially failed
+    # Always restore custom links, even if build partially failed.
     _restore_custom_links(node_tree, _saved_custom_links)
-    _restore_node_positions(node_tree, _saved_positions)
 
     # Group each layer's nodes in a colored NodeFrame for visual organization
-    # in the shader editor. Must run AFTER _restore_node_positions so child
-    # positions are final before frames auto-shrink to their bounding box.
+    # in the shader editor. Generated positions are already final here.
     _assign_layer_frames(node_tree, expanded)
 
     # Ensure Blender re-evaluates the node tree after rebuild
@@ -4734,6 +5506,8 @@ def rebuild_node_tree(material):
     # Sweep orphan mask-blur NodeGroups (e.g. left behind when an image was
     # renamed/removed or a layer with blur was deleted).
     _cleanup_tlm_mask_blur_groups()
+
+    _record_rebuild_performance(material, perf_started, node_tree, expanded)
 
 
 def _build_base_color(node_tree, root_layers, group_children, uv_map, start_x, y_base, x_step):
@@ -4944,9 +5718,7 @@ def _build_proc_fac_node(node_tree, layer, name_suffix, x, y, uv_map="UVMap"):
     _tag(mapping, layer.name, "proc_map")
     # NOTE: Scale is applied at the texture node level, not the Mapping node,
     # to match _build_procedural_node and avoid doubling the scale.
-    mapping.inputs["Location"].default_value = (
-        layer.proc_offset_x, layer.proc_offset_y, layer.proc_offset_z
-    )
+    _apply_mapping_settings(mapping, layer)
     # Select coordinate space based on layer setting
     coord_type = getattr(layer, 'proc_coord_type', 'GENERATED')
     if coord_type == 'UV':
@@ -5007,6 +5779,7 @@ def _build_proc_fac_node(node_tree, layer, name_suffix, x, y, uv_map="UVMap"):
         tex.distance = layer.proc_voronoi_distance
         tex.inputs["Scale"].default_value      = layer.proc_scale
         tex.inputs["Randomness"].default_value = layer.proc_randomness
+        _set_voronoi_fractal_inputs(tex, layer)
         if hasattr(tex, 'normalize'):
             tex.normalize = True
         node_tree.links.new(vec_out, tex.inputs["Vector"])
@@ -5016,14 +5789,17 @@ def _build_proc_fac_node(node_tree, layer, name_suffix, x, y, uv_map="UVMap"):
     elif pt == 'WAVE':
         tex = node_tree.nodes.new("ShaderNodeTexWave")
         tex.wave_type = layer.proc_wave_type
+        _set_wave_direction(
+            tex,
+            layer.proc_wave_type,
+            getattr(layer, 'proc_wave_bands_direction', 'X'),
+            getattr(layer, 'proc_wave_rings_direction', 'X'),
+        )
         try:
             tex.wave_profile = layer.proc_wave_profile
         except Exception:
             pass
-        tex.inputs["Scale"].default_value        = layer.proc_scale
-        tex.inputs["Distortion"].default_value   = layer.proc_distortion
-        tex.inputs["Detail"].default_value       = layer.proc_detail
-        tex.inputs["Detail Scale"].default_value = layer.proc_wave_detail_scale
+        _set_wave_inputs(tex, layer)
         node_tree.links.new(vec_out, tex.inputs["Vector"])
         fac_out = tex.outputs["Fac"]
 
@@ -5043,6 +5819,8 @@ def _build_proc_fac_node(node_tree, layer, name_suffix, x, y, uv_map="UVMap"):
         tex.inputs["Mortar Size"].default_value   = layer.proc_brick_mortar_size
         tex.inputs["Mortar Smooth"].default_value = layer.proc_brick_mortar_smooth
         tex.inputs["Bias"].default_value          = layer.proc_brick_bias
+        _set_input_default(tex, "Brick Width", getattr(layer, 'proc_brick_width', 0.5))
+        _set_input_default(tex, "Row Height", getattr(layer, 'proc_brick_row_height', 0.25))
         # Sentinel colours: WHITE bricks + BLACK mortar so Color.R is a
         # 0/1 brick-vs-mortar mask. Brick.Fac would be a 0/1 between
         # Color1 and Color2 bricks (alternation), which is rarely the
@@ -5077,6 +5855,185 @@ def _build_proc_fac_node(node_tree, layer, name_suffix, x, y, uv_map="UVMap"):
         node_tree.links.new(vec_out, tex.inputs["Vector"])
         fac_out = tex.outputs["Value"]
 
+    elif pt == 'DOTS':
+        # Mirror of DOTS path in _build_procedural_node — scalar fac
+        # for routing to roughness / metallic / bump.
+        vor = node_tree.nodes.new("ShaderNodeTexVoronoi")
+        try:
+            vor.feature = 'F1'
+        except Exception:
+            pass
+        try:
+            vor.voronoi_dimensions = '3D'
+        except Exception:
+            pass
+        if hasattr(vor, 'normalize'):
+            vor.normalize = True
+        vor.inputs["Scale"].default_value      = layer.proc_scale
+        vor.inputs["Randomness"].default_value = layer.proc_randomness
+        _set_voronoi_fractal_inputs(vor, layer)
+        vor.name = f"{TLM_PREFIX}pfac_dots_vor_{name_suffix}"
+        vor.location = (x - 100, y)
+        _tag(vor, layer.name, "proc_tex")
+        node_tree.links.new(vec_out, vor.inputs["Vector"])
+
+        radius = getattr(layer, 'proc_dots_radius', 0.35)
+        softness = getattr(layer, 'proc_dots_softness', 0.15)
+        half_band = max(0.005, softness * 0.5)
+
+        mr = node_tree.nodes.new("ShaderNodeMapRange")
+        try:
+            mr.interpolation_type = 'SMOOTHSTEP'
+        except Exception:
+            pass
+        mr.clamp = True
+        mr.inputs["From Min"].default_value = max(0.0, radius - half_band)
+        mr.inputs["From Max"].default_value = min(1.0, radius + half_band)
+        mr.inputs["To Min"].default_value   = 1.0
+        mr.inputs["To Max"].default_value   = 0.0
+        mr.location = (x + 50, y)
+        mr.name = f"{TLM_PREFIX}pfac_dots_mr_{name_suffix}"
+        _tag(mr, layer.name, "proc_dots_mr")
+        node_tree.links.new(vor.outputs["Distance"], mr.inputs["Value"])
+        return mr.outputs["Result"]
+
+    elif pt == 'RIDGED':
+        # Mirror of RIDGED path — 5-stage math chain that produces
+        # razor-like crests from a Noise base.
+        noise = node_tree.nodes.new("ShaderNodeTexNoise")
+        noise.inputs["Scale"].default_value      = layer.proc_scale
+        noise.inputs["Detail"].default_value     = layer.proc_detail
+        noise.inputs["Roughness"].default_value  = layer.proc_roughness_proc
+        noise.inputs["Lacunarity"].default_value = layer.proc_lacunarity
+        noise.inputs["Distortion"].default_value = layer.proc_distortion
+        noise.name = f"{TLM_PREFIX}pfac_ridge_noise_{name_suffix}"
+        noise.location = (x - 100, y)
+        _tag(noise, layer.name, "proc_tex")
+        node_tree.links.new(vec_out, noise.inputs["Vector"])
+
+        fold = node_tree.nodes.new("ShaderNodeMath")
+        fold.operation = 'MULTIPLY_ADD'
+        fold.name = f"{TLM_PREFIX}pfac_ridge_fold_{name_suffix}"
+        fold.location = (x + 60, y)
+        fold.inputs[1].default_value = 2.0
+        fold.inputs[2].default_value = -1.0
+        node_tree.links.new(noise.outputs["Fac"], fold.inputs[0])
+
+        abs_n = node_tree.nodes.new("ShaderNodeMath")
+        abs_n.operation = 'ABSOLUTE'
+        abs_n.name = f"{TLM_PREFIX}pfac_ridge_abs_{name_suffix}"
+        abs_n.location = (x + 160, y)
+        node_tree.links.new(fold.outputs[0], abs_n.inputs[0])
+
+        inv = node_tree.nodes.new("ShaderNodeMath")
+        inv.operation = 'SUBTRACT'
+        inv.use_clamp = True
+        inv.name = f"{TLM_PREFIX}pfac_ridge_inv_{name_suffix}"
+        inv.location = (x + 260, y)
+        inv.inputs[0].default_value = 1.0
+        node_tree.links.new(abs_n.outputs[0], inv.inputs[1])
+
+        pow_n = node_tree.nodes.new("ShaderNodeMath")
+        pow_n.operation = 'POWER'
+        pow_n.use_clamp = True
+        pow_n.name = f"{TLM_PREFIX}pfac_ridge_pow_{name_suffix}"
+        pow_n.location = (x + 360, y)
+        pow_n.inputs[1].default_value = getattr(layer, 'proc_ridged_gain', 2.0)
+        node_tree.links.new(inv.outputs[0], pow_n.inputs[0])
+
+        mult = node_tree.nodes.new("ShaderNodeMath")
+        mult.operation = 'MULTIPLY'
+        mult.use_clamp = True
+        mult.name = f"{TLM_PREFIX}pfac_ridge_mul_{name_suffix}"
+        mult.location = (x + 460, y)
+        mult.inputs[1].default_value = getattr(layer, 'proc_ridged_offset', 1.0)
+        node_tree.links.new(pow_n.outputs[0], mult.inputs[0])
+
+        return mult.outputs[0]
+
+    elif pt == 'CRACKS':
+        # Mirror of CRACKS path — Voronoi DISTANCE_TO_EDGE thresholded.
+        vor = node_tree.nodes.new("ShaderNodeTexVoronoi")
+        try:
+            vor.feature = 'DISTANCE_TO_EDGE'
+        except Exception:
+            pass
+        try:
+            vor.voronoi_dimensions = '3D'
+        except Exception:
+            pass
+        vor.inputs["Scale"].default_value = layer.proc_scale
+        if "Randomness" in vor.inputs:
+            vor.inputs["Randomness"].default_value = layer.proc_randomness
+        _set_voronoi_fractal_inputs(vor, layer)
+        vor.name = f"{TLM_PREFIX}pfac_cracks_vor_{name_suffix}"
+        vor.location = (x - 100, y)
+        _tag(vor, layer.name, "proc_tex")
+        node_tree.links.new(vec_out, vor.inputs["Vector"])
+
+        width = getattr(layer, 'proc_cracks_width', 0.05)
+        sharpness = getattr(layer, 'proc_cracks_sharpness', 0.7)
+        band = max(0.003, (1.0 - sharpness) * width * 0.8)
+
+        mr = node_tree.nodes.new("ShaderNodeMapRange")
+        try:
+            mr.interpolation_type = 'SMOOTHSTEP'
+        except Exception:
+            pass
+        mr.clamp = True
+        mr.inputs["From Min"].default_value = max(0.0, width - band)
+        mr.inputs["From Max"].default_value = min(1.0, width + band)
+        mr.inputs["To Min"].default_value   = 1.0
+        mr.inputs["To Max"].default_value   = 0.0
+        mr.location = (x + 50, y)
+        mr.name = f"{TLM_PREFIX}pfac_cracks_mr_{name_suffix}"
+        _tag(mr, layer.name, "proc_cracks_mr")
+        node_tree.links.new(vor.outputs["Distance"], mr.inputs["Value"])
+        return mr.outputs["Result"]
+
+    elif pt == 'GABOR':
+        # Mirror of the GABOR path in _build_procedural_node — provides
+        # the scalar fac for routing to roughness / metallic / bump.
+        import math as _math
+        try:
+            tex = node_tree.nodes.new("ShaderNodeTexGabor")
+        except RuntimeError:
+            tex = node_tree.nodes.new("ShaderNodeTexWave")
+            try:
+                tex.wave_type = 'BANDS'
+                tex.bands_direction = 'X'
+                tex.wave_profile = 'SIN'
+            except Exception:
+                pass
+            tex.inputs["Scale"].default_value      = layer.proc_scale
+            tex.inputs["Detail"].default_value     = layer.proc_detail
+            tex.inputs["Distortion"].default_value = layer.proc_distortion
+            node_tree.links.new(vec_out, tex.inputs["Vector"])
+            fac_out = tex.outputs["Fac"]
+        else:
+            try:
+                tex.gabor_type = '2D'
+            except (AttributeError, TypeError):
+                pass
+            tex.inputs["Scale"].default_value = layer.proc_scale
+            def _set_in(node, name, value):
+                sock = node.inputs.get(name)
+                if sock is not None:
+                    try:
+                        sock.default_value = value
+                    except Exception:
+                        pass
+            _set_in(tex, "Frequency",
+                    getattr(layer, 'proc_gabor_frequency', 2.0))
+            _set_in(tex, "Anisotropy",
+                    getattr(layer, 'proc_gabor_anisotropy', 1.0))
+            _set_in(tex, "Orientation",
+                    _math.radians(getattr(layer, 'proc_gabor_orientation', 45.0)))
+            node_tree.links.new(vec_out, tex.inputs["Vector"])
+            fac_out = (tex.outputs.get("Value")
+                       or tex.outputs.get("Fac")
+                       or tex.outputs[0])
+
     elif pt == 'STRIPES':
         # Mirror of the STRIPES path in _build_procedural_node — Wave
         # SAW thresholded by Map Range smoothstep.
@@ -5093,8 +6050,7 @@ def _build_proc_fac_node(node_tree, layer, name_suffix, x, y, uv_map="UVMap"):
         wave.name = f"{TLM_PREFIX}pfac_stripe_wave_{name_suffix}"
         wave.location = (x - 100, y)
         wave.inputs["Scale"].default_value      = layer.proc_scale
-        wave.inputs["Distortion"].default_value = 0.0
-        wave.inputs["Detail"].default_value     = 0.0
+        _set_wave_inputs(wave, layer)
         _tag(wave, layer.name, "proc_tex")
         node_tree.links.new(vec_out, wave.inputs["Vector"])
 
@@ -5131,6 +6087,7 @@ def _build_proc_fac_node(node_tree, layer, name_suffix, x, y, uv_map="UVMap"):
         vor.inputs["Scale"].default_value = layer.proc_scale
         if "Randomness" in vor.inputs:
             vor.inputs["Randomness"].default_value = layer.proc_randomness
+        _set_voronoi_fractal_inputs(vor, layer)
         _tag(vor, layer.name, "proc_tex")
         node_tree.links.new(vec_out, vor.inputs["Vector"])
 
@@ -5157,7 +6114,12 @@ def _build_proc_fac_node(node_tree, layer, name_suffix, x, y, uv_map="UVMap"):
     elif pt == 'MARBLE':
         wave = node_tree.nodes.new("ShaderNodeTexWave")
         wave.wave_type = layer.proc_marble_wave_type
-        wave.bands_direction = 'X'
+        _set_wave_direction(
+            wave,
+            layer.proc_marble_wave_type,
+            getattr(layer, 'proc_marble_bands_direction', 'X'),
+            getattr(layer, 'proc_marble_rings_direction', 'X'),
+        )
         wave.name = f"{TLM_PREFIX}pfac_marble_wave_{name_suffix}"
         wave.location = (x - 100, y)
         wave.inputs["Scale"].default_value = layer.proc_scale
@@ -5165,7 +6127,7 @@ def _build_proc_fac_node(node_tree, layer, name_suffix, x, y, uv_map="UVMap"):
         wave.inputs["Distortion"].default_value = layer.proc_distortion
         _tag(wave, layer.name, "proc_tex")
         try:
-            wave.wave_profile = 'SIN'
+            wave.wave_profile = getattr(layer, 'proc_marble_wave_profile', 'SIN')
         except Exception:
             pass
         node_tree.links.new(vec_out, wave.inputs["Vector"])
@@ -5229,6 +6191,15 @@ def _layer_has_first_layer_modulator(layer):
     )
 
 
+def _scalar_channel_default(channel_id):
+    return {
+        'roughness': 0.5,
+        'metallic': 0.0,
+        'transmission': 0.0,
+        'alpha': 1.0,
+    }.get(channel_id, 0.0)
+
+
 def _make_baseline_normal(node_tree, x, y):
     """Create a ShaderNodeNewGeometry and return its Normal output socket.
 
@@ -5281,17 +6252,16 @@ def _build_normal_channel(node_tree, layers, uv_map, x0, y_base, x_step):
         rotation = getattr(layer, 'normal_rotation', 0.0)
         vec_out = uv_node.outputs["UV"]
 
-        if tile_scale != 1.0 or rotation != 0.0:
-            mapping = node_tree.nodes.new("ShaderNodeMapping")
-            mapping.name = f"{TLM_PREFIX}normal_mapping_{_next_id()}"
-            mapping.location = (x - 50, y)
-            mapping.inputs["Scale"].default_value = (tile_scale, tile_scale, 1.0)
-            mapping.inputs["Rotation"].default_value = (
-                0.0, 0.0, _math.radians(rotation)
-            )
-            _tag(mapping, layer.name, "normal_mapping")
-            node_tree.links.new(vec_out, mapping.inputs["Vector"])
-            vec_out = mapping.outputs["Vector"]
+        mapping = node_tree.nodes.new("ShaderNodeMapping")
+        mapping.name = f"{TLM_PREFIX}normal_mapping_{_next_id()}"
+        mapping.location = (x - 50, y)
+        mapping.inputs["Scale"].default_value = (tile_scale, tile_scale, 1.0)
+        mapping.inputs["Rotation"].default_value = (
+            0.0, 0.0, _math.radians(rotation)
+        )
+        _tag(mapping, layer.name, "normal_mapping")
+        node_tree.links.new(vec_out, mapping.inputs["Vector"])
+        vec_out = mapping.outputs["Vector"]
 
         # ── Image Texture (Non-Color) ────────────────────────────────────
         tex = node_tree.nodes.new("ShaderNodeTexImage")
@@ -5764,6 +6734,8 @@ def _is_chain_role(role):
 # belong to different channel bands and get their own frame. Matches the
 # typical channel Y spacing in _build_channel (~300-400 units).
 _FRAME_Y_GAP = 250.0
+_FRAME_X_GAP = 700.0
+_FRAME_X_SPAN = 620.0
 
 
 def _assign_layer_frames(node_tree, layers):
@@ -5825,26 +6797,62 @@ def _assign_layer_frames(node_tree, layers):
             # Gap is measured from cluster's LOWEST node to this one.
             # (cluster is sorted top-down, so cluster[-1] is the lowest so far.)
             if cluster[-1].location.y - n.location.y > _FRAME_Y_GAP:
-                _wrap_frame_cluster(node_tree, cluster, ln, color)
+                _wrap_frame_cluster_by_x(node_tree, cluster, ln, color)
                 cluster = [n]
             else:
                 cluster.append(n)
-        _wrap_frame_cluster(node_tree, cluster, ln, color)
+        _wrap_frame_cluster_by_x(node_tree, cluster, ln, color)
+
+
+def _wrap_frame_cluster_by_x(node_tree, nodes, layer_name, color):
+    """Split a Y band into smaller frames when nodes sit far apart in X."""
+    if not nodes:
+        return
+    nodes = sorted(nodes, key=lambda n: n.location.x)
+    cluster = [nodes[0]]
+    for n in nodes[1:]:
+        if (n.location.x - cluster[-1].location.x > _FRAME_X_GAP
+                or n.location.x - cluster[0].location.x > _FRAME_X_SPAN):
+            _wrap_frame_cluster(node_tree, cluster, layer_name, color)
+            cluster = [n]
+        else:
+            cluster.append(n)
+    _wrap_frame_cluster(node_tree, cluster, layer_name, color)
 
 
 def _wrap_frame_cluster(node_tree, nodes, layer_name, color):
     """Create one NodeFrame and parent every node in this cluster to it."""
     if not nodes:
         return
+    margin_x = 40.0
+    margin_y = 50.0
+    min_x = min(n.location.x for n in nodes)
+    max_y = max(n.location.y for n in nodes)
+    max_x = max(n.location.x + max(getattr(n, "width", 140.0), 140.0)
+                for n in nodes)
+    min_y = min(n.location.y - max(getattr(n, "height", 100.0), 100.0)
+                for n in nodes)
+    frame_x = min_x - margin_x
+    frame_y = max_y + margin_y
+
     frame = node_tree.nodes.new("NodeFrame")
     frame.name = f"{TLM_PREFIX}frame_{_next_id()}"
     frame.label = layer_name
     frame.label_size = 20
+    frame.location = (frame_x, frame_y)
+    try:
+        frame.width = max(220.0, max_x - min_x + margin_x * 2.0)
+        frame.height = max(160.0, max_y - min_y + margin_y * 2.0)
+    except Exception:
+        pass
     frame.use_custom_color = True
     frame.color = color
     _tag(frame, layer_name, "layer_frame")
     for n in nodes:
+        abs_x = n.location.x
+        abs_y = n.location.y
         n.parent = frame
+        n.location = (abs_x - frame_x, abs_y - frame_y)
 
 
 # ── Tag validation (debug mode) ───────────────────────────────────────────────

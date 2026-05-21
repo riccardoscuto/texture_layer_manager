@@ -23,7 +23,7 @@ class TLM_OT_AddGroup(Operator):
 
         layer = tlm.layers.add()
         layer.layer_type = "GROUP"
-        layer.name = f"Group {len(tlm.layers)}"
+        layer.name = compositing.unique_layer_name(tlm.layers, "Group", current=layer)
         layer.visible = True
         layer.collapsed = False
         layer.group_name = ""

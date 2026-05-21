@@ -373,7 +373,7 @@ def _add_layer_common(context, layer_type):
     layer.group_name = parent_group  # assign to group if applicable
 
     if layer_type == "PAINT":
-        layer.name = f"Paint {len(tlm.layers)}"
+        layer.name = compositing.unique_layer_name(tlm.layers, "Paint", current=layer)
         res = int(tlm.resolution)
         # Initialise unpainted pixels as BLACK-transparent (0,0,0,0).
         #
@@ -437,14 +437,14 @@ def _add_layer_common(context, layer_type):
         layer.image_name = img.name
         previews.invalidate(img.name)
     elif layer_type == "FILL":
-        layer.name = f"Fill {len(tlm.layers)}"
+        layer.name = compositing.unique_layer_name(tlm.layers, "Fill", current=layer)
     elif layer_type == "ADJUSTMENT":
-        layer.name = "Hue/Sat"
+        layer.name = compositing.unique_layer_name(tlm.layers, "Hue/Sat", current=layer)
     elif layer_type == "PROCEDURAL":
         # proc_type defaults to 'NOISE' via the PropertyGroup definition.
-        layer.name = "Noise"
+        layer.name = compositing.unique_layer_name(tlm.layers, "Noise", current=layer)
     elif layer_type == "REFERENCE":
-        layer.name = f"Reference {len(tlm.layers)}"
+        layer.name = compositing.unique_layer_name(tlm.layers, "Reference", current=layer)
 
     # Move new layer to the correct position: new layers appear ABOVE the
     # active one in the UI (= composited LATER, i.e. on top). layers.add()

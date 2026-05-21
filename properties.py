@@ -21,6 +21,7 @@ from . import compositing
 # on hover-edit; smaller values stutter on slider drags with many layers.
 
 _REBUILD_DEBOUNCE_S = 0.25
+_suppress_layer_updates = False
 
 # Set of material names that need rebuilding — accumulates across rapid changes.
 _pending_materials: set = set()
@@ -90,6 +91,8 @@ def cancel_pending_rebuild(material_name=None):
 def _on_layer_update(self, context):
     """Called whenever a STRUCTURAL property changes. Triggers a debounced full rebuild."""
     global _pending_materials
+    if _suppress_layer_updates:
+        return
     try:
         if not context or not context.active_object:
             return
@@ -121,6 +124,8 @@ def _on_name_change(self, context):
     StringProperty); we read it before overwriting it with the new
     value.
     """
+    if _suppress_layer_updates:
+        return
     try:
         new_name = self.name
         old_name = self.get("_name_prev", "") or ""
@@ -169,6 +174,8 @@ def _on_preset_change(self, context):
 def _make_hot_callback(prop_name):
     """Create a callback that attempts hot update, falling back to full rebuild."""
     def _cb(self, context):
+        if _suppress_layer_updates:
+            return
         try:
             if not context or not context.active_object:
                 return
@@ -620,7 +627,7 @@ class TLM_LayerItem(PropertyGroup):
         name="Mask Blur",
         description="Pseudo-blur of IMAGE-source masks. 0 = off, higher values = larger radius (has runtime cost)",
         default=0.0, min=0.0, max=0.1,
-        update=_on_layer_update,
+        update=_make_hot_callback("mask_blur"),
     )
 
     # ── Smart generator parameters (EDGE_WEAR / DIRT / CURVATURE_SMART) ──
@@ -1092,12 +1099,16 @@ class TLM_LayerItem(PropertyGroup):
         items=[
             ('BRICK',       "Brick",       "Brick / tile pattern with offset, mortar, color variation", 7),
             ('CHECKER',     "Checker",     "Alternating checkerboard pattern",                     5),
+            ('CRACKS',      "Cracks",      "Organic crack / vein network from Voronoi distance-to-edge — marble veins, cracked ceramic, ice, lava fractures", 15),
+            ('DOTS',        "Dots",        "Packed circular dots in a jittered grid — paint splatter, polkadots, freckles, perforations", 13),
+            ('GABOR',       "Gabor",       "Anisotropic Gabor noise — directional streaks for brushed metal, fibers, woven fabric, scratches", 12),
             ('GRADIENT',    "Gradient",    "Linear, radial, quadratic or spherical gradient",      3),
             ('HEX_GRID',    "Hex Grid",    "Honeycomb / cell grid using Voronoi distance-to-edge", 11),
             ('MAGIC',       "Magic",       "Kaleidoscopic colored swirl pattern",                  8),
             ('MARBLE',      "Marble",      "Wave bands distorted by noise — marble/veined stone", 6),
             ('MUSGRAVE',    "Musgrave",    "Fractal noise (Multifractal, Ridged, etc.)",           4),
             ('NOISE',       "Noise",       "Perlin/FBM noise",                                    0),
+            ('RIDGED',      "Ridged",      "Sharp inverted-ridge fractal — mountain crests, rock veins, lightning, crackle", 14),
             ('STRIPES',     "Stripes",     "Hard-edged stripes (X, Y or diagonal) with adjustable width and sharpness", 10),
             ('VORONOI',     "Voronoi",     "Cell/Worley noise",                                   1),
             ('WAVE',        "Wave",        "Sine wave bands or rings",                             2),
@@ -1153,6 +1164,18 @@ class TLM_LayerItem(PropertyGroup):
         default=0.0, min=-1.0, max=1.0,
         update=_make_hot_callback("proc_brick_bias"),
     )
+    proc_brick_width: FloatProperty(
+        name="Brick Width",
+        description="Width of each brick cell in the Brick texture",
+        default=0.5, min=0.001, max=100.0,
+        update=_make_hot_callback("proc_brick_width"),
+    )
+    proc_brick_row_height: FloatProperty(
+        name="Row Height",
+        description="Height of each brick row in the Brick texture",
+        default=0.25, min=0.001, max=100.0,
+        update=_make_hot_callback("proc_brick_row_height"),
+    )
 
     # ── Magic-specific parameters ───────────────────────────────────────
     proc_magic_depth: IntProperty(
@@ -1173,6 +1196,89 @@ class TLM_LayerItem(PropertyGroup):
         update=_make_hot_callback("proc_magic_distortion"),
     )
 
+    # ── Gabor-specific parameters ───────────────────────────────────────
+    # ShaderNodeTexGabor (Blender 4.3+) generates anisotropic Gabor noise:
+    # directional streaks ideal for brushed metal, fiber weaves, hairline
+    # scratches and other surfaces with a clear orientation. When the
+    # node is unavailable (older Blender), the build falls back to a
+    # tuned Wave-bands texture as approximation.
+    proc_gabor_anisotropy: FloatProperty(
+        name="Anisotropy",
+        description="0 = isotropic noise (no direction); "
+                    "1 = strongly directional parallel streaks",
+        default=1.0, min=0.0, max=1.0, subtype='FACTOR',
+        update=_make_hot_callback("proc_gabor_anisotropy"),
+    )
+    proc_gabor_orientation: FloatProperty(
+        name="Orientation",
+        description="Streak direction in degrees (0 = along X axis, "
+                    "90 = along Y axis)",
+        default=45.0, min=-360.0, max=360.0,
+        update=_make_hot_callback("proc_gabor_orientation"),
+    )
+    proc_gabor_frequency: FloatProperty(
+        name="Frequency",
+        description="Spatial frequency of the streak pattern — higher = "
+                    "thinner / more closely packed streaks",
+        default=2.0, min=0.1, max=20.0,
+        update=_make_hot_callback("proc_gabor_frequency"),
+    )
+
+    # ── Dots-specific parameters ────────────────────────────────────────
+    # Packed circles in a jittered grid: Voronoi F1 distance, thresholded
+    # by Map Range, scaled by proc_scale. Useful for paint splatter,
+    # polka dots, freckles and perforations.
+    proc_dots_radius: FloatProperty(
+        name="Dot Radius",
+        description="Dot size as a fraction of the cell — 0 = no dots, "
+                    "1 = dots fill the entire cell",
+        default=0.35, min=0.01, max=1.0, subtype='FACTOR',
+        update=_make_hot_callback("proc_dots_radius"),
+    )
+    proc_dots_softness: FloatProperty(
+        name="Dot Softness",
+        description="Edge falloff — 0 = hard circles, 1 = soft halos",
+        default=0.15, min=0.0, max=1.0, subtype='FACTOR',
+        update=_make_hot_callback("proc_dots_softness"),
+    )
+
+    # ── Ridged-specific parameters ──────────────────────────────────────
+    # Classic ridged fractal noise: 1 - |2*noise - 1|, then sharpened.
+    # Produces clean crests / valleys ideal for mountain ridges, rock
+    # veins, lightning patterns and crackle textures.
+    proc_ridged_offset: FloatProperty(
+        name="Ridge Offset",
+        description="Pre-fold offset — shifts where the ridge crest sits "
+                    "(1.0 = symmetric ridges, lower = thicker bases)",
+        default=1.0, min=0.0, max=2.0,
+        update=_make_hot_callback("proc_ridged_offset"),
+    )
+    proc_ridged_gain: FloatProperty(
+        name="Ridge Gain",
+        description="Sharpness of the ridges — higher = thinner, more "
+                    "razor-like crests",
+        default=2.0, min=0.5, max=6.0,
+        update=_make_hot_callback("proc_ridged_gain"),
+    )
+
+    # ── Cracks-specific parameters ──────────────────────────────────────
+    # Voronoi distance-to-edge thresholded to thin organic crack lines.
+    # Similar mechanism to HEX_GRID but with irregular cells and tuned
+    # for narrow line geometry. proc_randomness controls cell jitter.
+    proc_cracks_width: FloatProperty(
+        name="Crack Width",
+        description="Thickness of the crack lines (fraction of cell edge "
+                    "distance)",
+        default=0.05, min=0.005, max=0.3, subtype='FACTOR',
+        update=_make_hot_callback("proc_cracks_width"),
+    )
+    proc_cracks_sharpness: FloatProperty(
+        name="Crack Sharpness",
+        description="Edge falloff — 0 = soft fissures, 1 = razor-sharp cracks",
+        default=0.7, min=0.0, max=1.0, subtype='FACTOR',
+        update=_make_hot_callback("proc_cracks_sharpness"),
+    )
+
     # ── Stripes-specific parameters ─────────────────────────────────────
     # Stripes are built from a Wave (BANDS, SAW profile) thresholded
     # through a Map Range smoothstep — that lets the user dial both the
@@ -1184,6 +1290,7 @@ class TLM_LayerItem(PropertyGroup):
             ('X',        "X",        "Horizontal stripes (perpendicular to X)", 0),
             ('Y',        "Y",        "Vertical stripes (perpendicular to Y)",   1),
             ('DIAGONAL', "Diagonal", "Diagonal stripes",                        2),
+            ('Z',        "Z",        "Depth-oriented stripes (perpendicular to Z)", 3),
         ],
         default='Y',
         update=_on_layer_update,  # structural — direction changes the wave node
@@ -1225,6 +1332,57 @@ class TLM_LayerItem(PropertyGroup):
         default=0.0, update=_make_hot_callback("proc_offset_y"))
     proc_offset_z: FloatProperty(name="Offset Z", description="Offset texture origin along Z",
         default=0.0, update=_make_hot_callback("proc_offset_z"))
+    proc_rotation_x: FloatProperty(
+        name="Rotation X",
+        description="Rotate procedural coordinates around X before texture evaluation",
+        subtype='ANGLE',
+        default=0.0,
+        update=_make_hot_callback("proc_rotation_x"),
+    )
+    proc_rotation_y: FloatProperty(
+        name="Rotation Y",
+        description="Rotate procedural coordinates around Y before texture evaluation",
+        subtype='ANGLE',
+        default=0.0,
+        update=_make_hot_callback("proc_rotation_y"),
+    )
+    proc_rotation_z: FloatProperty(
+        name="Rotation Z",
+        description="Rotate procedural coordinates around Z before texture evaluation",
+        subtype='ANGLE',
+        default=0.0,
+        update=_make_hot_callback("proc_rotation_z"),
+    )
+    proc_mapping_scale_x: FloatProperty(
+        name="Scale X",
+        description="Scale procedural coordinates along X before texture evaluation",
+        default=1.0,
+        update=_make_hot_callback("proc_mapping_scale_x"),
+    )
+    proc_mapping_scale_y: FloatProperty(
+        name="Scale Y",
+        description="Scale procedural coordinates along Y before texture evaluation",
+        default=1.0,
+        update=_make_hot_callback("proc_mapping_scale_y"),
+    )
+    proc_mapping_scale_z: FloatProperty(
+        name="Scale Z",
+        description="Scale procedural coordinates along Z before texture evaluation",
+        default=1.0,
+        update=_make_hot_callback("proc_mapping_scale_z"),
+    )
+    proc_mapping_type: EnumProperty(
+        name="Mapping Type",
+        description="Mapping vector type, matching the Blender Mapping node",
+        items=[
+            ('POINT',   "Point",   "Transform coordinates as points", 0),
+            ('TEXTURE', "Texture", "Transform coordinates in texture mode", 1),
+            ('VECTOR',  "Vector",  "Transform directions as vectors", 2),
+            ('NORMAL',  "Normal",  "Transform normals", 3),
+        ],
+        default='POINT',
+        update=_make_hot_callback("proc_mapping_type"),
+    )
 
     # Colors (Color1 = dark/base, Color2 = bright/accent)
     proc_color1: bpy.props.FloatVectorProperty(
@@ -1354,10 +1512,44 @@ class TLM_LayerItem(PropertyGroup):
         default='SIN',
         update=_on_layer_update,
     )
+    proc_wave_bands_direction: EnumProperty(
+        name="Bands Direction",
+        items=[
+            ('X',        "X",        "Bands along the X axis", 0),
+            ('Y',        "Y",        "Bands along the Y axis", 1),
+            ('Z',        "Z",        "Bands along the Z axis", 2),
+            ('DIAGONAL', "Diagonal", "Diagonal bands",         3),
+        ],
+        default='X',
+        update=_on_layer_update,
+    )
+    proc_wave_rings_direction: EnumProperty(
+        name="Rings Direction",
+        items=[
+            ('X',         "X",         "Rings around the X axis", 0),
+            ('Y',         "Y",         "Rings around the Y axis", 1),
+            ('Z',         "Z",         "Rings around the Z axis", 2),
+            ('SPHERICAL', "Spherical", "Spherical rings",         3),
+        ],
+        default='X',
+        update=_on_layer_update,
+    )
     proc_wave_detail_scale: FloatProperty(
         name="Detail Scale", description="Scale of the detail noise overlaid on the wave",
         default=1.0, min=0.0, max=10.0,
         update=_make_hot_callback("proc_wave_detail_scale"),
+    )
+    proc_wave_detail_roughness: FloatProperty(
+        name="Detail Roughness",
+        description="Roughness of the wave detail noise",
+        default=0.5, min=0.0, max=1.0,
+        update=_make_hot_callback("proc_wave_detail_roughness"),
+    )
+    proc_wave_phase_offset: FloatProperty(
+        name="Phase Offset",
+        description="Shift the wave phase without moving the mapping coordinates",
+        default=0.0, min=-100.0, max=100.0,
+        update=_make_hot_callback("proc_wave_phase_offset"),
     )
 
     # Gradient
@@ -1391,6 +1583,41 @@ class TLM_LayerItem(PropertyGroup):
             ('RINGS', "Rings", "Concentric marble rings",     1),
         ],
         default='BANDS',
+        update=_on_layer_update,
+    )
+    proc_marble_wave_profile: EnumProperty(
+        name="Profile",
+        description="Wave profile used by the marble bands",
+        items=[
+            ('SIN', "Sine", "Smooth sine wave",       0),
+            ('SAW', "Saw",  "Sharp sawtooth ramp",    1),
+            ('TRI', "Tri",  "Triangular zigzag wave", 2),
+        ],
+        default='SIN',
+        update=_on_layer_update,
+    )
+    proc_marble_bands_direction: EnumProperty(
+        name="Bands Direction",
+        description="Direction of marble bands",
+        items=[
+            ('X',        "X",        "Bands along the X axis", 0),
+            ('Y',        "Y",        "Bands along the Y axis", 1),
+            ('Z',        "Z",        "Bands along the Z axis", 2),
+            ('DIAGONAL', "Diagonal", "Diagonal bands",         3),
+        ],
+        default='X',
+        update=_on_layer_update,
+    )
+    proc_marble_rings_direction: EnumProperty(
+        name="Rings Direction",
+        description="Direction of marble rings",
+        items=[
+            ('X',         "X",         "Rings around the X axis", 0),
+            ('Y',         "Y",         "Rings around the Y axis", 1),
+            ('Z',         "Z",         "Rings around the Z axis", 2),
+            ('SPHERICAL', "Spherical", "Spherical rings",         3),
+        ],
+        default='X',
         update=_on_layer_update,
     )
 
@@ -1706,6 +1933,84 @@ class TLM_MaterialProperties(PropertyGroup):
         name="Solo Layer",
         description="Index of the solo'd layer (-1 = off)",
         default=-1,
+    )
+
+    performance_debug: BoolProperty(
+        name="Performance Debug",
+        description="Show lightweight timing data for rebuilds and heavy operations",
+        default=False,
+    )
+
+    perf_last_rebuild_ms: FloatProperty(
+        name="Last Rebuild ms",
+        default=0.0,
+        min=0.0,
+        precision=2,
+    )
+    perf_last_hot_update_ms: FloatProperty(
+        name="Last Hot Update ms",
+        default=0.0,
+        min=0.0,
+        precision=2,
+    )
+    perf_last_hot_update_prop: StringProperty(
+        name="Last Hot Update Prop",
+        default="",
+    )
+    perf_last_hot_update_ok: BoolProperty(
+        name="Last Hot Update OK",
+        default=False,
+    )
+    perf_last_bake_ms: FloatProperty(
+        name="Last Bake ms",
+        default=0.0,
+        min=0.0,
+        precision=2,
+    )
+    perf_last_bake_maps: IntProperty(
+        name="Last Bake Maps",
+        default=0,
+        min=0,
+    )
+    perf_last_smart_mask_ms: FloatProperty(
+        name="Last Smart Mask ms",
+        default=0.0,
+        min=0.0,
+        precision=2,
+    )
+    perf_last_smart_mask_ok: BoolProperty(
+        name="Last Smart Mask OK",
+        default=False,
+    )
+    perf_last_node_count: IntProperty(
+        name="Node Count",
+        default=0,
+        min=0,
+    )
+    perf_last_layer_count: IntProperty(
+        name="Layer Count",
+        default=0,
+        min=0,
+    )
+    perf_last_visible_layer_count: IntProperty(
+        name="Visible Layer Count",
+        default=0,
+        min=0,
+    )
+    perf_last_mesh_vertices: IntProperty(
+        name="Mesh Vertices",
+        default=0,
+        min=0,
+    )
+    perf_last_mesh_faces: IntProperty(
+        name="Mesh Faces",
+        default=0,
+        min=0,
+    )
+    perf_last_mesh_objects: IntProperty(
+        name="Mesh Objects",
+        default=0,
+        min=0,
     )
 
     @property
