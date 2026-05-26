@@ -52,53 +52,61 @@ TARGET_MESH = "TLM_IceBlock"
 SUBDIV_LEVEL = 4
 
 # ── Ice body (FILL) ──
-ICE_BODY_COLOR         = (0.620, 0.770, 0.870, 1.0)      # mid cyan-blue (base tint)
-ICE_TRANSMISSION       = 0.55                            # MEDIUM — body color stays visible
-ICE_ROUGHNESS          = 0.12                            # slight surface diffuse (not pure glass)
+# Real ice is TRANSPARENT with subtle absorption. The "internal cloudy"
+# look in the reference comes from base_color NOISE shifting subtly +
+# HIGH transmission letting light pass through with the tinted refraction.
+# NOT from baked-in "frost" diffuse texture (that's the trap I fell into).
+ICE_BODY_COLOR         = (0.700, 0.840, 0.940, 1.0)      # mid cyan-blue (body shows through)
+ICE_TRANSMISSION       = 0.50                            # MID — body colour stays visible, no clear see-through
+ICE_ROUGHNESS          = 0.08                            # low — sharp reflections
 ICE_METALLIC           = 0.0
 ICE_IOR                = 1.31                            # ice physical IOR
 
-# ── Cloud macroscale (NOISE — large internal clouds) ──
-# This is the BIG noise that gives the "frozen volumetric" appearance.
-# The trick is SUBTLE — the user reference has gentle cloudy variation,
-# not dramatic 2-tone splits. So we use opacity ~0.4 (subtle), and
-# Color1/Color2 are CLOSE to each other (light blue ↔ slightly lighter blue),
-# not saturated dark cyan vs white.
-CLOUD_MACRO_SCALE      = 4.5                             # several distributed patches
-CLOUD_MACRO_DETAIL     = 14.0                            # very high detail = fine micro variation
-CLOUD_MACRO_ROUGH      = 0.55                            # mid roughness
-CLOUD_MACRO_DISTORT    = 1.50                            # heavy organic warp
-CLOUD_MACRO_OPACITY    = 0.80                            # stronger — visible cloud patches
+# ── Cloud macroscale (NOISE — large internal cloudy variation) ──
+# Reference architecture: ONE noise at MEDIUM scale, LOW detail, MILD
+# distortion. The trick is LOW detail (5-7, not 14) so the noise has
+# SOFT round patches, not grainy frost. ColorRamp is gentle (close
+# tones) so the variation reads as "subtle volumetric depth" not
+# "painted frost stripes".
+CLOUD_MACRO_SCALE      = 3.0                             # medium patches
+CLOUD_MACRO_DETAIL     = 8.0                             # medium-high detail for organic texture
+CLOUD_MACRO_ROUGH      = 0.60
+CLOUD_MACRO_DISTORT    = 0.80                            # organic warp
+CLOUD_MACRO_OPACITY    = 0.85                            # strong cloud contribution
 CLOUD_MACRO_BLEND      = "MIX"
-CLOUD_MACRO_C1         = (0.350, 0.560, 0.720, 1.0)      # mid-dark blue (cloudy interior depth)
-CLOUD_MACRO_C2         = (0.970, 0.990, 1.000, 1.0)      # bright white (clear veins)
-CLOUD_MACRO_C3         = (0.640, 0.820, 0.930, 1.0)      # mid blue (transition tone)
-CLOUD_MACRO_C3_POS     = 0.55
-# Manual stops: narrow band → sharper internal contrast between blue
-# patches and white "veins" (mimics the reference's internal structure).
-CLOUD_MACRO_POS1       = 0.30
+# HIGH CONTRAST cloud colors — dark blue ↔ bright white. This creates
+# the visible "internal cloudy patches" the reference shows.
+CLOUD_MACRO_C1         = (0.300, 0.510, 0.700, 1.0)      # MUCH darker blue (deep zones)
+CLOUD_MACRO_C2         = (0.980, 0.995, 1.000, 1.0)      # bright white (highlights / clear veins)
+CLOUD_MACRO_C3         = (0.700, 0.840, 0.940, 1.0)      # mid blue (transitions)
+CLOUD_MACRO_C3_POS     = 0.50
+# Manual stops: MID width band → noticeable contrast without harsh edges.
+CLOUD_MACRO_POS1       = 0.25
 CLOUD_MACRO_POS2       = 0.75
 
-# ── Cloud detail (NOISE OVERLAY — finer cloudy texture) ──
-CLOUD_DETAIL_SCALE     = 5.0
-CLOUD_DETAIL_DETAIL    = 12.0
-CLOUD_DETAIL_ROUGH     = 0.65
+# ── Cloud detail (NOISE OVERLAY — fine variation) ──
+# Smaller scale + lower opacity for very subtle micro-variation.
+CLOUD_DETAIL_SCALE     = 7.0
+CLOUD_DETAIL_DETAIL    = 6.0
+CLOUD_DETAIL_ROUGH     = 0.55
 CLOUD_DETAIL_DISTORT   = 0.20
-CLOUD_DETAIL_OPACITY   = 0.30                            # subtle
+CLOUD_DETAIL_OPACITY   = 0.18                            # very subtle
 CLOUD_DETAIL_BLEND     = "OVERLAY"
-CLOUD_DETAIL_C1        = (0.300, 0.520, 0.700, 1.0)
-CLOUD_DETAIL_C2        = (0.900, 0.970, 1.000, 1.0)
+CLOUD_DETAIL_C1        = (0.700, 0.860, 0.940, 1.0)
+CLOUD_DETAIL_C2        = (0.950, 0.985, 1.000, 1.0)
 
 # ── Frost roughness (NOISE → ROUGHNESS, PRIMARY) ──
-ROUGH_LO               = 0.03                            # near-mirror
-ROUGH_HI               = 0.18                            # slightly frosted
-ROUGH_NOISE_SCALE      = 2.5
-ROUGH_CONTRAST         = 0.40
+# Very subtle roughness variation — most of the surface is mirror-clear.
+ROUGH_LO               = 0.03
+ROUGH_HI               = 0.10
+ROUGH_NOISE_SCALE      = 2.0
+ROUGH_CONTRAST         = 0.30
 
 # ── Surface microbump ──
-BUMP_SCALE             = 40.0
-BUMP_STRENGTH          = 0.22
-BUMP_DISTANCE          = 0.0020
+# Almost NONE — the reference has clean ice surface, no orange-peel frost.
+BUMP_SCALE             = 50.0
+BUMP_STRENGTH          = 0.05
+BUMP_DISTANCE          = 0.0005
 
 
 # ─── HELPERS ──────────────────────────────────────────────────────────────────
