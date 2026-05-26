@@ -1191,17 +1191,26 @@ def _draw_composite_section(layout, tlm):
     # so this is rarely touched, but ice / water / gem presets need it.
     comp.prop(tlm, "bsdf_ior", text="IOR", slider=True)
 
-    # ── Volume Absorption (for refractive ice / water / jade / gems) ──
-    # Off by default — most materials don't need a volume shader.
-    # When on, exposes Color + Density controls that drive
-    # Material Output.Volume via a Volume Absorption node.
+    # ── Volume Absorption + Volume Scatter ──
+    # Off by default. Both ON → combined via Add Shader inside the
+    # rebuild (ice = absorption + light scatter, jade = absorption +
+    # heavy scatter, etc.).
     va_row = comp.row(align=True)
     va_row.prop(tlm, "use_volume_absorption", text="Volume Absorption",
-                icon='OUTLINER_DATA_VOLUME' if tlm.use_volume_absorption else 'OUTLINER_DATA_VOLUME',
+                icon='OUTLINER_DATA_VOLUME',
                 toggle=True)
     if tlm.use_volume_absorption:
-        comp.prop(tlm, "volume_absorption_color", text="Volume Color")
-        comp.prop(tlm, "volume_absorption_density", text="Density", slider=True)
+        comp.prop(tlm, "volume_absorption_color", text="Abs Color")
+        comp.prop(tlm, "volume_absorption_density", text="Abs Density", slider=True)
+
+    vs_row = comp.row(align=True)
+    vs_row.prop(tlm, "use_volume_scatter", text="Volume Scatter",
+                icon='OUTLINER_OB_VOLUME',
+                toggle=True)
+    if tlm.use_volume_scatter:
+        comp.prop(tlm, "volume_scatter_color", text="Scatter Color")
+        comp.prop(tlm, "volume_scatter_density", text="Scatter Density", slider=True)
+        comp.prop(tlm, "volume_scatter_anisotropy", text="Anisotropy", slider=True)
     ops_row = comp.row(align=True)
     ops_row.operator("tlm.rebuild_composite", text="Rebuild", icon='FILE_REFRESH')
     ops_row.operator("tlm.flatten_layers",    text="Flatten", icon='IMAGE_ZDEPTH')

@@ -297,14 +297,19 @@ def build_frozen_ice_glass():
     # mat.tlm.bsdf_ior and applies it to BSDF.IOR.
     tlm.bsdf_ior = ICE_IOR
 
-    # Volume Absorption — gives the "deep blue interior" effect from the
-    # reference. Without it, the ice looks too thin / glassy. With it,
-    # refracted light gets tinted+attenuated as it travels through the
-    # mesh interior → darker, more tinted patches form naturally based
-    # on the path length each ray travels.
+    # Volume Absorption + Volume Scatter — the real "ice cube depth" feel.
+    # Absorption alone gives a clean tinted glass. Adding subtle scatter
+    # makes light bounce inside the volume → milky/foggy interior with
+    # visible inner cloudy depth (matches the reference much closer).
+    # Density 0.3 keeps it subtle — too high and it looks like wax.
     tlm.use_volume_absorption = True
-    tlm.volume_absorption_color = (0.55, 0.78, 0.95, 1.0)   # light cyan
-    tlm.volume_absorption_density = 1.5                     # moderate absorption
+    tlm.volume_absorption_color = (0.55, 0.78, 0.95, 1.0)   # light cyan tint
+    tlm.volume_absorption_density = 1.2
+
+    tlm.use_volume_scatter = True
+    tlm.volume_scatter_color = (0.92, 0.96, 1.00, 1.0)      # near-white scatter
+    tlm.volume_scatter_density = 0.30                       # subtle haze — ice not milk
+    tlm.volume_scatter_anisotropy = 0.0                     # isotropic for ice
 
     tlm.auto_composite = True
     compositing.rebuild_node_tree(mat)

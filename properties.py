@@ -355,6 +355,47 @@ def _on_volume_absorption_change(material_props, context):
         compositing.rebuild_node_tree(mat)
 
 
+def _on_volume_scatter_change(material_props, context):
+    """Structural toggle for use_volume_scatter — triggers full rebuild
+    so the Volume Scatter shader appears/disappears and the combine
+    topology (alone, or Add Shader'd with Absorption) is rebuilt."""
+    mat = _resolve_owning_material(material_props, context)
+    if mat is None:
+        return
+    try:
+        from . import compositing
+    except ImportError:
+        import importlib
+        compositing = importlib.import_module(__package__ + ".compositing")
+    if getattr(mat.tlm, 'auto_composite', True):
+        compositing.rebuild_node_tree(mat)
+
+
+def _on_volume_scatter_param_change(material_props, context):
+    """Hot-update Volume Scatter shader's Color, Density, or Anisotropy
+    without rebuilding. No-op if scatter is currently disabled.
+    """
+    mat = _resolve_owning_material(material_props, context)
+    if mat is None or not mat.use_nodes or not mat.node_tree:
+        return
+    nt = mat.node_tree
+    sct = next((n for n in nt.nodes if n.bl_idname == 'ShaderNodeVolumeScatter'), None)
+    if sct is None:
+        return
+    try:
+        col = sct.inputs.get("Color")
+        if col is not None and not col.is_linked:
+            col.default_value = material_props.volume_scatter_color
+        den = sct.inputs.get("Density")
+        if den is not None and not den.is_linked:
+            den.default_value = material_props.volume_scatter_density
+        ani = sct.inputs.get("Anisotropy")
+        if ani is not None and not ani.is_linked:
+            ani.default_value = material_props.volume_scatter_anisotropy
+    except (AttributeError, KeyError):
+        pass
+
+
 def _on_volume_absorption_param_change(material_props, context):
     """Hot-update the existing Volume Absorption node's Color or Density
     without rebuilding. If the node isn't present (e.g. user toggled
@@ -2233,6 +2274,50 @@ class TLM_MaterialProperties(PropertyGroup):
         default=1.0, min=0.0, max=100.0,
         subtype='UNSIGNED',
         update=lambda self, ctx: _on_volume_absorption_param_change(self, ctx),
+    )
+
+    # ── Volume Scatter ──
+    # Where Volume Absorption tints+attenuates light along its path,
+    # Volume Scatter actually scatters light SIDEWAYS within the volume,
+    # producing the "milky/cloudy" depth effect. Combined with Absorption
+    # this gives realistic ice (subtle haze + blue tint), jade (green
+    # tint + heavy scatter), wax (warm tint + medium scatter), milk
+    # (white + high scatter), smoke (grey + strong forward scatter).
+    use_volume_scatter: BoolProperty(
+        name="Volume Scatter",
+        description="Wire a Volume Scatter shader to Material Output.Volume "
+                    "(combined via Add Shader if Volume Absorption is also on). "
+                    "Scatter makes light bounce inside the volume, giving the "
+                    "milky/cloudy interior look that absorption alone can't.",
+        default=False,
+        update=lambda self, ctx: _on_volume_scatter_change(self, ctx),
+    )
+    volume_scatter_color: bpy.props.FloatVectorProperty(
+        name="Scatter Color",
+        description="Colour the scattering tints. Often kept close to white "
+                    "for ice/water; tinted for jade (green), wax (warm).",
+        subtype='COLOR', min=0.0, max=1.0, size=4,
+        default=(0.92, 0.96, 1.00, 1.0),
+        update=lambda self, ctx: _on_volume_scatter_param_change(self, ctx),
+    )
+    volume_scatter_density: bpy.props.FloatProperty(
+        name="Scatter Density",
+        description="How much the volume scatters light. Higher = more milky. "
+                    "Ice (subtle haze): 0.1-0.5. Wax: 0.5-1.5. Jade: 1.0-3.0. "
+                    "Milk (opaque): 3.0+. 0 = no scatter (clear).",
+        default=0.5, min=0.0, max=100.0,
+        subtype='UNSIGNED',
+        update=lambda self, ctx: _on_volume_scatter_param_change(self, ctx),
+    )
+    volume_scatter_anisotropy: bpy.props.FloatProperty(
+        name="Anisotropy",
+        description="Direction bias of the scatter. 0 = isotropic (uniform "
+                    "scatter, default for ice/jade). Positive = forward scatter "
+                    "(0.3-0.6 for smoke/fog/clouds). Negative = back scatter "
+                    "(rare; gives 'rim glow' from behind).",
+        default=0.0, min=-1.0, max=1.0,
+        subtype='FACTOR',
+        update=lambda self, ctx: _on_volume_scatter_param_change(self, ctx),
     )
 
     # use_custom_slots: BoolProperty(

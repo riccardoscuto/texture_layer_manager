@@ -5675,39 +5675,77 @@ def rebuild_node_tree(material):
         except (AttributeError, KeyError):
             pass
 
-        # ── Volume Absorption ─────────────────────────────────────────────
-        # When `mat.tlm.use_volume_absorption=True`, wire a Volume
-        # Absorption shader into the Material Output's Volume socket.
-        # Removed first to avoid stacking on rebuild. Density/Colour live
-        # on material-level properties so the values survive rebuilds.
+        # ── Volume shaders (Absorption + Scatter) ─────────────────────────
+        # Three valid configurations:
+        #   - only Absorption ON → wire absorption.Volume → Output.Volume
+        #   - only Scatter ON    → wire scatter.Volume → Output.Volume
+        #   - BOTH ON            → Add Shader(abs.Volume, scat.Volume) → Output.Volume
+        # Always tear down first so toggle-off cleanly leaves no orphans.
         if mat_out is not None:
-            # Remove any pre-existing volume shader we manage
             stale = [n for n in node_tree.nodes
                      if n.bl_idname in ('ShaderNodeVolumeAbsorption',
                                         'ShaderNodeVolumeScatter')
                      and n.name.startswith(TLM_PREFIX)]
-            for n in stale:
+            # Also tear down any TLM-managed Add Shader used for volume combine
+            stale_add = [n for n in node_tree.nodes
+                         if n.bl_idname == 'ShaderNodeAddShader'
+                         and n.name.startswith(f"{TLM_PREFIX}volume_combine")]
+            for n in stale + stale_add:
                 node_tree.nodes.remove(n)
+
             vol_in = mat_out.inputs.get("Volume")
             if vol_in is not None and vol_in.is_linked:
-                # Clear existing user volume links — TLM owns the Volume socket
-                # while use_volume_absorption is True. If user toggled off, we
-                # also clear so the Volume socket stays clean.
+                # Clear any existing link on Output.Volume — TLM owns this socket
                 for l in list(node_tree.links):
                     if l.to_node is mat_out and l.to_socket is vol_in:
                         node_tree.links.remove(l)
-            if getattr(tlm, 'use_volume_absorption', False) and vol_in is not None:
-                vol = node_tree.nodes.new('ShaderNodeVolumeAbsorption')
-                vol.name = f"{TLM_PREFIX}volume_abs_{_next_id()}"
-                vol.label = "Volume Absorption (TLM)"
-                vol.location = (shader_x, shader_y - 300)
-                vol.inputs["Color"].default_value = getattr(
+
+            use_abs = getattr(tlm, 'use_volume_absorption', False)
+            use_sct = getattr(tlm, 'use_volume_scatter', False)
+
+            abs_node = None
+            sct_node = None
+            if use_abs and vol_in is not None:
+                abs_node = node_tree.nodes.new('ShaderNodeVolumeAbsorption')
+                abs_node.name = f"{TLM_PREFIX}volume_abs_{_next_id()}"
+                abs_node.label = "Volume Absorption (TLM)"
+                abs_node.location = (shader_x, shader_y - 300)
+                abs_node.inputs["Color"].default_value = getattr(
                     tlm, 'volume_absorption_color', (0.55, 0.75, 0.95, 1.0)
                 )
-                vol.inputs["Density"].default_value = getattr(
+                abs_node.inputs["Density"].default_value = getattr(
                     tlm, 'volume_absorption_density', 1.0
                 )
-                node_tree.links.new(vol.outputs["Volume"], vol_in)
+            if use_sct and vol_in is not None:
+                sct_node = node_tree.nodes.new('ShaderNodeVolumeScatter')
+                sct_node.name = f"{TLM_PREFIX}volume_sct_{_next_id()}"
+                sct_node.label = "Volume Scatter (TLM)"
+                sct_node.location = (shader_x, shader_y - 460)
+                sct_node.inputs["Color"].default_value = getattr(
+                    tlm, 'volume_scatter_color', (0.92, 0.96, 1.0, 1.0)
+                )
+                sct_node.inputs["Density"].default_value = getattr(
+                    tlm, 'volume_scatter_density', 0.5
+                )
+                ani_in = sct_node.inputs.get("Anisotropy")
+                if ani_in is not None:
+                    ani_in.default_value = getattr(
+                        tlm, 'volume_scatter_anisotropy', 0.0
+                    )
+
+            # Wire to Output.Volume based on which shaders are on
+            if abs_node and sct_node:
+                add = node_tree.nodes.new('ShaderNodeAddShader')
+                add.name = f"{TLM_PREFIX}volume_combine_{_next_id()}"
+                add.label = "Volume Combine (TLM)"
+                add.location = (shader_x + 220, shader_y - 380)
+                node_tree.links.new(abs_node.outputs["Volume"], add.inputs[0])
+                node_tree.links.new(sct_node.outputs["Volume"], add.inputs[1])
+                node_tree.links.new(add.outputs[0], vol_in)
+            elif abs_node:
+                node_tree.links.new(abs_node.outputs["Volume"], vol_in)
+            elif sct_node:
+                node_tree.links.new(sct_node.outputs["Volume"], vol_in)
 
         # â”€â”€ Base Color â€” built from root_layers to preserve GROUP alpha for clipping mask â”€
         bc_out, bc_alpha = _build_base_color(node_tree, root_layers, group_children, uv_map, start_x, ch_y['base_color'], x_step)
