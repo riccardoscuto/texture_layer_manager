@@ -1120,69 +1120,65 @@ def _ramp_stops(contrast, center=0.5):
 def _hot_proc_color(node_tree, layer, prop_name):
     nodes = _find_all_tagged(node_tree, layer.name, "proc_cr")
     if nodes:
-        # Element count check: refuse hot update if the ColorRamp
-        # element count doesn't match the expected count from the
-        # layer's data (color1 + color2 + [color3] + N extras). When
-        # the user adds or removes a stop, _on_proc_color_stop_change
-        # falls through to a full rebuild.
-        has_c3 = getattr(layer, 'use_proc_color3', False)
-        extras = list(getattr(layer, 'proc_extra_color_stops', []))
-        expected_count = 2 + (1 if has_c3 else 0) + len(extras)
+        # ── Build the target (position, color) pairs in data order ──
+        # Same logic as _build_proc_color_ramp so hot path stays in sync
+        # with the build path.
+        pairs = []  # list of (pos, color) tuples
+
+        # Stop positions for color1 + color2 — manual or computed.
+        if getattr(layer, 'proc_use_manual_stops', False) and layer.proc_type != 'GRADIENT':
+            pos1 = max(0.0, min(1.0, getattr(layer, 'proc_color1_position', 0.0)))
+            pos2 = max(0.0, min(1.0, getattr(layer, 'proc_color2_position', 1.0)))
+            if abs(pos1 - pos2) < 1e-4:
+                pos2 = min(1.0, pos1 + 0.001)
+            pairs.append((pos1, tuple(layer.proc_color1)))
+            pairs.append((pos2, tuple(layer.proc_color2)))
+        else:
+            contrast = getattr(layer, 'proc_contrast', 0.5)
+            center = getattr(layer, 'proc_ramp_center', 0.5)
+            if layer.proc_type == 'GRADIENT':
+                contrast = 0.0
+                center = 0.5
+            stop_lo, stop_hi = _ramp_stops(contrast, center)
+            pairs.append((stop_lo, tuple(layer.proc_color1)))
+            pairs.append((stop_hi, tuple(layer.proc_color2)))
+
+        # Legacy color3
+        if getattr(layer, 'use_proc_color3', False):
+            pairs.append((
+                _clamped_ramp_position(layer.proc_color3_position),
+                tuple(layer.proc_color3),
+            ))
+
+        # Extra color stops
+        for extra in getattr(layer, 'proc_extra_color_stops', []):
+            pairs.append((
+                _clamped_ramp_position(extra.position),
+                tuple(extra.color),
+            ))
+
+        # Sort by position — CRITICAL. Blender's ColorRamp elements MUST
+        # be in monotonic increasing position order for the renderer
+        # (and for color_ramp.evaluate) to produce correct results. The
+        # OLD hot path mutated elements in arbitrary order which left
+        # the array non-monotonic → wrong evaluate output and possible
+        # wrong shader output. Sorting before assignment guarantees a
+        # well-formed ramp.
+        pairs.sort(key=lambda p: p[0])
+
         for cr in nodes:
-            if len(cr.color_ramp.elements) != expected_count:
+            if len(cr.color_ramp.elements) != len(pairs):
                 return False  # Topology changed → caller will rebuild
 
-        for cr in nodes:
-            elems = cr.color_ramp.elements
-            elems = sorted((elem for elem in elems), key=lambda elem: elem.position)
-            if getattr(layer, 'use_proc_color3', False) and len(elems) >= 3:
-                elems[1], elems[2] = elems[-1], elems[1]
-
-            # Two stop-position modes — keep them in sync with the build
-            # path in _build_procedural_node so hot updates stay accurate.
-            if getattr(layer, 'proc_use_manual_stops', False) and layer.proc_type != 'GRADIENT':
-                # Manual mode: positions as-is, swap allowed (Blender's
-                # ColorRamp re-sorts internally). Only nudge apart if
-                # EXACTLY equal to prevent stop merging.
-                pos1 = max(0.0, min(1.0, getattr(layer, 'proc_color1_position', 0.0)))
-                pos2 = max(0.0, min(1.0, getattr(layer, 'proc_color2_position', 1.0)))
-                if abs(pos1 - pos2) < 1e-4:
-                    pos2 = min(1.0, pos1 + 0.001)
-                stop_lo, stop_hi = pos1, pos2
-            else:
-                contrast = getattr(layer, 'proc_contrast', 0.5)
-                center = getattr(layer, 'proc_ramp_center', 0.5)
-                # Gradient uses the full ramp so Color 3 Position stays meaningful.
-                if layer.proc_type == 'GRADIENT':
-                    contrast = 0.0
-                    center = 0.5
-                stop_lo, stop_hi = _ramp_stops(contrast, center)
-
-            elems[0].position = stop_lo
-            elems[0].color = layer.proc_color1
-            elems[1].position = stop_hi
-            elems[1].color = layer.proc_color2
-            # Track which elems we've consumed so far so the extras loop
-            # below picks up from the next available slot. With color3
-            # disabled the extras start at index 2; with color3 enabled
-            # they start at index 3.
-            cursor = 2
-            if getattr(layer, 'use_proc_color3', False) and len(elems) >= 3:
-                elems[cursor].position = _clamped_ramp_position(layer.proc_color3_position)
-                elems[cursor].color = layer.proc_color3
-                cursor += 1
-            elif getattr(layer, 'use_proc_color3', False) and len(elems) < 3:
-                return False  # element count mismatch — need rebuild
-
-            # Update any extra user-defined stops. We rely on element-count
-            # match (verified at top of this function) so the index-zip
-            # is safe.
-            for extra in extras:
-                if cursor >= len(elems):
-                    break
-                elems[cursor].position = _clamped_ramp_position(extra.position)
-                elems[cursor].color = extra.color
-                cursor += 1
+            # Snapshot element references — assigning via this list is
+            # stable even if Blender re-sorts the internal collection
+            # while we're mid-update. Each ref points to the underlying
+            # element struct, so modifying .position / .color affects
+            # that specific element regardless of array reordering.
+            elem_refs = list(cr.color_ramp.elements)
+            for i, (pos, col) in enumerate(pairs):
+                elem_refs[i].position = pos
+                elem_refs[i].color = col
 
             # color_mode + interpolation are also live-updatable
             try:
