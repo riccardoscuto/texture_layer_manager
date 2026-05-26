@@ -1,46 +1,41 @@
 """
-TLM Showcase Preset — Frozen Ice Glass
-========================================
+TLM Showcase Preset — Frozen Ice Glass (v2 — reverse-engineered)
+==================================================================
 
-100% procedural — NO PAINT layers — translucent blue-tinted ice block
-with internal fractures and frost imperfections. Reference: the #2
-material in the user's reference grid (top row) — an ice cube + ice
-sphere with refractive transparency, faint blue absorption tint, and
-internal cracks visible through the body.
+100% procedural — NO PAINT layers — translucent blue-tinted ice with
+cloudy volumetric internal structure (NO sharp CRACKS — those read as
+glass shards, not real ice). Reverse-engineered from the user's
+reference node group:
 
-Showcases TLM's TRANSMISSION channel (which routes to BSDF v2 's
-"Transmission Weight"). This is the first hero preset to drive the
-transmission path:
+    Group Input → NOISE 1 → ColorRamp → Bright/Contrast → BSDF.Base Color
+                  NOISE 2 → ColorRamp → Bump (height) → BSDF.Normal
+                                                       → BSDF.IOR = 1.31
 
-  1. **`use_transmission = True` + `transmission_fill = 0.92`** on the
-     base FILL layer → most light passes through, but a slight
-     absorption gives the blue tint.
-  2. **CRACKS proc → BASE_COLOR** for internal fractures (the cracks
-     darken the tinted base, simulating refractive scatter at the
-     fracture surfaces).
-  3. **Low roughness (~0.08)** for sharp refractive reflections, with
-     a NOISE roughness layer adding subtle "frozen-not-perfect" variation.
-  4. **NOISE microbump → BUMP** for the surface frost texture that
-     scatters light at glancing angles.
+The "frosted ice not clear glass" effect is achieved by:
+  - HIGH transmission (0.92) so light passes through
+  - BUT base_color carries cloudy NOISE variation, so refracted rays
+    pick up subtle gray-blue tints through the volume → "fog inside"
+  - Two noise scales (large macroclouds + finer detail) layered via
+    OVERLAY blend, both with custom multi-stop ColorRamp gradients
+  - Low overall roughness (0.05) for sharp surface reflections
+  - **mat.tlm.bsdf_ior = 1.31** (ice physical IOR) for proper refraction
+  - Microbump for "frozen surface micro-pits" texture
 
-Visual anatomy:
-  - Translucent body with light-cyan absorption tint
-  - Internal CRACKS proc fractures (slightly darker than the tint)
-  - Glossy near-mirror surface with gentle roughness variation
-  - Subtle bump texture for "frost feel"
-  - Heavy transmission → light passes through, refracts at edges
+This preset showcases the recently-added features:
+  - mat.tlm.bsdf_ior (material-level IOR)
+  - proc_extra_color_stops collection (multi-color cloud gradient)
+  - proc_use_manual_stops (precise control over ColorRamp positions)
+  - use_transmission + transmission_fill (fixed hot-update bug 8q)
 
 Layer stack (5 layers):
-  01. Ice Body FILL                — light cyan tint, high transmission, low rough
-  02. Internal Cracks CRACKS proc  — fracture lines visible inside the body
-  03. Cloudy Variation NOISE       → BASE_COLOR — subtle inhomogeneity
-  04. Frost Roughness NOISE        → ROUGHNESS — non-uniform roughness for character
-  05. Surface Microbump NOISE      → BUMP — frost texture (opacity=0!)
+  01. Ice Body FILL                  — translucent base, IOR drives at mat level
+  02. Cloud Macroscale NOISE         — large cloudy color variation
+  03. Cloud Detail NOISE (OVERLAY)   — finer noise on top
+  04. Frost Roughness NOISE          → ROUGHNESS — non-uniform roughness
+  05. Surface Microbump NOISE        → BUMP — frost feel (opacity=0!)
 
-⚠ Renderer: Cycles required for proper refraction. Eevee will show the
-transmission but without true refraction physics.
-⚠ Set the mesh smooth-shaded — a low-poly facet edges will spoil the
-glass look.
+⚠ Engine: Cycles required for proper refraction.
+⚠ Set the mesh smooth-shaded.
 """
 
 import bpy
@@ -57,39 +52,53 @@ TARGET_MESH = "TLM_IceBlock"
 SUBDIV_LEVEL = 4
 
 # ── Ice body (FILL) ──
-ICE_TINT               = (0.520, 0.770, 0.920, 1.0)      # light cyan
-ICE_TRANSMISSION       = 0.92                            # mostly transmits, slight absorption
-ICE_ROUGHNESS          = 0.05                            # near-mirror — clear glass
+ICE_BODY_COLOR         = (0.620, 0.770, 0.870, 1.0)      # mid cyan-blue (base tint)
+ICE_TRANSMISSION       = 0.55                            # MEDIUM — body color stays visible
+ICE_ROUGHNESS          = 0.12                            # slight surface diffuse (not pure glass)
 ICE_METALLIC           = 0.0
-ICE_IOR                = 1.31                            # ice IOR
+ICE_IOR                = 1.31                            # ice physical IOR
 
-# ── Internal fractures (CRACKS proc) ──
-FRACTURE_SCALE         = 1.8                             # sparse big cracks
-FRACTURE_RANDOMNESS    = 0.95
-FRACTURE_WIDTH         = 0.04                            # thin
-FRACTURE_SHARPNESS     = 0.85                            # crisp edges
-FRACTURE_TINT_OUTSIDE  = ICE_TINT                        # surface stays tinted
-FRACTURE_TINT_INSIDE   = (0.250, 0.380, 0.510, 1.0)      # darker tint in fractures
-FRACTURE_OPACITY       = 0.55
-FRACTURE_BLEND         = "MIX"
+# ── Cloud macroscale (NOISE — large internal clouds) ──
+# This is the BIG noise that gives the "frozen volumetric" appearance.
+# The trick is SUBTLE — the user reference has gentle cloudy variation,
+# not dramatic 2-tone splits. So we use opacity ~0.4 (subtle), and
+# Color1/Color2 are CLOSE to each other (light blue ↔ slightly lighter blue),
+# not saturated dark cyan vs white.
+CLOUD_MACRO_SCALE      = 4.5                             # several distributed patches
+CLOUD_MACRO_DETAIL     = 14.0                            # very high detail = fine micro variation
+CLOUD_MACRO_ROUGH      = 0.55                            # mid roughness
+CLOUD_MACRO_DISTORT    = 1.50                            # heavy organic warp
+CLOUD_MACRO_OPACITY    = 0.80                            # stronger — visible cloud patches
+CLOUD_MACRO_BLEND      = "MIX"
+CLOUD_MACRO_C1         = (0.350, 0.560, 0.720, 1.0)      # mid-dark blue (cloudy interior depth)
+CLOUD_MACRO_C2         = (0.970, 0.990, 1.000, 1.0)      # bright white (clear veins)
+CLOUD_MACRO_C3         = (0.640, 0.820, 0.930, 1.0)      # mid blue (transition tone)
+CLOUD_MACRO_C3_POS     = 0.55
+# Manual stops: narrow band → sharper internal contrast between blue
+# patches and white "veins" (mimics the reference's internal structure).
+CLOUD_MACRO_POS1       = 0.30
+CLOUD_MACRO_POS2       = 0.75
 
-# ── Cloudy variation (NOISE OVERLAY) ──
-CLOUD_SCALE            = 1.3                             # big soft clouds
-CLOUD_OPACITY          = 0.35
-CLOUD_BLEND            = "OVERLAY"
-CLOUD_DARK             = (0.250, 0.520, 0.700, 1.0)
-CLOUD_LIGHT            = (0.880, 0.960, 1.000, 1.0)
+# ── Cloud detail (NOISE OVERLAY — finer cloudy texture) ──
+CLOUD_DETAIL_SCALE     = 5.0
+CLOUD_DETAIL_DETAIL    = 12.0
+CLOUD_DETAIL_ROUGH     = 0.65
+CLOUD_DETAIL_DISTORT   = 0.20
+CLOUD_DETAIL_OPACITY   = 0.30                            # subtle
+CLOUD_DETAIL_BLEND     = "OVERLAY"
+CLOUD_DETAIL_C1        = (0.300, 0.520, 0.700, 1.0)
+CLOUD_DETAIL_C2        = (0.900, 0.970, 1.000, 1.0)
 
-# ── Frost roughness (NOISE → ROUGHNESS) ──
-ROUGH_LO               = 0.04                            # mirror-clear regions
-ROUGH_HI               = 0.22                            # slightly frosted regions
+# ── Frost roughness (NOISE → ROUGHNESS, PRIMARY) ──
+ROUGH_LO               = 0.03                            # near-mirror
+ROUGH_HI               = 0.18                            # slightly frosted
 ROUGH_NOISE_SCALE      = 2.5
 ROUGH_CONTRAST         = 0.40
 
 # ── Surface microbump ──
-BUMP_SCALE             = 45.0
-BUMP_STRENGTH          = 0.18                            # very subtle (we want it CLEAR)
-BUMP_DISTANCE          = 0.0015
+BUMP_SCALE             = 40.0
+BUMP_STRENGTH          = 0.22
+BUMP_DISTANCE          = 0.0020
 
 
 # ─── HELPERS ──────────────────────────────────────────────────────────────────
@@ -192,7 +201,7 @@ def build_frozen_ice_glass():
     bpy.context.view_layer.objects.active = obj
     obj.select_set(True)
 
-    print(f"\n[TLM] Building Frozen Ice Glass v0.1 on '{obj.name}'…")
+    print(f"\n[TLM] Building Frozen Ice Glass v2 on '{obj.name}'…")
 
     mat = _get_or_create_material(obj, MATERIAL_NAME)
     tlm = mat.tlm
@@ -201,9 +210,9 @@ def build_frozen_ice_glass():
     _clear_layers(mat)
 
     # ─── 01. Ice Body ───
-    # Single FILL with transmission + low roughness. The transmission_fill
-    # value is what drives the BSDF Transmission Weight, NOT the alpha.
-    l_ice = _add_fill(mat, "01 Ice Body", ICE_TINT,
+    # Single FILL — colour, metallic, roughness, transmission.
+    # IOR is now MATERIAL-level (mat.tlm.bsdf_ior), set below after the build.
+    l_ice = _add_fill(mat, "01 Ice Body", ICE_BODY_COLOR,
                       opacity=1.0, output_channel="BASE_COLOR")
     l_ice.use_metallic = True
     l_ice.metallic_fill = ICE_METALLIC
@@ -212,31 +221,43 @@ def build_frozen_ice_glass():
     l_ice.use_transmission = True
     l_ice.transmission_fill = ICE_TRANSMISSION
 
-    # ─── 02. Internal Fractures (CRACKS → darken in cracks) ───
-    l_frac = _add_proc(mat, "02 Internal Fractures", "CRACKS",
-                       opacity=FRACTURE_OPACITY,
-                       blend_mode=FRACTURE_BLEND,
-                       output_channel="BASE_COLOR")
-    l_frac.proc_scale = FRACTURE_SCALE
-    l_frac.proc_randomness = FRACTURE_RANDOMNESS
-    l_frac.proc_cracks_width = FRACTURE_WIDTH
-    l_frac.proc_cracks_sharpness = FRACTURE_SHARPNESS
-    # CRACKS Fac = 1 INSIDE crack, 0 OUTSIDE. So color2 (Fac=1) = inside fracture.
-    l_frac.proc_color1 = FRACTURE_TINT_OUTSIDE
-    l_frac.proc_color2 = FRACTURE_TINT_INSIDE
-    l_frac.proc_contrast = 0.30
-
-    # ─── 03. Cloudy Variation (NOISE OVERLAY) ───
-    l_cloud = _add_proc(mat, "03 Cloudy Variation", "NOISE",
-                        opacity=CLOUD_OPACITY,
-                        blend_mode=CLOUD_BLEND,
+    # ─── 02. Cloud Macroscale (NOISE, large internal clouds) ───
+    # Uses the new multi-color stops system: Color1 dark, Color3 mid,
+    # Color2 light. Manual Stops with custom positions for full control
+    # of the gradient. With OBJECT coord, the noise is anchored to the
+    # mesh — rotating the camera doesn't change the cloud pattern.
+    l_macro = _add_proc(mat, "02 Cloud Macroscale", "NOISE",
+                        opacity=CLOUD_MACRO_OPACITY,
+                        blend_mode=CLOUD_MACRO_BLEND,
                         output_channel="BASE_COLOR")
-    l_cloud.proc_scale = CLOUD_SCALE
-    l_cloud.proc_detail = 7.0
-    l_cloud.proc_roughness_proc = 0.55
-    l_cloud.proc_color1 = CLOUD_DARK
-    l_cloud.proc_color2 = CLOUD_LIGHT
-    l_cloud.proc_contrast = 0.30
+    l_macro.proc_scale = CLOUD_MACRO_SCALE
+    l_macro.proc_detail = CLOUD_MACRO_DETAIL
+    l_macro.proc_roughness_proc = CLOUD_MACRO_ROUGH
+    l_macro.proc_distortion = CLOUD_MACRO_DISTORT
+    l_macro.proc_color1 = CLOUD_MACRO_C1
+    l_macro.proc_color2 = CLOUD_MACRO_C2
+    # Add Color3 (rose) as an extra stop via the new collection
+    extra = l_macro.proc_extra_color_stops.add()
+    extra.color = CLOUD_MACRO_C3
+    extra.position = CLOUD_MACRO_C3_POS
+    # Manual stops for precise positioning
+    l_macro.proc_use_manual_stops = True
+    l_macro.proc_color1_position = CLOUD_MACRO_POS1
+    l_macro.proc_color2_position = CLOUD_MACRO_POS2
+
+    # ─── 03. Cloud Detail (NOISE OVERLAY) ───
+    # Finer noise scale for subtle micro-texture inside the ice volume.
+    l_detail = _add_proc(mat, "03 Cloud Detail", "NOISE",
+                         opacity=CLOUD_DETAIL_OPACITY,
+                         blend_mode=CLOUD_DETAIL_BLEND,
+                         output_channel="BASE_COLOR")
+    l_detail.proc_scale = CLOUD_DETAIL_SCALE
+    l_detail.proc_detail = CLOUD_DETAIL_DETAIL
+    l_detail.proc_roughness_proc = CLOUD_DETAIL_ROUGH
+    l_detail.proc_distortion = CLOUD_DETAIL_DISTORT
+    l_detail.proc_color1 = CLOUD_DETAIL_C1
+    l_detail.proc_color2 = CLOUD_DETAIL_C2
+    l_detail.proc_contrast = 0.30
 
     # ─── 04. Frost Roughness (NOISE → ROUGHNESS, PRIMARY) ───
     l_rough = _add_proc(mat, "04 Frost Roughness", "NOISE",
@@ -256,7 +277,7 @@ def build_frozen_ice_glass():
                        blend_mode="MIX",
                        output_channel="BASE_COLOR")
     l_bump.proc_scale = BUMP_SCALE
-    l_bump.proc_detail = 5.0
+    l_bump.proc_detail = 6.0
     l_bump.proc_color1 = (0.0, 0.0, 0.0, 1.0)
     l_bump.proc_color2 = (0.0, 0.0, 0.0, 1.0)
     l_bump.proc_contrast = 0.45
@@ -264,16 +285,14 @@ def build_frozen_ice_glass():
     l_bump.bump_strength = BUMP_STRENGTH
     l_bump.bump_distance = BUMP_DISTANCE
 
+    # Set the material-level IOR BEFORE rebuild — rebuild reads
+    # mat.tlm.bsdf_ior and applies it to BSDF.IOR.
+    tlm.bsdf_ior = ICE_IOR
+
     tlm.auto_composite = True
     compositing.rebuild_node_tree(mat)
 
-    # The BSDF v2 has an "IOR" input — set to ice IOR for proper refraction
-    # (TLM doesn't manage IOR yet — set it directly on the BSDF after rebuild).
-    bsdf = next((n for n in mat.node_tree.nodes if n.type == 'BSDF_PRINCIPLED'), None)
-    if bsdf and "IOR" in bsdf.inputs:
-        bsdf.inputs["IOR"].default_value = ICE_IOR
-
-    print(f"[TLM] Frozen Ice Glass built — {len(tlm.layers)} layers")
+    print(f"[TLM] Frozen Ice Glass v2 built — {len(tlm.layers)} layers, IOR={ICE_IOR}")
     return mat
 
 

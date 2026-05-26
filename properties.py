@@ -334,6 +334,40 @@ class TLM_ProcColorStop(PropertyGroup):
     )
 
 
+def _on_bsdf_ior_change(material_props, context):
+    """Hot-update the BSDF.IOR input without rebuilding the whole tree.
+
+    Looks up the Principled BSDF on the owning material and pokes its IOR
+    socket. Falls through silently if the material isn't built or doesn't
+    have a Principled BSDF (e.g. converted to editable shader).
+    """
+    # material_props is a TLM_MaterialProperties — find the owning Material
+    # via context (we don't keep a back-pointer to avoid stale references).
+    obj = getattr(context, 'object', None)
+    if not obj:
+        return
+    mat = obj.active_material if hasattr(obj, 'active_material') else None
+    if not mat or not mat.use_nodes or not mat.node_tree:
+        return
+    if getattr(mat, 'tlm', None) is not material_props:
+        # Active material isn't this one — fall back to scanning all materials.
+        # Rare case (e.g. property edit via Python on a non-active material).
+        for m in bpy.data.materials:
+            if getattr(m, 'tlm', None) is material_props:
+                mat = m
+                break
+        else:
+            return
+    bsdf = next((n for n in mat.node_tree.nodes if n.type == 'BSDF_PRINCIPLED'), None)
+    if bsdf is None:
+        return
+    ior_in = bsdf.inputs.get("IOR")
+    if ior_in is None:
+        return
+    if not ior_in.is_linked:
+        ior_in.default_value = material_props.bsdf_ior
+
+
 def _on_proc_color_stop_change(stop, context):
     """Edge case: a TLM_ProcColorStop lives inside TLM_LayerItem.proc_extra_color_stops,
     which lives on a Material. We need to find which layer owns this stop and trigger
@@ -2094,6 +2128,24 @@ class TLM_MaterialProperties(PropertyGroup):
             "driven by NDOTL mask source bands"
         ),
         default=False,
+    )
+
+    # ── Material-level BSDF IOR (Index Of Refraction) ──
+    # Drives BSDF.IOR on rebuild. Per-material because IOR is a physical
+    # property of the medium, not per-layer. Common values: 1.00 air,
+    # 1.31 ice, 1.33 water, 1.45 glass (BSDF default), 1.52 crown glass,
+    # 1.77 sapphire, 2.42 diamond. Without this property, refraction-based
+    # presets (ice, water, gems) had to set bsdf.inputs["IOR"] manually
+    # after rebuild — fragile because the next rebuild reset it.
+    bsdf_ior: bpy.props.FloatProperty(
+        name="IOR",
+        description="Index of Refraction. Affects refraction angle in transmission and "
+                    "the strength of Fresnel reflections on Base Color. "
+                    "Common values: 1.31 ice, 1.33 water, 1.45 glass (default), "
+                    "1.52 crown glass, 2.42 diamond. 1.00 = no refraction (air).",
+        default=1.45, min=1.00, max=3.50,
+        subtype='UNSIGNED',
+        update=lambda self, ctx: _on_bsdf_ior_change(self, ctx),
     )
 
     # use_custom_slots: BoolProperty(

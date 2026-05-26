@@ -1186,6 +1186,10 @@ def _draw_composite_section(layout, tlm):
     # exists, Opaque otherwise â€” the right default 95% of the time.
     # Manual override for the rare glass / forced-cutout cases.
     comp.prop(tlm, "alpha_blend_method", text="Alpha Mode")
+
+    # Material-level BSDF IOR. Most materials sit at 1.45 (glass default)
+    # so this is rarely touched, but ice / water / gem presets need it.
+    comp.prop(tlm, "bsdf_ior", text="IOR", slider=True)
     ops_row = comp.row(align=True)
     ops_row.operator("tlm.rebuild_composite", text="Rebuild", icon='FILE_REFRESH')
     ops_row.operator("tlm.flatten_layers",    text="Flatten", icon='IMAGE_ZDEPTH')

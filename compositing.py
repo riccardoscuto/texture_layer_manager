@@ -5665,6 +5665,16 @@ def rebuild_node_tree(material):
         if mat_out:
             mat_out.location = (output_x, shader_y)
 
+        # Apply material-level BSDF IOR (default 1.45 glass; ice = 1.31,
+        # water = 1.33, diamond = 2.42). Only set when the IOR socket
+        # exists and isn't user-linked — preserve any manual wiring.
+        try:
+            ior_in = bsdf.inputs.get("IOR")
+            if ior_in is not None and not ior_in.is_linked:
+                ior_in.default_value = getattr(tlm, 'bsdf_ior', 1.45)
+        except (AttributeError, KeyError):
+            pass
+
         # â”€â”€ Base Color â€” built from root_layers to preserve GROUP alpha for clipping mask â”€
         bc_out, bc_alpha = _build_base_color(node_tree, root_layers, group_children, uv_map, start_x, ch_y['base_color'], x_step)
         if bc_out:
