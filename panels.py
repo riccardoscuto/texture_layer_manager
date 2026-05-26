@@ -379,25 +379,32 @@ def _draw_procedural(col, active, tlm):
         pos12.prop(active, "proc_color1_position", text="Pos 1", slider=True)
         pos12.prop(active, "proc_color2_position", text="Pos 2", slider=True)
 
-    c3r = col.row(align=True)
-    c3r.prop(active, "use_proc_color3", text="",
-             icon='ADD' if not active.use_proc_color3 else 'REMOVE', toggle=True)
-    if active.use_proc_color3:
+    # Legacy Color 3 row — only shown if the underlying flag is True
+    # (i.e. loaded from a pre-collection .tlm preset that hasn't been
+    # migrated yet). New presets use the proc_extra_color_stops list
+    # below exclusively, so the row is hidden by default to avoid
+    # visual overlap with the "Add Color Stop" button.
+    legacy_c3 = active.use_proc_color3
+    if legacy_c3:
+        c3r = col.row(align=True)
+        c3r.prop(active, "use_proc_color3", text="",
+                 icon='REMOVE', toggle=True)
         c3r.prop(active, "proc_color3", text="")
         c3r.prop(active, "proc_color3_position", text="Pos", slider=True)
-    else:
-        c3r.label(text="Color 3")
 
     # Extra color stops (proc_extra_color_stops collection).
     # Each row: color picker + Pos slider + per-row "X" delete button.
     # Below the list: "+ Add Color Stop" wide button.
     # The X button passes the row's index to the operator so it knows
     # which stop to remove — no need to fiddle with the active index
-    # ourselves.
+    # ourselves. Labels start at "Pos 3" because Color1 and Color2 are
+    # always present (Pos 1 + Pos 2). If the legacy Color 3 row is
+    # still visible, extras start at "Pos 4" instead to avoid collision.
+    label_offset = 4 if legacy_c3 else 3
     for idx, stop in enumerate(active.proc_extra_color_stops):
         sr = col.row(align=True)
         sr.prop(stop, "color", text="")
-        sr.prop(stop, "position", text=f"Pos {idx + 4}", slider=True)
+        sr.prop(stop, "position", text=f"Pos {idx + label_offset}", slider=True)
         del_op = sr.operator("tlm.remove_proc_color_stop", text="", icon='X')
         del_op.index = idx
     add_row = col.row(align=True)

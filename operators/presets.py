@@ -638,6 +638,16 @@ class TLM_OT_ApplyPreset(Operator):
                     item = layer.proc_extra_color_stops.add()
                     item.color = s.get("color", [0.5, 0.5, 0.5, 1.0])
                     item.position = s.get("position", 0.5)
+                # Legacy migration: if use_proc_color3 came in True from
+                # an older preset AND the new collection is empty, move
+                # the Color 3 entry into the collection so the UI shows
+                # a single unified list. Old data path stays callable
+                # for users who explicitly want it back.
+                if layer.use_proc_color3 and not layer.proc_extra_color_stops:
+                    item = layer.proc_extra_color_stops.add()
+                    item.color = list(layer.proc_color3)
+                    item.position = layer.proc_color3_position
+                    layer.use_proc_color3 = False
                 # Feature A â€” Advanced coordinates
                 layer.proc_coord_transform  = ld.get("proc_coord_transform", "NONE")
                 layer.proc_swirl_amount     = ld.get("proc_swirl_amount", 2.0)
