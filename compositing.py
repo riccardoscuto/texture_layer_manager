@@ -1031,6 +1031,68 @@ def _find_first_sun_direction():
     return (0.4, -0.3, 0.85)
 
 
+def _build_proc_color_ramp(node_tree, layer, x, y, fac_out):
+    """Build the standard TLM ColorRamp for a procedural layer.
+
+    Centralised so every proc_type that has a ColorRamp behaves the
+    same way — Manual Stops, color mode, interpolation, extra stops,
+    Color 3 legacy. Previously the MARBLE branch had its own inline
+    copy of this logic that fell out of sync as new features landed.
+
+    Returns the ColorRamp.outputs["Color"] socket.
+    """
+    cr = node_tree.nodes.new("ShaderNodeValToRGB")
+    cr.name = f"{TLM_PREFIX}proc_cr_{_next_id()}"
+    cr.label = "Proc Color"
+    cr.location = (x + 180, y)
+    _tag(cr, layer.name, "proc_cr")
+
+    # Stop positions: two modes — Manual or computed-from-contrast.
+    if getattr(layer, 'proc_use_manual_stops', False) and layer.proc_type != 'GRADIENT':
+        pos1 = max(0.0, min(1.0, getattr(layer, 'proc_color1_position', 0.0)))
+        pos2 = max(0.0, min(1.0, getattr(layer, 'proc_color2_position', 1.0)))
+        if abs(pos1 - pos2) < 1e-4:
+            pos2 = min(1.0, pos1 + 0.001)
+        stop_lo, stop_hi = pos1, pos2
+    else:
+        contrast = getattr(layer, 'proc_contrast', 0.5)
+        center = getattr(layer, 'proc_ramp_center', 0.5)
+        if layer.proc_type == 'GRADIENT':
+            contrast = 0.0
+            center = 0.5
+        stop_lo, stop_hi = _ramp_stops(contrast, center)
+
+    cr.color_ramp.elements[0].position = stop_lo
+    cr.color_ramp.elements[0].color = layer.proc_color1
+    cr.color_ramp.elements[1].position = stop_hi
+    cr.color_ramp.elements[1].color = layer.proc_color2
+
+    # Legacy Color 3 (kept for backward compat — migrated to extras on load).
+    if getattr(layer, 'use_proc_color3', False):
+        el = cr.color_ramp.elements.new(_clamped_ramp_position(layer.proc_color3_position))
+        el.color = layer.proc_color3
+
+    # Extra colour stops collection — N stops beyond Color1/Color2/Color3.
+    for extra in getattr(layer, 'proc_extra_color_stops', []):
+        el = cr.color_ramp.elements.new(_clamped_ramp_position(extra.position))
+        el.color = extra.color
+
+    # color_mode + interpolation — apply 1:1 to ShaderNodeValToRGB.
+    try:
+        cr.color_ramp.color_mode = getattr(layer, 'proc_color_ramp_mode', 'RGB')
+    except (TypeError, AttributeError):
+        pass
+    try:
+        cr.color_ramp.interpolation = getattr(
+            layer, 'proc_color_ramp_interpolation', 'LINEAR'
+        )
+    except (TypeError, AttributeError):
+        pass
+
+    node_tree.links.new(fac_out, cr.inputs["Fac"])
+    return cr.outputs["Color"]
+
+
 def _ramp_stops(contrast, center=0.5):
     """Compute the two outer ColorRamp stop positions from contrast + center.
 
@@ -4966,28 +5028,11 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
 
         fac_out = wave.outputs["Fac"]
 
-        cr = node_tree.nodes.new("ShaderNodeValToRGB")
-        cr.name = f"{TLM_PREFIX}proc_cr_{_next_id()}"
-        cr.label = "Proc Color"
-        cr.location = (x + 180, y)
-        _tag(cr, layer.name, "proc_cr")
-
-        contrast = getattr(layer, 'proc_contrast', 0.5)
-        center = getattr(layer, 'proc_ramp_center', 0.5)
-        # Gradient uses the full ramp so Color 3 Position stays meaningful.
-        if layer.proc_type == 'GRADIENT':
-            contrast = 0.0
-            center = 0.5
-        stop_lo, stop_hi = _ramp_stops(contrast, center)
-        cr.color_ramp.elements[0].position = stop_lo
-        cr.color_ramp.elements[0].color = layer.proc_color1
-        cr.color_ramp.elements[1].position = stop_hi
-        cr.color_ramp.elements[1].color = layer.proc_color2
-        if getattr(layer, 'use_proc_color3', False):
-            el = cr.color_ramp.elements.new(_clamped_ramp_position(layer.proc_color3_position))
-            el.color = layer.proc_color3
-        node_tree.links.new(fac_out, cr.inputs["Fac"])
-        return cr.outputs["Color"], None
+        # Use the shared ramp builder so MARBLE gets Manual Stops, color
+        # mode, interpolation, and extra stops just like every other
+        # proc_type. Previously this branch had its own inline copy that
+        # fell out of sync.
+        return _build_proc_color_ramp(node_tree, layer, x, y, fac_out), None
 
     if tex_node is None:
         return None, None
@@ -5002,67 +5047,10 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
         node_tree.links.new(vec_out, tex_node.inputs["Vector"])
 
     # â”€â”€ ColorRamp: map Fac â†’ Color1..Color2 â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    cr = node_tree.nodes.new("ShaderNodeValToRGB")
-    cr.name = f"{TLM_PREFIX}proc_cr_{_next_id()}"
-    cr.label = "Proc Color"
-    cr.location = (x + 180, y)
-    _tag(cr, layer.name, "proc_cr")
-
-    # Stop positions: two modes.
-    #   (1) Manual (proc_use_manual_stops=True) — proc_color1_position,
-    #       proc_color2_position drive stops directly. The user gets a
-    #       1:1 mapping with a raw ColorRamp.
-    #   (2) Computed (default) — Contrast + Ramp Center compute the
-    #       stop positions via _ramp_stops(). This is the legacy
-    #       artist-friendly model where contrast = band sharpness.
-    if getattr(layer, 'proc_use_manual_stops', False) and layer.proc_type != 'GRADIENT':
-        # Manual mode: positions used as-is. Blender's ColorRamp sorts
-        # elements internally by position, so swapping Pos1 and Pos2
-        # just flips the gradient direction (no clamping/merging).
-        # Only nudge apart if EXACTLY equal so Blender doesn't merge them.
-        pos1 = max(0.0, min(1.0, getattr(layer, 'proc_color1_position', 0.0)))
-        pos2 = max(0.0, min(1.0, getattr(layer, 'proc_color2_position', 1.0)))
-        if abs(pos1 - pos2) < 1e-4:
-            pos2 = min(1.0, pos1 + 0.001)
-        stop_lo, stop_hi = pos1, pos2
-    else:
-        contrast = getattr(layer, 'proc_contrast', 0.5)
-        center = getattr(layer, 'proc_ramp_center', 0.5)
-        if layer.proc_type == 'GRADIENT':
-            contrast = 0.0
-            center = 0.5
-        stop_lo, stop_hi = _ramp_stops(contrast, center)
-
-    cr.color_ramp.elements[0].position = stop_lo
-    cr.color_ramp.elements[0].color = layer.proc_color1
-    cr.color_ramp.elements[1].position = stop_hi
-    cr.color_ramp.elements[1].color = layer.proc_color2
-    if getattr(layer, 'use_proc_color3', False):
-        el = cr.color_ramp.elements.new(_clamped_ramp_position(layer.proc_color3_position))
-        el.color = layer.proc_color3
-
-    # Extra user-defined colour stops (proc_extra_color_stops collection).
-    # Each entry contributes one ColorRamp element. Blender's ColorRamp
-    # sorts elements by position internally, so the user can append
-    # stops in any order — the visual gradient remains correct.
-    for extra in getattr(layer, 'proc_extra_color_stops', []):
-        el = cr.color_ramp.elements.new(_clamped_ramp_position(extra.position))
-        el.color = extra.color
-
-    # Apply ColorRamp color_mode + interpolation. Guarded with try/except
-    # because rare Blender versions may rename these or restrict enum values.
-    try:
-        cr.color_ramp.color_mode = getattr(layer, 'proc_color_ramp_mode', 'RGB')
-    except (TypeError, AttributeError):
-        pass
-    try:
-        cr.color_ramp.interpolation = getattr(layer, 'proc_color_ramp_interpolation', 'LINEAR')
-    except (TypeError, AttributeError):
-        pass
-
-    node_tree.links.new(fac_out, cr.inputs["Fac"])
-
-    return cr.outputs["Color"], None
+    # Delegated to _build_proc_color_ramp so all proc_types share the
+    # same ramp construction (Manual Stops, color mode, interpolation,
+    # extra stops, legacy Color 3). See helper near top of file.
+    return _build_proc_color_ramp(node_tree, layer, x, y, fac_out), None
 
 def _wrap_adjustment_opacity(node_tree, layer, original_output, adjusted_output, x, y,
                              channel_id="base_color"):
