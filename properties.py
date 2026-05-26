@@ -334,6 +334,64 @@ class TLM_ProcColorStop(PropertyGroup):
     )
 
 
+def _on_volume_absorption_change(material_props, context):
+    """Structural toggle — add or remove the Volume Absorption shader.
+
+    `use_volume_absorption` flipping requires a topology change (new
+    nodes appear / disappear), so we route this through a full rebuild.
+    The actual building lives in compositing.rebuild_node_tree which
+    reads `mat.tlm.use_volume_absorption` and emits the Volume shader
+    if true.
+    """
+    mat = _resolve_owning_material(material_props, context)
+    if mat is None:
+        return
+    try:
+        from . import compositing
+    except ImportError:
+        import importlib
+        compositing = importlib.import_module(__package__ + ".compositing")
+    if getattr(mat.tlm, 'auto_composite', True):
+        compositing.rebuild_node_tree(mat)
+
+
+def _on_volume_absorption_param_change(material_props, context):
+    """Hot-update the existing Volume Absorption node's Color or Density
+    without rebuilding. If the node isn't present (e.g. user toggled
+    use_volume_absorption off), this is a no-op.
+    """
+    mat = _resolve_owning_material(material_props, context)
+    if mat is None or not mat.use_nodes or not mat.node_tree:
+        return
+    nt = mat.node_tree
+    vol = next((n for n in nt.nodes if n.bl_idname == 'ShaderNodeVolumeAbsorption'), None)
+    if vol is None:
+        return
+    try:
+        col = vol.inputs.get("Color")
+        if col is not None and not col.is_linked:
+            col.default_value = material_props.volume_absorption_color
+        den = vol.inputs.get("Density")
+        if den is not None and not den.is_linked:
+            den.default_value = material_props.volume_absorption_density
+    except (AttributeError, KeyError):
+        pass
+
+
+def _resolve_owning_material(material_props, context):
+    """Find the Material that owns the given TLM_MaterialProperties.
+    Tries the active object first, then falls back to scanning bpy.data.
+    Returns None if not found.
+    """
+    obj = getattr(context, 'object', None)
+    if obj and obj.active_material is not None and getattr(obj.active_material, 'tlm', None) is material_props:
+        return obj.active_material
+    for m in bpy.data.materials:
+        if getattr(m, 'tlm', None) is material_props:
+            return m
+    return None
+
+
 def _on_bsdf_ior_change(material_props, context):
     """Hot-update the BSDF.IOR input without rebuilding the whole tree.
 
@@ -2146,6 +2204,43 @@ class TLM_MaterialProperties(PropertyGroup):
         default=1.45, min=1.00, max=3.50,
         subtype='UNSIGNED',
         update=lambda self, ctx: _on_bsdf_ior_change(self, ctx),
+    )
+
+    # ── Volume Absorption ──
+    # Wires a Volume Absorption shader to Material Output.Volume. As light
+    # rays travel through the mesh interior they get tinted+attenuated by
+    # this color × density (Beer–Lambert absorption). Without this, true
+    # ice/water/jade/gem materials look "thin" — the tint comes only from
+    # surface base_color, not from the path through the volume.
+    # Density of 1.0 = light loses 63% intensity per unit (Blender unit).
+    # For a 2m diameter sphere, density 0.5–2.0 reads as "tinted glass".
+    use_volume_absorption: BoolProperty(
+        name="Volume Absorption",
+        description="Wire a Volume Absorption shader to Material Output.Volume. "
+                    "Gives refractive materials (ice, water, gems) the natural "
+                    "'darker inside' look that comes from light getting absorbed "
+                    "as it travels through the volume.",
+        default=False,
+        update=lambda self, ctx: _on_volume_absorption_change(self, ctx),
+    )
+    volume_absorption_color: bpy.props.FloatVectorProperty(
+        name="Volume Color",
+        description="Tint of the volume absorption. Light becomes more this colour "
+                    "as it travels through the mesh interior. For ice: light cyan. "
+                    "For amber: warm orange. For jade: green.",
+        subtype='COLOR', min=0.0, max=1.0, size=4,
+        default=(0.55, 0.75, 0.95, 1.0),
+        update=lambda self, ctx: _on_volume_absorption_param_change(self, ctx),
+    )
+    volume_absorption_density: bpy.props.FloatProperty(
+        name="Density",
+        description="How quickly light is absorbed per unit distance. "
+                    "Higher = darker interior. 0.0 = no absorption, 1.0 = moderate, "
+                    "5.0 = strongly tinted (dark gem). Ice: 0.5-1.5. "
+                    "Water: 0.1-0.5. Coloured gem: 2.0-8.0.",
+        default=1.0, min=0.0, max=100.0,
+        subtype='UNSIGNED',
+        update=lambda self, ctx: _on_volume_absorption_param_change(self, ctx),
     )
 
     # use_custom_slots: BoolProperty(

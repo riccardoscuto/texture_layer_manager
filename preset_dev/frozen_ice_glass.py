@@ -56,9 +56,9 @@ SUBDIV_LEVEL = 4
 # look in the reference comes from base_color NOISE shifting subtly +
 # HIGH transmission letting light pass through with the tinted refraction.
 # NOT from baked-in "frost" diffuse texture (that's the trap I fell into).
-ICE_BODY_COLOR         = (0.700, 0.840, 0.940, 1.0)      # mid cyan-blue (body shows through)
-ICE_TRANSMISSION       = 0.50                            # MID — body colour stays visible, no clear see-through
-ICE_ROUGHNESS          = 0.08                            # low — sharp reflections
+ICE_BODY_COLOR         = (0.840, 0.930, 0.985, 1.0)      # light cyan-white (volume tints it darker)
+ICE_TRANSMISSION       = 0.85                            # HIGH — true ice transparency, volume gives the depth
+ICE_ROUGHNESS          = 0.06                            # near-mirror — sharp reflections
 ICE_METALLIC           = 0.0
 ICE_IOR                = 1.31                            # ice physical IOR
 
@@ -296,6 +296,15 @@ def build_frozen_ice_glass():
     # Set the material-level IOR BEFORE rebuild — rebuild reads
     # mat.tlm.bsdf_ior and applies it to BSDF.IOR.
     tlm.bsdf_ior = ICE_IOR
+
+    # Volume Absorption — gives the "deep blue interior" effect from the
+    # reference. Without it, the ice looks too thin / glassy. With it,
+    # refracted light gets tinted+attenuated as it travels through the
+    # mesh interior → darker, more tinted patches form naturally based
+    # on the path length each ray travels.
+    tlm.use_volume_absorption = True
+    tlm.volume_absorption_color = (0.55, 0.78, 0.95, 1.0)   # light cyan
+    tlm.volume_absorption_density = 1.5                     # moderate absorption
 
     tlm.auto_composite = True
     compositing.rebuild_node_tree(mat)
