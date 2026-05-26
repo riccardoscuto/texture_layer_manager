@@ -380,59 +380,45 @@ def _on_volume_absorption_param_change(material_props, context):
 
 def _resolve_owning_material(material_props, context):
     """Find the Material that owns the given TLM_MaterialProperties.
-    Tries the active object first, then falls back to scanning bpy.data.
-    Returns None if not found.
+
+    Uses `material_props.id_data` which Blender guarantees to be the ID
+    datablock the PropertyGroup is attached to. This is far more reliable
+    than the `is` comparison (which fails because Blender's bpy_struct
+    wrappers don't preserve identity across accesses — `mat.tlm is mat.tlm`
+    can return False even when they're the same underlying data).
     """
+    try:
+        owner = material_props.id_data
+        if owner is not None and isinstance(owner, bpy.types.Material):
+            return owner
+    except (AttributeError, ReferenceError):
+        pass
+    # Fallback: scan by name match between context object's material and
+    # the property values. Last-ditch in case id_data isn't available.
     obj = getattr(context, 'object', None)
-    if obj and obj.active_material is not None and getattr(obj.active_material, 'tlm', None) is material_props:
+    if obj and obj.active_material is not None:
         return obj.active_material
-    for m in bpy.data.materials:
-        if getattr(m, 'tlm', None) is material_props:
-            return m
     return None
 
 
 def _on_bsdf_ior_change(material_props, context):
-    """Hot-update the BSDF.IOR input without rebuilding the whole tree.
-
-    Looks up the Principled BSDF on the owning material and pokes its IOR
-    socket. Falls through silently if the material isn't built or doesn't
-    have a Principled BSDF (e.g. converted to editable shader).
-    """
-    # material_props is a TLM_MaterialProperties — find the owning Material
-    # via context (we don't keep a back-pointer to avoid stale references).
-    obj = getattr(context, 'object', None)
-    if not obj:
-        return
-    mat = obj.active_material if hasattr(obj, 'active_material') else None
+    """Hot-update the BSDF.IOR input without rebuilding the whole tree."""
+    mat = _resolve_owning_material(material_props, context)
     if not mat or not mat.use_nodes or not mat.node_tree:
         return
-    if getattr(mat, 'tlm', None) is not material_props:
-        # Active material isn't this one — fall back to scanning all materials.
-        # Rare case (e.g. property edit via Python on a non-active material).
-        for m in bpy.data.materials:
-            if getattr(m, 'tlm', None) is material_props:
-                mat = m
-                break
-        else:
-            return
     bsdf = next((n for n in mat.node_tree.nodes if n.type == 'BSDF_PRINCIPLED'), None)
     if bsdf is None:
         return
     ior_in = bsdf.inputs.get("IOR")
-    if ior_in is None:
+    if ior_in is None or ior_in.is_linked:
         return
-    if not ior_in.is_linked:
-        ior_in.default_value = material_props.bsdf_ior
+    ior_in.default_value = material_props.bsdf_ior
 
 
 def _on_proc_color_stop_change(stop, context):
-    """Edge case: a TLM_ProcColorStop lives inside TLM_LayerItem.proc_extra_color_stops,
-    which lives on a Material. We need to find which layer owns this stop and trigger
-    a hot proc_color update on it. We do this by walking up via context.
-
-    Falls back to a debounced full rebuild if the hot path can't find the right ColorRamp
-    (e.g. element count mismatch after add/remove).
+    """A TLM_ProcColorStop lives inside TLM_LayerItem.proc_extra_color_stops
+    which lives on a Material. Find owner via id_data (the Material), then
+    walk its layers to find which one owns this stop (by as_pointer match).
     """
     try:
         from . import compositing
@@ -440,26 +426,32 @@ def _on_proc_color_stop_change(stop, context):
         import importlib
         compositing = importlib.import_module(__package__ + ".compositing")
 
-    # Find owning layer & material from context. If we can't, do nothing.
-    obj = getattr(context, 'object', None)
-    if not obj:
-        return
-    mat = obj.active_material if hasattr(obj, 'active_material') else None
-    if not mat or not hasattr(mat, 'tlm'):
-        return
+    # The stop's id_data IS the Material that owns it via the layer chain.
+    # This works because PropertyGroups inside CollectionProperty inside
+    # PropertyGroup attached to a Material still report the Material as
+    # id_data.
+    try:
+        mat = stop.id_data
+    except (AttributeError, ReferenceError):
+        mat = None
+    if mat is None or not isinstance(mat, bpy.types.Material) or not hasattr(mat, 'tlm'):
+        # Fallback: try the active object's material
+        obj = getattr(context, 'object', None)
+        mat = obj.active_material if (obj and hasattr(obj, 'active_material')) else None
+        if not mat:
+            return
 
-    # Walk material's layers and find the one whose collection includes us
+    target_ptr = stop.as_pointer()
     for layer in mat.tlm.layers:
         if getattr(layer, 'layer_type', '') != 'PROCEDURAL':
             continue
         for s in getattr(layer, 'proc_extra_color_stops', []):
-            if s.as_pointer() == stop.as_pointer():
+            if s.as_pointer() == target_ptr:
                 nt = mat.node_tree
                 if nt is None:
                     return
                 ok = compositing._hot_proc_color(nt, layer, "proc_extra_color_stops")
                 if not ok:
-                    # Element count changed (add/remove) — full rebuild
                     compositing.rebuild_node_tree(mat)
                 return
 
