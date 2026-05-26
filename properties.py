@@ -307,6 +307,71 @@ LAYER_TYPES = [
 ]
 
 
+# ─── Extra color stops on a procedural ColorRamp ──────────────────────────
+# In addition to the always-present Color1/Color2 (+ optional Color3),
+# a PROCEDURAL layer can carry N extra colour stops here. Each entry
+# is one ColorRamp element with its own colour + position. The build
+# path in _build_procedural_node iterates this collection and appends
+# each stop to the ColorRamp. Hot updates re-thread the elements
+# without rebuilding the whole graph.
+
+class TLM_ProcColorStop(PropertyGroup):
+    """A single extra ColorRamp stop (color + position) on a PROCEDURAL layer."""
+
+    color: bpy.props.FloatVectorProperty(
+        name="Color",
+        description="Colour applied at this stop position",
+        subtype='COLOR', min=0.0, max=1.0, size=4,
+        default=(0.5, 0.5, 0.5, 1.0),
+        update=lambda self, ctx: _on_proc_color_stop_change(self, ctx),
+    )
+    position: FloatProperty(
+        name="Position",
+        description="Position of this stop along the ColorRamp (0..1). "
+                    "Blender sorts stops internally — order doesn't matter.",
+        default=0.5, min=0.0, max=1.0, subtype='FACTOR',
+        update=lambda self, ctx: _on_proc_color_stop_change(self, ctx),
+    )
+
+
+def _on_proc_color_stop_change(stop, context):
+    """Edge case: a TLM_ProcColorStop lives inside TLM_LayerItem.proc_extra_color_stops,
+    which lives on a Material. We need to find which layer owns this stop and trigger
+    a hot proc_color update on it. We do this by walking up via context.
+
+    Falls back to a debounced full rebuild if the hot path can't find the right ColorRamp
+    (e.g. element count mismatch after add/remove).
+    """
+    try:
+        from . import compositing
+    except ImportError:
+        import importlib
+        compositing = importlib.import_module(__package__ + ".compositing")
+
+    # Find owning layer & material from context. If we can't, do nothing.
+    obj = getattr(context, 'object', None)
+    if not obj:
+        return
+    mat = obj.active_material if hasattr(obj, 'active_material') else None
+    if not mat or not hasattr(mat, 'tlm'):
+        return
+
+    # Walk material's layers and find the one whose collection includes us
+    for layer in mat.tlm.layers:
+        if getattr(layer, 'layer_type', '') != 'PROCEDURAL':
+            continue
+        for s in getattr(layer, 'proc_extra_color_stops', []):
+            if s.as_pointer() == stop.as_pointer():
+                nt = mat.node_tree
+                if nt is None:
+                    return
+                ok = compositing._hot_proc_color(nt, layer, "proc_extra_color_stops")
+                if not ok:
+                    # Element count changed (add/remove) — full rebuild
+                    compositing.rebuild_node_tree(mat)
+                return
+
+
 # â”€â”€â”€ Single Layer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class TLM_LayerItem(PropertyGroup):
@@ -1575,6 +1640,19 @@ class TLM_LayerItem(PropertyGroup):
         update=_make_hot_callback("proc_color_ramp_interpolation"),
     )
 
+    # ── Extra ColorRamp stops (beyond Color1 / Color2 / Color3) ──
+    # A user-managed list of additional stops layered on top of the
+    # legacy 2-or-3-color model. Each stop is a TLM_ProcColorStop with
+    # its own colour + position. The build path appends each to the
+    # ColorRamp after Color1/Color2(/Color3). UIList in the panel with
+    # tlm.add_proc_color_stop / tlm.remove_proc_color_stop operators.
+    proc_extra_color_stops: bpy.props.CollectionProperty(type=TLM_ProcColorStop)
+    proc_active_color_stop_index: IntProperty(
+        name="Active Stop",
+        description="Index of the currently selected extra color stop in the list",
+        default=0, min=0,
+    )
+
     # Noise / Musgrave
     proc_detail: FloatProperty(
         name="Detail", description="Number of noise octaves â€” more detail means finer grain",
@@ -2201,6 +2279,7 @@ class TLM_MaterialProperties(PropertyGroup):
 # â”€â”€â”€ Registration â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 classes = [
+    TLM_ProcColorStop,   # MUST register before TLM_LayerItem (it's the type= for the CollectionProperty)
     TLM_LayerItem,
     TLM_MaterialProperties,
 ]

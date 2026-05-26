@@ -204,6 +204,11 @@ def _layer_to_dict(layer):
         d["proc_color_ramp_interpolation"] = getattr(
             layer, 'proc_color_ramp_interpolation', 'LINEAR'
         )
+        # Extra colour stops (collection of {color, position})
+        d["proc_extra_color_stops"] = [
+            {"color": list(s.color), "position": round(s.position, 4)}
+            for s in getattr(layer, 'proc_extra_color_stops', [])
+        ]
         # Feature A â€” Advanced coordinates (POLAR / SPHERICAL / SWIRL / CYLINDRICAL)
         d["proc_coord_transform"]  = getattr(layer, 'proc_coord_transform', 'NONE')
         d["proc_swirl_amount"]     = round(getattr(layer, 'proc_swirl_amount', 2.0), 4)
@@ -459,6 +464,12 @@ def _dict_to_layer(d, tlm):
         layer.proc_color_ramp_interpolation = d.get(
             "proc_color_ramp_interpolation", "LINEAR"
         )
+        # Extra colour stops — clear then re-populate
+        layer.proc_extra_color_stops.clear()
+        for s in d.get("proc_extra_color_stops", []):
+            item = layer.proc_extra_color_stops.add()
+            item.color = s.get("color", [0.5, 0.5, 0.5, 1.0])
+            item.position = s.get("position", 0.5)
         # Feature A â€” Advanced coordinates
         layer.proc_coord_transform  = d.get("proc_coord_transform", "NONE")
         layer.proc_swirl_amount     = d.get("proc_swirl_amount", 2.0)

@@ -388,6 +388,21 @@ def _draw_procedural(col, active, tlm):
     else:
         c3r.label(text="Color 3")
 
+    # Extra color stops (proc_extra_color_stops collection).
+    # Each row: color picker + Pos slider + per-row "X" delete button.
+    # Below the list: "+ Add Color Stop" wide button.
+    # The X button passes the row's index to the operator so it knows
+    # which stop to remove — no need to fiddle with the active index
+    # ourselves.
+    for idx, stop in enumerate(active.proc_extra_color_stops):
+        sr = col.row(align=True)
+        sr.prop(stop, "color", text="")
+        sr.prop(stop, "position", text=f"Pos {idx + 4}", slider=True)
+        del_op = sr.operator("tlm.remove_proc_color_stop", text="", icon='X')
+        del_op.index = idx
+    add_row = col.row(align=True)
+    add_row.operator("tlm.add_proc_color_stop", text="Add Color Stop", icon='ADD')
+
     # Color mode + interpolation enums — apply 1:1 to ShaderNodeValToRGB.
     # Shown for all proc types that use a ColorRamp (i.e. not the
     # Mix-topology procs Stripes / Hex Grid — those bypass ColorRamp).

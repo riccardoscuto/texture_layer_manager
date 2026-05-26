@@ -192,6 +192,120 @@ class TLM_OT_AddReferenceLayer(Operator):
         return {'FINISHED'}
 
 
+class TLM_OT_AddProcColorStop(Operator):
+    """Add a new colour stop to the active procedural layer's ColorRamp.
+
+    The new stop is inserted at the midpoint between the existing
+    Color1 and Color2 positions, so the user sees an immediate change
+    without having to set position manually. Stops can later be dragged
+    via the position slider — Blender's ColorRamp sorts them internally.
+    """
+    bl_idname = "tlm.add_proc_color_stop"
+    bl_label = "Add Color Stop"
+    bl_description = "Add an extra ColorRamp stop to the active procedural layer"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        mat = _get_material(context)
+        if mat is None or mat.tlm.shader_editable:
+            return False
+        active = mat.tlm.active_layer
+        return active is not None and active.layer_type == 'PROCEDURAL'
+
+    def execute(self, context):
+        mat = _get_material(context)
+        layer = mat.tlm.active_layer
+        if layer is None or layer.layer_type != 'PROCEDURAL':
+            self.report({'ERROR'}, "Active layer is not a procedural layer")
+            return {'CANCELLED'}
+
+        # Insert at the midpoint of the current Color1 / Color2 positions
+        # so the user sees the stop fall between them. Default colour is
+        # the average of color1 and color2 — visually a "smooth midstop".
+        if getattr(layer, 'proc_use_manual_stops', False):
+            p1 = layer.proc_color1_position
+            p2 = layer.proc_color2_position
+        else:
+            from .. import compositing as _comp
+            contrast = layer.proc_contrast
+            center = layer.proc_ramp_center
+            p1, p2 = _comp._ramp_stops(contrast, center)
+        new_pos = max(0.001, min(0.999, (p1 + p2) * 0.5))
+        c1 = layer.proc_color1
+        c2 = layer.proc_color2
+        avg_color = (
+            (c1[0] + c2[0]) * 0.5,
+            (c1[1] + c2[1]) * 0.5,
+            (c1[2] + c2[2]) * 0.5,
+            1.0,
+        )
+
+        stop = layer.proc_extra_color_stops.add()
+        stop.position = new_pos
+        stop.color = avg_color
+        layer.proc_active_color_stop_index = len(layer.proc_extra_color_stops) - 1
+
+        # Element count changed → need full rebuild (hot_proc_color returns
+        # False on element-count mismatch, but doing it directly is cleaner).
+        if mat.tlm.auto_composite:
+            compositing.rebuild_node_tree(mat)
+
+        self.report({'INFO'}, f"Added color stop at {new_pos:.2f}")
+        return {'FINISHED'}
+
+
+class TLM_OT_RemoveProcColorStop(Operator):
+    """Remove the active extra color stop from the active procedural layer."""
+    bl_idname = "tlm.remove_proc_color_stop"
+    bl_label = "Remove Color Stop"
+    bl_description = "Remove the extra ColorRamp stop at the given index"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    # When invoked from the per-row X button the panel sets this index
+    # directly. When invoked with the default -1 we fall back to the
+    # active_color_stop_index property on the layer.
+    index: IntProperty(
+        name="Stop Index",
+        description="Index of the stop to remove (-1 = use the layer's active index)",
+        default=-1,
+    )
+
+    @classmethod
+    def poll(cls, context):
+        mat = _get_material(context)
+        if mat is None or mat.tlm.shader_editable:
+            return False
+        active = mat.tlm.active_layer
+        if active is None or active.layer_type != 'PROCEDURAL':
+            return False
+        return len(active.proc_extra_color_stops) > 0
+
+    def execute(self, context):
+        mat = _get_material(context)
+        layer = mat.tlm.active_layer
+        if layer is None or layer.layer_type != 'PROCEDURAL':
+            return {'CANCELLED'}
+
+        idx = self.index if self.index >= 0 else layer.proc_active_color_stop_index
+        if idx < 0 or idx >= len(layer.proc_extra_color_stops):
+            self.report({'WARNING'}, "Invalid stop index")
+            return {'CANCELLED'}
+
+        layer.proc_extra_color_stops.remove(idx)
+        # Clamp the active index to a valid value after removal
+        new_count = len(layer.proc_extra_color_stops)
+        if new_count > 0:
+            layer.proc_active_color_stop_index = min(idx, new_count - 1)
+        else:
+            layer.proc_active_color_stop_index = 0
+
+        if mat.tlm.auto_composite:
+            compositing.rebuild_node_tree(mat)
+
+        return {'FINISHED'}
+
+
 class TLM_OT_RemoveLayer(Operator):
     """Remove the active layer (image datablock is kept in bpy.data)."""
     bl_idname = "tlm.remove_layer"
@@ -392,6 +506,8 @@ classes = [
     TLM_OT_AddAdjustmentLayer,
     TLM_OT_AddProceduralLayer,
     TLM_OT_AddReferenceLayer,
+    TLM_OT_AddProcColorStop,
+    TLM_OT_RemoveProcColorStop,
     TLM_OT_RemoveLayer,
     TLM_OT_MoveLayer,
     TLM_OT_DuplicateLayer,

@@ -632,6 +632,12 @@ class TLM_OT_ApplyPreset(Operator):
                 layer.proc_color_ramp_interpolation = ld.get(
                     "proc_color_ramp_interpolation", "LINEAR"
                 )
+                # Extra colour stops collection — clear then re-populate
+                layer.proc_extra_color_stops.clear()
+                for s in ld.get("proc_extra_color_stops", []):
+                    item = layer.proc_extra_color_stops.add()
+                    item.color = s.get("color", [0.5, 0.5, 0.5, 1.0])
+                    item.position = s.get("position", 0.5)
                 # Feature A â€” Advanced coordinates
                 layer.proc_coord_transform  = ld.get("proc_coord_transform", "NONE")
                 layer.proc_swirl_amount     = ld.get("proc_swirl_amount", 2.0)
@@ -900,6 +906,11 @@ class TLM_OT_SavePreset(Operator):
                 d["proc_color_ramp_interpolation"] = getattr(
                     layer, 'proc_color_ramp_interpolation', 'LINEAR'
                 )
+                # Extra colour stops (variable count, each {color, position})
+                d["proc_extra_color_stops"] = [
+                    {"color": list(s.color), "position": s.position}
+                    for s in getattr(layer, 'proc_extra_color_stops', [])
+                ]
             elif layer.layer_type == "ADJUSTMENT":
                 d.update({
                     "adj_type": layer.adj_type,

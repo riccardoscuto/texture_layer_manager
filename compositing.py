@@ -1058,6 +1058,18 @@ def _ramp_stops(contrast, center=0.5):
 def _hot_proc_color(node_tree, layer, prop_name):
     nodes = _find_all_tagged(node_tree, layer.name, "proc_cr")
     if nodes:
+        # Element count check: refuse hot update if the ColorRamp
+        # element count doesn't match the expected count from the
+        # layer's data (color1 + color2 + [color3] + N extras). When
+        # the user adds or removes a stop, _on_proc_color_stop_change
+        # falls through to a full rebuild.
+        has_c3 = getattr(layer, 'use_proc_color3', False)
+        extras = list(getattr(layer, 'proc_extra_color_stops', []))
+        expected_count = 2 + (1 if has_c3 else 0) + len(extras)
+        for cr in nodes:
+            if len(cr.color_ramp.elements) != expected_count:
+                return False  # Topology changed → caller will rebuild
+
         for cr in nodes:
             elems = cr.color_ramp.elements
             elems = sorted((elem for elem in elems), key=lambda elem: elem.position)
@@ -1067,9 +1079,14 @@ def _hot_proc_color(node_tree, layer, prop_name):
             # Two stop-position modes — keep them in sync with the build
             # path in _build_procedural_node so hot updates stay accurate.
             if getattr(layer, 'proc_use_manual_stops', False) and layer.proc_type != 'GRADIENT':
-                stop_lo = max(0.0, min(0.998, getattr(layer, 'proc_color1_position', 0.0)))
-                stop_hi = max(stop_lo + 0.001,
-                              min(1.0, getattr(layer, 'proc_color2_position', 1.0)))
+                # Manual mode: positions as-is, swap allowed (Blender's
+                # ColorRamp re-sorts internally). Only nudge apart if
+                # EXACTLY equal to prevent stop merging.
+                pos1 = max(0.0, min(1.0, getattr(layer, 'proc_color1_position', 0.0)))
+                pos2 = max(0.0, min(1.0, getattr(layer, 'proc_color2_position', 1.0)))
+                if abs(pos1 - pos2) < 1e-4:
+                    pos2 = min(1.0, pos1 + 0.001)
+                stop_lo, stop_hi = pos1, pos2
             else:
                 contrast = getattr(layer, 'proc_contrast', 0.5)
                 center = getattr(layer, 'proc_ramp_center', 0.5)
@@ -1083,11 +1100,27 @@ def _hot_proc_color(node_tree, layer, prop_name):
             elems[0].color = layer.proc_color1
             elems[1].position = stop_hi
             elems[1].color = layer.proc_color2
+            # Track which elems we've consumed so far so the extras loop
+            # below picks up from the next available slot. With color3
+            # disabled the extras start at index 2; with color3 enabled
+            # they start at index 3.
+            cursor = 2
             if getattr(layer, 'use_proc_color3', False) and len(elems) >= 3:
-                elems[2].position = _clamped_ramp_position(layer.proc_color3_position)
-                elems[2].color = layer.proc_color3
+                elems[cursor].position = _clamped_ramp_position(layer.proc_color3_position)
+                elems[cursor].color = layer.proc_color3
+                cursor += 1
             elif getattr(layer, 'use_proc_color3', False) and len(elems) < 3:
                 return False  # element count mismatch — need rebuild
+
+            # Update any extra user-defined stops. We rely on element-count
+            # match (verified at top of this function) so the index-zip
+            # is safe.
+            for extra in extras:
+                if cursor >= len(elems):
+                    break
+                elems[cursor].position = _clamped_ramp_position(extra.position)
+                elems[cursor].color = extra.color
+                cursor += 1
 
             # color_mode + interpolation are also live-updatable
             try:
@@ -4983,8 +5016,15 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
     #       stop positions via _ramp_stops(). This is the legacy
     #       artist-friendly model where contrast = band sharpness.
     if getattr(layer, 'proc_use_manual_stops', False) and layer.proc_type != 'GRADIENT':
-        stop_lo = max(0.0, min(0.998, getattr(layer, 'proc_color1_position', 0.0)))
-        stop_hi = max(stop_lo + 0.001, min(1.0, getattr(layer, 'proc_color2_position', 1.0)))
+        # Manual mode: positions used as-is. Blender's ColorRamp sorts
+        # elements internally by position, so swapping Pos1 and Pos2
+        # just flips the gradient direction (no clamping/merging).
+        # Only nudge apart if EXACTLY equal so Blender doesn't merge them.
+        pos1 = max(0.0, min(1.0, getattr(layer, 'proc_color1_position', 0.0)))
+        pos2 = max(0.0, min(1.0, getattr(layer, 'proc_color2_position', 1.0)))
+        if abs(pos1 - pos2) < 1e-4:
+            pos2 = min(1.0, pos1 + 0.001)
+        stop_lo, stop_hi = pos1, pos2
     else:
         contrast = getattr(layer, 'proc_contrast', 0.5)
         center = getattr(layer, 'proc_ramp_center', 0.5)
@@ -5000,6 +5040,14 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
     if getattr(layer, 'use_proc_color3', False):
         el = cr.color_ramp.elements.new(_clamped_ramp_position(layer.proc_color3_position))
         el.color = layer.proc_color3
+
+    # Extra user-defined colour stops (proc_extra_color_stops collection).
+    # Each entry contributes one ColorRamp element. Blender's ColorRamp
+    # sorts elements by position internally, so the user can append
+    # stops in any order — the visual gradient remains correct.
+    for extra in getattr(layer, 'proc_extra_color_stops', []):
+        el = cr.color_ramp.elements.new(_clamped_ramp_position(extra.position))
+        el.color = extra.color
 
     # Apply ColorRamp color_mode + interpolation. Guarded with try/except
     # because rare Blender versions may rename these or restrict enum values.
