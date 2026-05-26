@@ -1048,7 +1048,13 @@ def _build_proc_color_ramp(node_tree, layer, x, y, fac_out):
     _tag(cr, layer.name, "proc_cr")
 
     # Stop positions: two modes — Manual or computed-from-contrast.
-    if getattr(layer, 'proc_use_manual_stops', False) and layer.proc_type != 'GRADIENT':
+    # GRADIENT + FRESNEL force contrast=0, center=0.5 so the ColorRamp
+    # stops sit at the full 0..1 range. Without this, Fresnel.Fac (which
+    # follows Schlick's non-linear distribution — most pixels concentrate
+    # below 0.255 except at grazing angles) maps almost entirely to
+    # color1 and color2 is never visible. Treating Fresnel like a real
+    # gradient gives the expected face-to-edge sweep with user-set IOR.
+    if getattr(layer, 'proc_use_manual_stops', False) and layer.proc_type not in ('GRADIENT', 'FRESNEL'):
         pos1 = max(0.0, min(1.0, getattr(layer, 'proc_color1_position', 0.0)))
         pos2 = max(0.0, min(1.0, getattr(layer, 'proc_color2_position', 1.0)))
         if abs(pos1 - pos2) < 1e-4:
@@ -1057,7 +1063,7 @@ def _build_proc_color_ramp(node_tree, layer, x, y, fac_out):
     else:
         contrast = getattr(layer, 'proc_contrast', 0.5)
         center = getattr(layer, 'proc_ramp_center', 0.5)
-        if layer.proc_type == 'GRADIENT':
+        if layer.proc_type in ('GRADIENT', 'FRESNEL'):
             contrast = 0.0
             center = 0.5
         stop_lo, stop_hi = _ramp_stops(contrast, center)
@@ -1126,7 +1132,9 @@ def _hot_proc_color(node_tree, layer, prop_name):
         pairs = []  # list of (pos, color) tuples
 
         # Stop positions for color1 + color2 — manual or computed.
-        if getattr(layer, 'proc_use_manual_stops', False) and layer.proc_type != 'GRADIENT':
+        # Same special-case as the build path: GRADIENT and FRESNEL bypass
+        # contrast/center to give a full 0..1 sweep.
+        if getattr(layer, 'proc_use_manual_stops', False) and layer.proc_type not in ('GRADIENT', 'FRESNEL'):
             pos1 = max(0.0, min(1.0, getattr(layer, 'proc_color1_position', 0.0)))
             pos2 = max(0.0, min(1.0, getattr(layer, 'proc_color2_position', 1.0)))
             if abs(pos1 - pos2) < 1e-4:
@@ -1136,7 +1144,7 @@ def _hot_proc_color(node_tree, layer, prop_name):
         else:
             contrast = getattr(layer, 'proc_contrast', 0.5)
             center = getattr(layer, 'proc_ramp_center', 0.5)
-            if layer.proc_type == 'GRADIENT':
+            if layer.proc_type in ('GRADIENT', 'FRESNEL'):
                 contrast = 0.0
                 center = 0.5
             stop_lo, stop_hi = _ramp_stops(contrast, center)
@@ -1346,6 +1354,24 @@ def _hot_fresnel(node_tree, layer, prop_name):
     if fstr:
         fstr.inputs[1].default_value = getattr(layer, 'fresnel_strength', 1.0)
     return True
+
+
+def _hot_proc_fresnel_ior(node_tree, layer, prop_name):
+    """Update the IOR of a Fresnel PROCEDURAL's tex node without rebuilding.
+    The proc_type='FRESNEL' build path tags the Fresnel node as 'proc_tex'
+    (shared tag with other procedural tex nodes), so a layer can have at
+    most one Fresnel proc_tex. Update both color + scalar fac paths.
+    """
+    if getattr(layer, 'proc_type', '') != 'FRESNEL':
+        return False
+    ior = getattr(layer, 'proc_fresnel_ior', 1.45)
+    nodes = _find_all_tagged(node_tree, layer.name, "proc_tex")
+    found = False
+    for n in nodes:
+        if n.bl_idname == 'ShaderNodeFresnel' and "IOR" in n.inputs:
+            n.inputs["IOR"].default_value = ior
+            found = True
+    return found  # False if no Fresnel proc_tex found → fall back to rebuild
 
 
 def _hot_mask_fresnel_ior(node_tree, layer, prop_name):
@@ -1751,6 +1777,7 @@ _HOT_DISPATCH = {
     "fresnel_ior": _hot_fresnel,
     "fresnel_strength": _hot_fresnel,
     "mask_fresnel_ior": _hot_mask_fresnel_ior,
+    "proc_fresnel_ior": _hot_proc_fresnel_ior,
     "mask_wireframe_size": _hot_mask_wireframe,
     "mask_wireframe_use_pixel_size": _hot_mask_wireframe,
     "normal_strength": _hot_normal_strength,
@@ -6342,7 +6369,10 @@ def _build_proc_fac_node(node_tree, layer, name_suffix, x, y, uv_map="UVMap"):
         # fac for scalar channels (roughness, metallic, bump) so iridescent-
         # style angle-dependent values can also drive non-colour channels.
         tex = node_tree.nodes.new("ShaderNodeFresnel")
+        tex.name = f"{TLM_PREFIX}pfac_fresnel_{name_suffix}"
+        tex.location = (x - 100, y)
         tex.inputs["IOR"].default_value = getattr(layer, 'proc_fresnel_ior', 1.45)
+        _tag(tex, layer.name, "proc_tex")  # so _hot_proc_fresnel_ior can find it
         fac_out = tex.outputs["Fac"]
 
     elif pt == 'DOTS':
