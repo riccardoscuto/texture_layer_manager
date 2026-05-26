@@ -445,6 +445,11 @@ class TLM_OT_ApplyPreset(Operator):
         _ensure_nodes(mat)
         tlm = mat.tlm
 
+        # Default empty material props — overwritten by file-based presets
+        # below. BUILTIN_PRESETS are pure layer lists with no material-level
+        # data, so they keep this default.
+        preset_material = {}
+
         preset_layers = BUILTIN_PRESETS.get(self.preset_name)
         if not preset_layers:
             # Try user presets directory

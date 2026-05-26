@@ -367,9 +367,11 @@ def _draw_procedural(col, active, tlm):
     # compute the stops automatically (default artist-friendly model).
     use_manual = getattr(active, 'proc_use_manual_stops', False)
     proc_t = active.proc_type
-    # GRADIENT is forced to a 0..1 ramp internally; manual stops would
-    # break the GRADIENT semantics, so hide the manual toggle there.
-    manual_supported = proc_t != 'GRADIENT'
+    # GRADIENT and FRESNEL are forced to a 0..1 ramp internally so the
+    # full sweep is always visible — Manual Stops would break their
+    # semantics, so the toggle (and Pos 1 / Pos 2 sliders) are hidden.
+    # Contrast + Ramp Center are also hidden for these types below.
+    manual_supported = proc_t not in ('GRADIENT', 'FRESNEL')
 
     cr = col.row(align=True)
     cr.prop(active, "proc_color1", text="")
@@ -614,9 +616,9 @@ def _draw_procedural(col, active, tlm):
 
     # Contrast controls the ColorRamp stop positions. Hidden for the proc
     # types that bypass the ramp (CHECKER / BRICK / MAGIC output Color
-    # directly) and for GRADIENT where it's already a clean linear ramp
-    # and contrast adds nothing useful.
-    if active.proc_type not in ('CHECKER', 'GRADIENT', 'BRICK', 'MAGIC'):
+    # directly) and for GRADIENT + FRESNEL where contrast is forced to 0
+    # in the build path so the full ramp sweep is always available.
+    if active.proc_type not in ('CHECKER', 'GRADIENT', 'BRICK', 'MAGIC', 'FRESNEL'):
         cr_row = col.row(align=True)
         # Contrast + Ramp Center are auto-computed stop positions.
         # When Manual Stops is enabled (proc_use_manual_stops=True),
