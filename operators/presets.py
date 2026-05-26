@@ -459,6 +459,7 @@ class TLM_OT_ApplyPreset(Operator):
                                     f"Invalid preset file: top-level must be an object")
                         return {'CANCELLED'}
                     preset_layers = data.get("layers", [])
+                    preset_material = data.get("material", {})
                 except (ValueError, OSError, TypeError) as e:
                     self.report({'ERROR'}, f"Invalid preset file: {e}")
                     return {'CANCELLED'}
@@ -473,6 +474,36 @@ class TLM_OT_ApplyPreset(Operator):
 
         if not self.merge:
             tlm.layers.clear()
+
+        # Apply material-level properties (IOR, Volume Abs/Scatter, etc).
+        # Built-in presets and pre-material-block .tlm files have no
+        # 'material' key — defaults make those continue to load fine.
+        if isinstance(preset_material, dict) and preset_material:
+            if 'bsdf_ior' in preset_material:
+                tlm.bsdf_ior = preset_material['bsdf_ior']
+            if 'use_volume_absorption' in preset_material:
+                tlm.use_volume_absorption = preset_material['use_volume_absorption']
+            if 'volume_absorption_color' in preset_material:
+                tlm.volume_absorption_color = preset_material['volume_absorption_color']
+            if 'volume_absorption_density' in preset_material:
+                tlm.volume_absorption_density = preset_material['volume_absorption_density']
+            if 'use_volume_scatter' in preset_material:
+                tlm.use_volume_scatter = preset_material['use_volume_scatter']
+            if 'volume_scatter_color' in preset_material:
+                tlm.volume_scatter_color = preset_material['volume_scatter_color']
+            if 'volume_scatter_density' in preset_material:
+                tlm.volume_scatter_density = preset_material['volume_scatter_density']
+            if 'volume_scatter_anisotropy' in preset_material:
+                tlm.volume_scatter_anisotropy = preset_material['volume_scatter_anisotropy']
+            if 'use_emission_output' in preset_material:
+                tlm.use_emission_output = preset_material['use_emission_output']
+            if 'use_base_color_alpha' in preset_material:
+                tlm.use_base_color_alpha = preset_material['use_base_color_alpha']
+            if 'alpha_blend_method' in preset_material:
+                try:
+                    tlm.alpha_blend_method = preset_material['alpha_blend_method']
+                except (TypeError, ValueError):
+                    pass  # unknown enum value — keep default
 
         # Per-layer apply isolated in a closure so a single malformed entry
         # can be rolled back without aborting the whole preset import.
@@ -1012,7 +1043,31 @@ class TLM_OT_SavePreset(Operator):
                 d["alpha_image_name"]        = getattr(layer, 'alpha_image_name', "")
             layers_data.append(d)
 
-        data = {"preset_name": self.preset_name, "layers": layers_data}
+        # Capture material-level properties too — IOR, Volume Absorption /
+        # Scatter, alpha modes, emission output toggle. Without these the
+        # round-trip drops crucial physical material settings (an ice
+        # preset that goes IOR 1.31 + Volume Abs would round-trip to
+        # glass-1.45 with no volume).
+        material_props = {
+            "bsdf_ior":                       getattr(tlm, 'bsdf_ior', 1.45),
+            "use_volume_absorption":          getattr(tlm, 'use_volume_absorption', False),
+            "volume_absorption_color":        list(getattr(tlm, 'volume_absorption_color',
+                                                           (0.55, 0.75, 0.95, 1.0))),
+            "volume_absorption_density":      getattr(tlm, 'volume_absorption_density', 1.0),
+            "use_volume_scatter":             getattr(tlm, 'use_volume_scatter', False),
+            "volume_scatter_color":           list(getattr(tlm, 'volume_scatter_color',
+                                                           (0.92, 0.96, 1.0, 1.0))),
+            "volume_scatter_density":         getattr(tlm, 'volume_scatter_density', 0.5),
+            "volume_scatter_anisotropy":      getattr(tlm, 'volume_scatter_anisotropy', 0.0),
+            "use_emission_output":            getattr(tlm, 'use_emission_output', False),
+            "use_base_color_alpha":           getattr(tlm, 'use_base_color_alpha', False),
+            "alpha_blend_method":             getattr(tlm, 'alpha_blend_method', 'AUTO'),
+        }
+        data = {
+            "preset_name": self.preset_name,
+            "material": material_props,
+            "layers": layers_data,
+        }
         filepath = os.path.join(preset_dir, f"{self.preset_name}.tlm")
         try:
             with open(filepath, 'w') as f:

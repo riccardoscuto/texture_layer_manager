@@ -620,6 +620,24 @@ class TLM_OT_ExportJSON(Operator):
             "material":    mat.name,
             "resolution":  tlm.resolution,
             "uv_map":      tlm.uv_map,
+            # Material-level physical / channel settings — without these
+            # an exported .tlm round-trip loses IOR + Volume Abs/Scatter
+            # + emission output toggle, breaking ice / gem / anime presets.
+            "material_props": {
+                "bsdf_ior":                  getattr(tlm, 'bsdf_ior', 1.45),
+                "use_volume_absorption":     getattr(tlm, 'use_volume_absorption', False),
+                "volume_absorption_color":   list(getattr(tlm, 'volume_absorption_color',
+                                                          (0.55, 0.75, 0.95, 1.0))),
+                "volume_absorption_density": getattr(tlm, 'volume_absorption_density', 1.0),
+                "use_volume_scatter":        getattr(tlm, 'use_volume_scatter', False),
+                "volume_scatter_color":      list(getattr(tlm, 'volume_scatter_color',
+                                                          (0.92, 0.96, 1.0, 1.0))),
+                "volume_scatter_density":    getattr(tlm, 'volume_scatter_density', 0.5),
+                "volume_scatter_anisotropy": getattr(tlm, 'volume_scatter_anisotropy', 0.0),
+                "use_emission_output":       getattr(tlm, 'use_emission_output', False),
+                "use_base_color_alpha":      getattr(tlm, 'use_base_color_alpha', False),
+                "alpha_blend_method":        getattr(tlm, 'alpha_blend_method', 'AUTO'),
+            },
             "layers":      [_layer_to_dict(l) for l in tlm.layers],
         }
 
@@ -688,6 +706,30 @@ class TLM_OT_ImportJSON(Operator):
         if not self.merge:
             # Clear existing layers
             tlm.layers.clear()
+
+        # Apply material-level properties if present. Old .tlm files (no
+        # material_props block) fall through with defaults — fully
+        # backward-compatible.
+        mp = data.get("material_props", {})
+        if isinstance(mp, dict) and mp:
+            for prop_name, default in (
+                ('bsdf_ior',                       1.45),
+                ('use_volume_absorption',          False),
+                ('volume_absorption_color',        None),
+                ('volume_absorption_density',      1.0),
+                ('use_volume_scatter',             False),
+                ('volume_scatter_color',           None),
+                ('volume_scatter_density',         0.5),
+                ('volume_scatter_anisotropy',      0.0),
+                ('use_emission_output',            False),
+                ('use_base_color_alpha',           False),
+                ('alpha_blend_method',             'AUTO'),
+            ):
+                if prop_name in mp:
+                    try:
+                        setattr(tlm, prop_name, mp[prop_name])
+                    except (TypeError, ValueError):
+                        pass  # unknown enum value or invalid type — keep default
 
         imported = 0
         skipped = 0
