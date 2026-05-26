@@ -158,7 +158,7 @@ class TLM_OT_AddReferenceLayer(Operator):
         # Need at least one non-REFERENCE layer to reference
         if mat is None or mat.tlm.shader_editable:
             return False
-        return any(l.layer_type != "REFERENCE" for l in mat.tlm.layers)
+        return any(l.layer_type in {"PAINT", "FILL", "PROCEDURAL"} for l in mat.tlm.layers)
 
     def execute(self, context):
         mat = _get_material(context)

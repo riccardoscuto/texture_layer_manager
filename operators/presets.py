@@ -122,14 +122,14 @@ BUILTIN_PRESETS = {
          "use_bump": True, "bump_strength": 0.2, "bump_distance": 0.008},
     ],
 
-    # ── Reference material recreations ────────────────────────────────────────
+    # â”€â”€ Reference material recreations â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     # Ten materials from a common PBR reference grid: candy, rock, planet, etc.
-    # All use only TLM procedural layers — no external textures needed.
+    # All use only TLM procedural layers â€” no external textures needed.
     # Blend mode rules used throughout:
-    #   Screen  → color1=black(passthrough), color2=bright → adds highlights
-    #   Multiply → color1=white(passthrough), color2=dark → adds shadows/dirt
-    #   MIX     → full pattern replacement (color1 at fac=0, color2 at fac=1)
-    #   Overlay → contrast enhancement (darks darker, lights lighter)
+    #   Screen  â†’ color1=black(passthrough), color2=bright â†’ adds highlights
+    #   Multiply â†’ color1=white(passthrough), color2=dark â†’ adds shadows/dirt
+    #   MIX     â†’ full pattern replacement (color1 at fac=0, color2 at fac=1)
+    #   Overlay â†’ contrast enhancement (darks darker, lights lighter)
 
     "Blue Marble": [
         # Polished deep-blue stone base
@@ -145,7 +145,7 @@ BUILTIN_PRESETS = {
          "proc_color1": [0.02, 0.04, 0.18, 1.0],
          "proc_color2": [0.08, 0.14, 0.48, 1.0],
          "opacity": 0.60, "blend_mode": "MIX"},
-        # White veins — Screen: black areas pass through (keep blue), bright=white veins
+        # White veins â€” Screen: black areas pass through (keep blue), bright=white veins
         {"name": "Marble White Veins", "type": "PROCEDURAL", "proc_type": "NOISE",
          "proc_scale": 1.5, "proc_detail": 14.0,
          "proc_roughness_proc": 0.8, "proc_distortion": 2.5,
@@ -176,7 +176,7 @@ BUILTIN_PRESETS = {
          "proc_color2": [0.65, 0.22, 0.08, 1.0],
          "opacity": 0.80, "blend_mode": "Overlay",
          "use_roughness": True, "roughness_fill": 0.88},
-        # Rock crevices — Multiply: white=passthrough, dark shadow at noise peaks
+        # Rock crevices â€” Multiply: white=passthrough, dark shadow at noise peaks
         {"name": "Mars Crevice", "type": "PROCEDURAL", "proc_type": "NOISE",
          "proc_scale": 7.0, "proc_detail": 4.0,
          "proc_roughness_proc": 0.5, "proc_distortion": 1.2,
@@ -184,7 +184,7 @@ BUILTIN_PRESETS = {
          "proc_color2": [0.18, 0.04, 0.01, 1.0],
          "opacity": 0.55, "blend_mode": "Multiply",
          "use_bump": True, "bump_strength": 0.9, "bump_distance": 0.06},
-        # Fine dust — Screen: adds lighter dust highlights on surfaces
+        # Fine dust â€” Screen: adds lighter dust highlights on surfaces
         {"name": "Mars Dust", "type": "PROCEDURAL", "proc_type": "NOISE",
          "proc_scale": 14.0, "proc_detail": 2.0,
          "proc_roughness_proc": 0.4, "proc_distortion": 0.3,
@@ -200,15 +200,15 @@ BUILTIN_PRESETS = {
          "opacity": 1.0, "blend_mode": "MIX",
          "use_roughness": True, "roughness_fill": 0.92,
          "use_metallic": True, "metallic_fill": 0.0},
-        # Light bands — Screen adds bright band highlights
-        # Note: BANDS direction is X in TLM. Rotate object 90° for horizontal bands.
+        # Light bands â€” Screen adds bright band highlights
+        # Note: BANDS direction is X in TLM. Rotate object 90Â° for horizontal bands.
         {"name": "Saturn Light Bands", "type": "PROCEDURAL", "proc_type": "WAVE",
          "proc_wave_type": "BANDS", "proc_scale": 6.0,
          "proc_distortion": 0.8, "proc_detail": 4.0, "proc_wave_detail_scale": 1.5,
          "proc_color1": [0.0, 0.0, 0.0, 0.0],
          "proc_color2": [0.82, 0.70, 0.38, 1.0],
          "opacity": 0.65, "blend_mode": "Screen"},
-        # Dark bands — Multiply darkens periodic zones
+        # Dark bands â€” Multiply darkens periodic zones
         {"name": "Saturn Dark Bands", "type": "PROCEDURAL", "proc_type": "WAVE",
          "proc_wave_type": "BANDS", "proc_scale": 11.0,
          "proc_distortion": 1.2, "proc_detail": 3.0, "proc_wave_detail_scale": 2.0,
@@ -243,7 +243,7 @@ BUILTIN_PRESETS = {
          "proc_color2": [0.92, 0.78, 0.05, 1.0],
          "opacity": 1.0, "blend_mode": "MIX",
          "use_roughness": True, "roughness_fill": 0.08},
-        # Glaze highlights — Screen adds white glint at Voronoi cell boundaries
+        # Glaze highlights â€” Screen adds white glint at Voronoi cell boundaries
         {"name": "Jawbreaker Glaze", "type": "PROCEDURAL", "proc_type": "VORONOI",
          "proc_scale": 8.0, "proc_voronoi_feature": "F1", "proc_randomness": 0.6,
          "proc_color1": [0.0, 0.0, 0.0, 0.0],
@@ -259,14 +259,14 @@ BUILTIN_PRESETS = {
          "use_roughness": True, "roughness_fill": 0.72,
          "use_metallic": True, "metallic_fill": 0.0,
          "use_transmission": True, "transmission_fill": 0.08},
-        # Internal mineral inclusions — Multiply: white=passthrough, grey=darker veins
+        # Internal mineral inclusions â€” Multiply: white=passthrough, grey=darker veins
         {"name": "Quartz Inclusions", "type": "PROCEDURAL", "proc_type": "NOISE",
          "proc_scale": 5.5, "proc_detail": 10.0,
          "proc_roughness_proc": 0.7, "proc_distortion": 0.8,
          "proc_color1": [1.0, 1.0, 1.0, 1.0],
          "proc_color2": [0.35, 0.33, 0.30, 1.0],
          "opacity": 0.55, "blend_mode": "Multiply"},
-        # Crystal facet glints — Screen adds bright spots at Voronoi cell centers
+        # Crystal facet glints â€” Screen adds bright spots at Voronoi cell centers
         {"name": "Quartz Glints", "type": "PROCEDURAL", "proc_type": "VORONOI",
          "proc_scale": 12.0, "proc_randomness": 0.7, "proc_voronoi_feature": "F1",
          "proc_color1": [0.0, 0.0, 0.0, 0.0],
@@ -291,7 +291,7 @@ BUILTIN_PRESETS = {
          "opacity": 0.85, "blend_mode": "Overlay",
          "use_roughness": True, "roughness_fill": 0.85,
          "use_bump": True, "bump_strength": 1.0, "bump_distance": 0.06},
-        # Snow coverage — MIX: rock-color areas = no snow, white = snow patches
+        # Snow coverage â€” MIX: rock-color areas = no snow, white = snow patches
         # Increase proc_scale for denser snow, decrease for larger snow fields
         {"name": "Snow Coverage", "type": "PROCEDURAL", "proc_type": "NOISE",
          "proc_scale": 1.8, "proc_detail": 3.0,
@@ -309,7 +309,7 @@ BUILTIN_PRESETS = {
          "opacity": 1.0, "blend_mode": "MIX",
          "use_roughness": True, "roughness_fill": 0.50,
          "use_metallic": True, "metallic_fill": 1.0},
-        # Panel variation — Voronoi F1 creates panel-like cell regions + bump seams
+        # Panel variation â€” Voronoi F1 creates panel-like cell regions + bump seams
         {"name": "Greeble Panels", "type": "PROCEDURAL", "proc_type": "VORONOI",
          "proc_scale": 2.5, "proc_voronoi_feature": "F1", "proc_randomness": 0.5,
          "proc_color1": [0.20, 0.20, 0.22, 1.0],
@@ -317,7 +317,7 @@ BUILTIN_PRESETS = {
          "opacity": 0.60, "blend_mode": "MIX",
          "use_roughness": True, "roughness_fill": 0.30,
          "use_bump": True, "bump_strength": 0.7, "bump_distance": 0.025},
-        # Grime and wear — Multiply darkens random surface areas
+        # Grime and wear â€” Multiply darkens random surface areas
         {"name": "Greeble Grime", "type": "PROCEDURAL", "proc_type": "NOISE",
          "proc_scale": 3.0, "proc_detail": 5.0,
          "proc_roughness_proc": 0.8, "proc_distortion": 1.0,
@@ -325,7 +325,7 @@ BUILTIN_PRESETS = {
          "proc_color2": [0.10, 0.10, 0.12, 1.0],
          "opacity": 0.45, "blend_mode": "Multiply",
          "use_roughness": True, "roughness_fill": 0.75},
-        # Tech-light accents — Voronoi emission dots at cell centers
+        # Tech-light accents â€” Voronoi emission dots at cell centers
         {"name": "Greeble Lights", "type": "PROCEDURAL", "proc_type": "VORONOI",
          "proc_scale": 8.0, "proc_voronoi_feature": "F1", "proc_randomness": 0.3,
          "proc_color1": [0.0, 0.0, 0.0, 0.0],
@@ -336,14 +336,14 @@ BUILTIN_PRESETS = {
     ],
 
     "Candy Corn": [
-        # Waxy yellow base — the main body color
+        # Waxy yellow base â€” the main body color
         {"name": "Candy Yellow", "type": "FILL",
          "fill_color": [0.95, 0.72, 0.08, 1.0],
          "opacity": 1.0, "blend_mode": "MIX",
          "use_roughness": True, "roughness_fill": 0.28,
          "use_metallic": True, "metallic_fill": 0.0},
-        # Orange band — Wave BANDS create periodic stripes along X axis
-        # Note: use OBJECT coords + rotate mesh 90° to align bands with candy corn height
+        # Orange band â€” Wave BANDS create periodic stripes along X axis
+        # Note: use OBJECT coords + rotate mesh 90Â° to align bands with candy corn height
         {"name": "Candy Orange Band", "type": "PROCEDURAL", "proc_type": "WAVE",
          "proc_wave_type": "BANDS", "proc_scale": 2.2,
          "proc_distortion": 0.0, "proc_detail": 0.0, "proc_wave_detail_scale": 0.0,
@@ -351,7 +351,7 @@ BUILTIN_PRESETS = {
          "proc_color1": [0.90, 0.38, 0.04, 1.0],
          "proc_color2": [0.95, 0.72, 0.08, 1.0],
          "opacity": 1.0, "blend_mode": "MIX"},
-        # White tip — finer wave creates the narrow white section at the point
+        # White tip â€” finer wave creates the narrow white section at the point
         {"name": "Candy White Tip", "type": "PROCEDURAL", "proc_type": "WAVE",
          "proc_wave_type": "BANDS", "proc_scale": 4.8,
          "proc_distortion": 0.0, "proc_detail": 0.0, "proc_wave_detail_scale": 0.0,
@@ -368,8 +368,8 @@ BUILTIN_PRESETS = {
          "opacity": 1.0, "blend_mode": "MIX",
          "use_roughness": True, "roughness_fill": 0.92,
          "use_metallic": True, "metallic_fill": 0.0},
-        # Brick faces — Checker alternates between brick-white and mortar-grey
-        # Note: Checker is square (1:1). Real bricks are 2:1 offset — use UV scale for ratio.
+        # Brick faces â€” Checker alternates between brick-white and mortar-grey
+        # Note: Checker is square (1:1). Real bricks are 2:1 offset â€” use UV scale for ratio.
         {"name": "Brick Faces", "type": "PROCEDURAL", "proc_type": "CHECKER",
          "proc_scale": 8.0,
          "proc_color1": [0.85, 0.84, 0.82, 1.0],
@@ -401,7 +401,7 @@ BUILTIN_PRESETS = {
          "proc_color1": [0.92, 0.10, 0.10, 1.0],
          "proc_color2": [0.08, 0.18, 0.92, 1.0],
          "opacity": 1.0, "blend_mode": "MIX"},
-        # Green swirl arm — Screen: dark areas pass through, bright=adds green
+        # Green swirl arm â€” Screen: dark areas pass through, bright=adds green
         {"name": "Lolly Green Swirl", "type": "PROCEDURAL", "proc_type": "MARBLE",
          "proc_scale": 3.0, "proc_detail": 2.0,
          "proc_roughness_proc": 0.3, "proc_distortion": 1.8,
@@ -482,13 +482,13 @@ class TLM_OT_ApplyPreset(Operator):
             layer.layer_type = ld.get("type", "FILL")
             layer.opacity    = ld.get("opacity", 1.0)
             layer.visible    = ld.get("visible", True)
-            # GROUP layers are always root-level — discard any stray parent
+            # GROUP layers are always root-level â€” discard any stray parent
             # so a hand-edited preset can't produce a nested-group state.
             _raw_group = ld.get("group_name", "")
             layer.group_name = "" if layer.layer_type == "GROUP" else _raw_group
             layer.collapsed  = ld.get("collapsed", False)
             layer.use_clipping_mask = ld.get("use_clipping_mask", False)
-            # Routing — restore output_channel; legacy 'AUTO' maps to 'BASE_COLOR'
+            # Routing â€” restore output_channel; legacy 'AUTO' maps to 'BASE_COLOR'
             _out_ch = ld.get("output_channel", "BASE_COLOR")
             if _out_ch == "AUTO":
                 _out_ch = "BASE_COLOR"
@@ -496,7 +496,7 @@ class TLM_OT_ApplyPreset(Operator):
                 layer.output_channel = _out_ch
             except (TypeError, ValueError):
                 layer.output_channel = "BASE_COLOR"
-            # Branching — per-channel blend mode overrides
+            # Branching â€” per-channel blend mode overrides
             layer.blend_mode_base_color   = ld.get("blend_mode_base_color",   "INHERIT")
             layer.blend_mode_roughness    = ld.get("blend_mode_roughness",    "INHERIT")
             layer.blend_mode_metallic     = ld.get("blend_mode_metallic",     "INHERIT")
@@ -616,6 +616,7 @@ class TLM_OT_ApplyPreset(Operator):
                 layer.proc_marble_bands_direction = ld.get("proc_marble_bands_direction", "X")
                 layer.proc_marble_rings_direction = ld.get("proc_marble_rings_direction", "X")
                 layer.proc_contrast         = ld.get("proc_contrast", 0.5)
+                layer.proc_ramp_center      = ld.get("proc_ramp_center", 0.5)
                 layer.proc_vector_distortion= ld.get("proc_vector_distortion", 0.0)
                 layer.proc_coord_type       = ld.get("proc_coord_type", "GENERATED")
                 layer.proc_emission_threshold = ld.get("proc_emission_threshold", 0.0)
@@ -623,16 +624,24 @@ class TLM_OT_ApplyPreset(Operator):
                 if layer.use_proc_color3:
                     layer.proc_color3          = ld.get("proc_color3", [0.5, 0.5, 0.5, 1])
                     layer.proc_color3_position = ld.get("proc_color3_position", 0.5)
-                # Feature A — Advanced coordinates
+                # ColorRamp controls (manual stops + mode + interpolation)
+                layer.proc_use_manual_stops      = ld.get("proc_use_manual_stops", False)
+                layer.proc_color1_position       = ld.get("proc_color1_position", 0.0)
+                layer.proc_color2_position       = ld.get("proc_color2_position", 1.0)
+                layer.proc_color_ramp_mode       = ld.get("proc_color_ramp_mode", "RGB")
+                layer.proc_color_ramp_interpolation = ld.get(
+                    "proc_color_ramp_interpolation", "LINEAR"
+                )
+                # Feature A â€” Advanced coordinates
                 layer.proc_coord_transform  = ld.get("proc_coord_transform", "NONE")
                 layer.proc_swirl_amount     = ld.get("proc_swirl_amount", 2.0)
-                # Feature B — Voronoi random per cell
+                # Feature B â€” Voronoi random per cell
                 layer.proc_voronoi_random_color = ld.get("proc_voronoi_random_color", False)
                 layer.proc_voronoi_random_seed  = ld.get("proc_voronoi_random_seed", 0.0)
             elif layer.layer_type == "REFERENCE":
                 layer.reference_layer_name = ld.get("reference_layer_name", "")
             elif layer.layer_type == "ADJUSTMENT":
-                # CURVES was removed in favour of LEVELS+BRIGHT_CONTRAST —
+                # CURVES was removed in favour of LEVELS+BRIGHT_CONTRAST â€”
                 # remap legacy presets so they still load without error.
                 adj_t = ld.get("adj_type", "HUE_SAT")
                 if adj_t == "CURVES":
@@ -659,10 +668,12 @@ class TLM_OT_ApplyPreset(Operator):
                 layer.fresnel_strength  = ld.get("fresnel_strength", 1.0)
                 layer.use_mask          = ld.get("use_mask", False)
                 layer.mask_image_name   = ld.get("mask_image_name", "")
-                # Feature C — Advanced combinable masks
+                # Feature C â€” Advanced combinable masks
                 layer.mask_source        = ld.get("mask_source", "IMAGE")
                 layer.mask_invert        = ld.get("mask_invert", False)
                 layer.mask_ao_distance   = ld.get("mask_ao_distance", 0.5)
+                layer.mask_wireframe_size = ld.get("mask_wireframe_size", 0.01)
+                layer.mask_wireframe_use_pixel_size = ld.get("mask_wireframe_use_pixel_size", True)
                 layer.use_mask_b         = ld.get("use_mask_b", False)
                 layer.mask_source_b      = ld.get("mask_source_b", "POINTINESS")
                 layer.mask_image_name_b  = ld.get("mask_image_name_b", "")
@@ -670,14 +681,14 @@ class TLM_OT_ApplyPreset(Operator):
                 layer.mask_ao_distance_b = ld.get("mask_ao_distance_b", 0.5)
                 layer.mask_combine       = ld.get("mask_combine", "MULTIPLY")
                 layer.mask_contrast      = ld.get("mask_contrast", 0.5)
-                # Mask refinement — Levels
+                # Mask refinement â€” Levels
                 layer.use_mask_levels     = ld.get("use_mask_levels", False)
                 layer.mask_levels_in_min  = ld.get("mask_levels_in_min", 0.0)
                 layer.mask_levels_in_max  = ld.get("mask_levels_in_max", 1.0)
                 layer.mask_levels_gamma   = ld.get("mask_levels_gamma", 1.0)
                 layer.mask_levels_out_min = ld.get("mask_levels_out_min", 0.0)
                 layer.mask_levels_out_max = ld.get("mask_levels_out_max", 1.0)
-                # Mask refinement — Softness + Blur
+                # Mask refinement â€” Softness + Blur
                 layer.mask_softness       = ld.get("mask_softness", 0.0)
                 layer.mask_blur           = ld.get("mask_blur", 0.0)
                 # Smart generator parameters
@@ -685,7 +696,7 @@ class TLM_OT_ApplyPreset(Operator):
                 layer.mask_gen_breakup       = ld.get("mask_gen_breakup", 0.3)
                 layer.mask_gen_breakup_scale = ld.get("mask_gen_breakup_scale", 15.0)
                 layer.mask_gen_sharpness     = ld.get("mask_gen_sharpness", 0.5)
-                # Image texture mapping config — Triplanar removed in
+                # Image texture mapping config â€” Triplanar removed in
                 # favour of paint_projection='BOX'. Legacy presets carry
                 # use_triplanar, auto-migrate them.
                 layer.paint_interpolation    = ld.get("paint_interpolation", "Linear")
@@ -790,9 +801,9 @@ class TLM_OT_SavePreset(Operator):
                 "collapsed": layer.collapsed,
                 "use_clipping_mask": layer.use_clipping_mask,
             }
-            # Routing — which BSDF input the layer drives
+            # Routing â€” which BSDF input the layer drives
             d["output_channel"]          = getattr(layer, 'output_channel',          'BASE_COLOR')
-            # Branching — per-channel blend mode overrides
+            # Branching â€” per-channel blend mode overrides
             d["blend_mode_base_color"]   = getattr(layer, 'blend_mode_base_color',   'INHERIT')
             d["blend_mode_roughness"]    = getattr(layer, 'blend_mode_roughness',    'INHERIT')
             d["blend_mode_metallic"]     = getattr(layer, 'blend_mode_metallic',     'INHERIT')
@@ -866,20 +877,29 @@ class TLM_OT_SavePreset(Operator):
                     "proc_marble_bands_direction": getattr(layer, 'proc_marble_bands_direction', 'X'),
                     "proc_marble_rings_direction": getattr(layer, 'proc_marble_rings_direction', 'X'),
                     "proc_contrast": layer.proc_contrast,
+                    "proc_ramp_center": getattr(layer, 'proc_ramp_center', 0.5),
                     "proc_vector_distortion": layer.proc_vector_distortion,
                     "proc_coord_type": layer.proc_coord_type,
                     "proc_emission_threshold": getattr(layer, 'proc_emission_threshold', 0.0),
                     "use_proc_color3": getattr(layer, 'use_proc_color3', False),
-                    # Feature A — Advanced coordinate transforms
+                    # Feature A â€” Advanced coordinate transforms
                     "proc_coord_transform": getattr(layer, 'proc_coord_transform', 'NONE'),
                     "proc_swirl_amount":    getattr(layer, 'proc_swirl_amount',    2.0),
-                    # Feature B — Voronoi random per cell
+                    # Feature B â€” Voronoi random per cell
                     "proc_voronoi_random_color": getattr(layer, 'proc_voronoi_random_color', False),
                     "proc_voronoi_random_seed":  getattr(layer, 'proc_voronoi_random_seed',  0.0),
                 })
                 if getattr(layer, 'use_proc_color3', False):
                     d["proc_color3"] = list(layer.proc_color3)
                     d["proc_color3_position"] = layer.proc_color3_position
+                # ColorRamp controls (manual stops + mode + interpolation)
+                d["proc_use_manual_stops"]      = getattr(layer, 'proc_use_manual_stops', False)
+                d["proc_color1_position"]       = getattr(layer, 'proc_color1_position', 0.0)
+                d["proc_color2_position"]       = getattr(layer, 'proc_color2_position', 1.0)
+                d["proc_color_ramp_mode"]       = getattr(layer, 'proc_color_ramp_mode', 'RGB')
+                d["proc_color_ramp_interpolation"] = getattr(
+                    layer, 'proc_color_ramp_interpolation', 'LINEAR'
+                )
             elif layer.layer_type == "ADJUSTMENT":
                 d.update({
                     "adj_type": layer.adj_type,
@@ -904,10 +924,12 @@ class TLM_OT_SavePreset(Operator):
                 d["fresnel_strength"]  = getattr(layer, 'fresnel_strength', 1.0)
                 d["use_mask"]          = layer.use_mask
                 d["mask_image_name"]   = layer.mask_image_name
-                # Feature C — Advanced combinable masks
+                # Feature C â€” Advanced combinable masks
                 d["mask_source"]        = getattr(layer, 'mask_source', 'IMAGE')
                 d["mask_invert"]        = getattr(layer, 'mask_invert', False)
                 d["mask_ao_distance"]   = getattr(layer, 'mask_ao_distance', 0.5)
+                d["mask_wireframe_size"] = getattr(layer, 'mask_wireframe_size', 0.01)
+                d["mask_wireframe_use_pixel_size"] = getattr(layer, 'mask_wireframe_use_pixel_size', True)
                 d["use_mask_b"]         = getattr(layer, 'use_mask_b', False)
                 d["mask_source_b"]      = getattr(layer, 'mask_source_b', 'POINTINESS')
                 d["mask_image_name_b"]  = getattr(layer, 'mask_image_name_b', "")
@@ -915,14 +937,14 @@ class TLM_OT_SavePreset(Operator):
                 d["mask_ao_distance_b"] = getattr(layer, 'mask_ao_distance_b', 0.5)
                 d["mask_combine"]       = getattr(layer, 'mask_combine', 'MULTIPLY')
                 d["mask_contrast"]      = getattr(layer, 'mask_contrast', 0.5)
-                # Mask refinement — Levels
+                # Mask refinement â€” Levels
                 d["use_mask_levels"]     = getattr(layer, 'use_mask_levels', False)
                 d["mask_levels_in_min"]  = getattr(layer, 'mask_levels_in_min', 0.0)
                 d["mask_levels_in_max"]  = getattr(layer, 'mask_levels_in_max', 1.0)
                 d["mask_levels_gamma"]   = getattr(layer, 'mask_levels_gamma', 1.0)
                 d["mask_levels_out_min"] = getattr(layer, 'mask_levels_out_min', 0.0)
                 d["mask_levels_out_max"] = getattr(layer, 'mask_levels_out_max', 1.0)
-                # Mask refinement — Softness + Blur
+                # Mask refinement â€” Softness + Blur
                 d["mask_softness"]       = getattr(layer, 'mask_softness', 0.0)
                 d["mask_blur"]           = getattr(layer, 'mask_blur', 0.0)
                 # Smart generator parameters

@@ -365,6 +365,7 @@ def _add_layer_common(context, layer_type):
         elif active.group_name:
             parent_group = active.group_name
 
+
     layer = tlm.layers.add()
     layer.layer_type = layer_type
     layer.opacity = 1.0

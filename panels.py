@@ -1,5 +1,5 @@
 """
-panels.py — UI for Texture Layer Manager.
+panels.py â€” UI for Texture Layer Manager.
 Properties panel: Properties > Material > Texture Layers
 N-panel:          3D Viewport > N-panel > TLM tab
 
@@ -42,7 +42,7 @@ _PBR_BADGE = {
     'use_bump':         'MOD_DISPLACE',
 }
 
-# Output channel → icon shown next to the layer name in the UIList.
+# Output channel â†’ icon shown next to the layer name in the UIList.
 # Mirrors the routing decision so the user can scan the stack and see
 # which layer drives which BSDF input at a glance.
 _OUTPUT_BADGE = {
@@ -57,8 +57,8 @@ def _is_at_compositor_bottom(active, tlm):
     """True if ``active`` will be the first layer composited in its scope.
 
     The compositor processes ``reversed(tlm.layers)`` (see compositing.py
-    _composite_layer_list and rebuild_node_tree). Within a scope — root
-    (``group_name == ""``) or the same non-empty ``group_name`` — the layer
+    _composite_layer_list and rebuild_node_tree). Within a scope â€” root
+    (``group_name == ""``) or the same non-empty ``group_name`` â€” the layer
     with the highest tlm.layers index is the first to be composited. For
     that layer ``prev_alpha`` is always None, so Clipping Mask silently
     does nothing (see compositing.py _set_factor, clipping branch).
@@ -91,7 +91,7 @@ def _draw_clipping_mask(col, active, tlm):
     col.prop(active, "use_clipping_mask",
              text="Clipping Mask", icon='CLIPUV_DEHLT', toggle=True)
     if active.use_clipping_mask and _is_at_compositor_bottom(active, tlm):
-        col.label(text="No effect — nothing to clip against below",
+        col.label(text="No effect â€” nothing to clip against below",
                   icon='ERROR')
 
 
@@ -123,7 +123,7 @@ class TLM_UL_LayerList(UIList):
             op.layer_index = index
             row.label(text="", icon='FILE_FOLDER')
         elif layer.layer_type == "FILL":
-            # Native color widget — also serves as a quick-edit click target.
+            # Native color widget â€” also serves as a quick-edit click target.
             # Avoids creating .tlm_swatch_* image datablocks that would pollute
             # the bpy.data.images dropdowns used to pick textures elsewhere.
             # scale_x compresses to roughly the same visual width as the paint
@@ -186,7 +186,7 @@ class TLM_UL_LayerList(UIList):
             row.prop(layer, "opacity", text="", slider=True)
         elif layer.layer_type == "ADJUSTMENT":
             # No blend mode (adjustment is destructive on the channel),
-            # but opacity acts as the strength dial — surface it inline
+            # but opacity acts as the strength dial â€” surface it inline
             # so the user can dial without opening the layer settings.
             row.prop(layer, "opacity", text="", slider=True)
 
@@ -297,7 +297,7 @@ def _draw_active_layer(layout, active, tlm, mat):
     hrow = box.row(align=True)
     hrow.label(text=ltype_label, icon=ltype_icon)
     hrow.prop(active, "name", text="", emboss=True)
-    # Solo button removed from here — lives in the UIList row, and after the
+    # Solo button removed from here â€” lives in the UIList row, and after the
     # solo-also-selects fix the active layer == soloed layer when toggled
     # from the list. Showing it here too was redundant.
     hrow.prop(active, "color_tag", text="", icon_only=True)
@@ -314,7 +314,7 @@ def _draw_active_layer(layout, active, tlm, mat):
     elif active.layer_type == "REFERENCE":
         _draw_reference(col, active, tlm)
     elif active.layer_type == "GROUP":
-        # Blend mode + opacity row — group treats its composited output as a
+        # Blend mode + opacity row â€” group treats its composited output as a
         # single layer, so these apply to the entire folder.
         br = col.row(align=True)
         if getattr(active, 'output_channel', 'BASE_COLOR') == 'ALPHA':
@@ -330,7 +330,7 @@ def _draw_active_layer(layout, active, tlm, mat):
             text=f"{len(children)} layer{'s' if len(children) != 1 else ''}  ({n_vis} visible)",
             icon='LAYER_ACTIVE'
         )
-        # Mask section — masks the group's composited output so the mask
+        # Mask section â€” masks the group's composited output so the mask
         # applies uniformly to every child (group mask: one mask shared by
         # the whole folder, applied after children compositing).
         col.separator(factor=0.4)
@@ -357,16 +357,51 @@ def _draw_procedural(col, active, tlm):
     col.separator(factor=0.5)
     col.prop(active, "proc_type")
     col.separator(factor=0.5)
+
+    # ── ColorRamp controls ───────────────────────────────────────────
+    # Color1 + Color2 are always shown side-by-side. Color3 is optional
+    # (toggle). When Manual Stops is enabled, each color also exposes
+    # its own Position slider (under the color picker) so each stop
+    # can be dragged independently, matching a raw ColorRamp's
+    # affordance. When Manual Stops is off, Contrast + Ramp Center
+    # compute the stops automatically (default artist-friendly model).
+    use_manual = getattr(active, 'proc_use_manual_stops', False)
+    proc_t = active.proc_type
+    # GRADIENT is forced to a 0..1 ramp internally; manual stops would
+    # break the GRADIENT semantics, so hide the manual toggle there.
+    manual_supported = proc_t != 'GRADIENT'
+
     cr = col.row(align=True)
     cr.prop(active, "proc_color1", text="")
     cr.prop(active, "proc_color2", text="")
+    if use_manual and manual_supported:
+        pos12 = col.row(align=True)
+        pos12.prop(active, "proc_color1_position", text="Pos 1", slider=True)
+        pos12.prop(active, "proc_color2_position", text="Pos 2", slider=True)
+
     c3r = col.row(align=True)
-    c3r.prop(active, "use_proc_color3", text="", icon='ADD' if not active.use_proc_color3 else 'REMOVE', toggle=True)
+    c3r.prop(active, "use_proc_color3", text="",
+             icon='ADD' if not active.use_proc_color3 else 'REMOVE', toggle=True)
     if active.use_proc_color3:
         c3r.prop(active, "proc_color3", text="")
         c3r.prop(active, "proc_color3_position", text="Pos", slider=True)
     else:
         c3r.label(text="Color 3")
+
+    # Color mode + interpolation enums — apply 1:1 to ShaderNodeValToRGB.
+    # Shown for all proc types that use a ColorRamp (i.e. not the
+    # Mix-topology procs Stripes / Hex Grid — those bypass ColorRamp).
+    uses_color_ramp = proc_t not in ('STRIPES', 'HEX_GRID')
+    if uses_color_ramp:
+        mi_row = col.row(align=True)
+        mi_row.prop(active, "proc_color_ramp_mode", text="")
+        mi_row.prop(active, "proc_color_ramp_interpolation", text="")
+        if manual_supported:
+            ms_row = col.row(align=True)
+            ms_row.prop(active, "proc_use_manual_stops",
+                        text="Manual Stops", toggle=True,
+                        icon='IPO_LINEAR' if not use_manual else 'IPO_CONSTANT')
+
     col.separator(factor=0.5)
 
     pt = active.proc_type
@@ -446,7 +481,7 @@ def _draw_procedural(col, active, tlm):
         col.prop(active, "proc_magic_depth",      text="Depth", slider=True)
         col.prop(active, "proc_magic_distortion", text="Distortion", slider=True)
     elif pt == 'WHITE_NOISE':
-        col.label(text="Pure per-pixel random — no extra params",
+        col.label(text="Pure per-pixel random â€” no extra params",
                   icon='INFO')
     elif pt == 'STRIPES':
         col.prop(active, "proc_stripe_direction", text="Direction")
@@ -464,7 +499,7 @@ def _draw_procedural(col, active, tlm):
         col.label(text="Tip: Randomness=0 gives the cleanest honeycomb",
                   icon='INFO')
     elif pt == 'GABOR':
-        # Anisotropic Gabor noise — directional streak generator.
+        # Anisotropic Gabor noise â€” directional streak generator.
         # Brushed metal: high Anisotropy (0.9-1.0), Frequency 3-5.
         col.prop(active, "proc_gabor_anisotropy", text="Anisotropy", slider=True)
         col.prop(active, "proc_gabor_orientation", text="Orientation")
@@ -482,7 +517,7 @@ def _draw_procedural(col, active, tlm):
         col.label(text="Tip: Radius 0.30, Softness 0.05 = clean polkadots",
                   icon='INFO')
     elif pt == 'RIDGED':
-        # Ridged fractal noise — razor-like crests, ideal for mountains,
+        # Ridged fractal noise â€” razor-like crests, ideal for mountains,
         # rock veins, lightning, crackle. Detail / Lacunarity reuse the
         # shared noise sliders shown above.
         col.prop(active, "proc_detail", text="Detail", slider=True)
@@ -531,7 +566,7 @@ def _draw_procedural(col, active, tlm):
     if active.proc_coord_type == 'OBJECT':
         col.prop(active, "proc_normalize_coords", text="Normalize Scale")
 
-    # ── Coordinate transform (polar / spherical / swirl / cylindrical) ──
+    # â”€â”€ Coordinate transform (polar / spherical / swirl / cylindrical) â”€â”€
     col.prop(active, "proc_coord_transform", text="Transform")
     if active.proc_coord_transform == 'SWIRL':
         col.prop(active, "proc_swirl_amount", slider=True, text="Swirl")
@@ -560,7 +595,15 @@ def _draw_procedural(col, active, tlm):
     # directly) and for GRADIENT where it's already a clean linear ramp
     # and contrast adds nothing useful.
     if active.proc_type not in ('CHECKER', 'GRADIENT', 'BRICK', 'MAGIC'):
-        col.prop(active, "proc_contrast", slider=True)
+        cr_row = col.row(align=True)
+        # Contrast + Ramp Center are auto-computed stop positions.
+        # When Manual Stops is enabled (proc_use_manual_stops=True),
+        # the positions are taken from proc_color1/2_position instead,
+        # so these sliders no longer do anything — grey them out so the
+        # UI honestly reflects state.
+        cr_row.enabled = not getattr(active, 'proc_use_manual_stops', False)
+        cr_row.prop(active, "proc_contrast", slider=True)
+        cr_row.prop(active, "proc_ramp_center", slider=True, text="Center")
     col.prop(active, "proc_vector_distortion", slider=True, text="Vec Distort")
 
     col.separator(factor=0.6)
@@ -613,10 +656,13 @@ def _draw_mask_slot(box, active, slot):
                 box.operator("tlm.add_layer_mask", text="New Image", icon='ADD')
             else:
                 box.label(text="No image selected", icon='INFO')
-    # AO distance slider — raw AO uses it directly; DIRT smart generator
+    # AO distance slider â€” raw AO uses it directly; DIRT smart generator
     # uses it internally as the inverted AO source.
     if src in _AO_DISTANCE_SOURCES:
         box.prop(active, ao_prop, slider=True, text="AO Distance")
+    if src == 'WIREFRAME':
+        box.prop(active, "mask_wireframe_size", slider=True, text="Size")
+        box.prop(active, "mask_wireframe_use_pixel_size", text="Use Pixel Size")
     # POINTINESS, EDGE_WEAR, CURVATURE_SMART: no per-slot parameter.
     # Shared smart-generator tuning shown once below in its own sub-box.
     box.prop(active, inv_prop, text=f"Invert {slot}")
@@ -632,23 +678,23 @@ def _draw_mask_block(col, active):
     UX:
     - When use_mask=False: compact row with only the two add-paths
       ("Add Mask" creates a paintable image; "Bake Smart" runs the smart-mask
-      bake operator). The toggle itself is implicit — both ops set use_mask=True.
+      bake operator). The toggle itself is implicit â€” both ops set use_mask=True.
     - When use_mask=True: collapsible header (show_mask_section) + details box.
       The mask source dropdown lives at the top of the details box.
     """
     if not active.use_mask:
-        # Mask is off — show only the two ways to enable it.
+        # Mask is off â€” show only the two ways to enable it.
         mr = col.row(align=True)
         mr.label(text="", icon='MOD_MASK')
         mr.operator("tlm.add_layer_mask", text="Add Mask", icon='ADD')
         mr.operator("tlm.add_smart_mask", text="Bake Smart Mask", icon='SHADERFX')
         return
 
-    # Mask is on — collapsible header with quick-disable toggle.
+    # Mask is on â€” collapsible header with quick-disable toggle.
     header = col.row(align=True)
     header.prop(
         active, "show_mask_section",
-        text=f"Mask  ·  {active.mask_source.replace('_', ' ').title()}",
+        text=f"Mask  Â·  {active.mask_source.replace('_', ' ').title()}",
         icon='TRIA_DOWN' if active.show_mask_section else 'TRIA_RIGHT',
         emboss=False,
     )
@@ -662,10 +708,10 @@ def _draw_mask_block(col, active):
     # Source dropdown lives at the top of the details box.
     mbox.prop(active, "mask_source", text="Source")
 
-    # ── Mask A ──
+    # â”€â”€ Mask A â”€â”€
     _draw_mask_slot(mbox, active, 'A')
 
-    # ── Smart generator params (visible only when A or B uses a smart source) ──
+    # â”€â”€ Smart generator params (visible only when A or B uses a smart source) â”€â”€
     uses_smart_a = active.mask_source in _SMART_GEN_SOURCES
     uses_smart_b = active.use_mask_b and active.mask_source_b in _SMART_GEN_SOURCES
     if uses_smart_a or uses_smart_b:
@@ -678,7 +724,7 @@ def _draw_mask_block(col, active):
         br.prop(active, "mask_gen_breakup",       slider=True, text="Breakup")
         br.prop(active, "mask_gen_breakup_scale", slider=True, text="Scale")
 
-    # ── Mask B ──
+    # â”€â”€ Mask B â”€â”€
     mbox.separator(factor=0.5)
     mbox.prop(active, "use_mask_b", text="Add Secondary Mask (B)",
               icon='SELECT_EXTEND', toggle=True)
@@ -688,15 +734,15 @@ def _draw_mask_block(col, active):
         _draw_mask_slot(bbox, active, 'B')
         mbox.prop(active, "mask_combine", text="Combine")
 
-    # ── Contrast ──
+    # â”€â”€ Contrast â”€â”€
     mbox.prop(active, "mask_contrast", slider=True, text="Contrast")
 
-    # ── Image-only: Blur ──
+    # â”€â”€ Image-only: Blur â”€â”€
     # Blur taps the UV input, so it only makes sense when the primary source is IMAGE.
     if active.mask_source == 'IMAGE':
         mbox.prop(active, "mask_blur", slider=True, text="Blur")
 
-    # ── Mask Refinement section (Levels + Softness) ──
+    # â”€â”€ Mask Refinement section (Levels + Softness) â”€â”€
     mbox.separator(factor=0.5)
     rrow = mbox.row(align=True)
     rrow.prop(active, "use_mask_levels", text="Levels",
@@ -718,7 +764,7 @@ def _draw_mask_block(col, active):
 
 
 def _draw_reference(col, active, tlm):
-    """Reference layer UI — reuses another layer's pattern with its own blend/mask/channels."""
+    """Reference layer UI â€” reuses another layer's pattern with its own blend/mask/channels."""
     br = col.row(align=True)
     # Alpha uses Shader Math operations instead of artistic colour blends.
     if getattr(active, 'output_channel', 'BASE_COLOR') == 'ALPHA':
@@ -734,7 +780,7 @@ def _draw_reference(col, active, tlm):
     col.prop_search(active, "reference_layer_name",
                     tlm, "layers", text="", icon='LAYER_ACTIVE')
 
-    # Validation hints — user-facing feedback that matches the compositing
+    # Validation hints â€” user-facing feedback that matches the compositing
     # guard rails so they can't accidentally build an invalid graph.
     ref_name = active.reference_layer_name
     if not ref_name:
@@ -751,7 +797,7 @@ def _draw_reference(col, active, tlm):
             col.label(text="Source must be Paint, Fill or Procedural",
                       icon='ERROR')
         else:
-            col.label(text=f"→ {ref.layer_type.title()} pattern reused",
+            col.label(text=f"â†’ {ref.layer_type.title()} pattern reused",
                       icon='CHECKMARK')
 
     col.separator(factor=0.6)
@@ -768,7 +814,7 @@ def _draw_reference(col, active, tlm):
 
     col.separator(factor=0.6)
     # Note: Normal + Bump channels on a REFERENCE layer use this layer's own
-    # image/strength — they do NOT pick up from the referenced pattern.
+    # image/strength â€” they do NOT pick up from the referenced pattern.
     # That's an intentional limitation of the Mix(VECTOR) normal pipeline.
     if getattr(active, 'use_normal', False) or getattr(active, 'use_bump', False):
         col.label(text="Normal/Bump use THIS layer's images, not the reference's",
@@ -780,7 +826,7 @@ def _draw_reference(col, active, tlm):
 
 
 def _draw_adjustment(col, active, tlm):
-    # Target channel — adjustments now route to a specific PBR channel,
+    # Target channel â€” adjustments now route to a specific PBR channel,
     # not just base color. Colour channels (Base Color) accept every
     # adj_type; scalar channels (Roughness / Metallic / Alpha) only get
     # a meaningful effect from BRIGHT_CONTRAST and LEVELS, while
@@ -838,7 +884,7 @@ def _draw_paint_fill(col, active, tlm):
     br.prop(active, "opacity",    text="", slider=True)
     br.operator("tlm.keyframe_opacity", text="", icon='KEYFRAME_HLT',
                 emboss=False).action = 'INSERT'
-    # Output channel routing — quick-select target BSDF input.
+    # Output channel routing â€” quick-select target BSDF input.
     # AUTO (default) preserves the legacy behavior driven by use_<channel>
     # toggles. Any other value bypasses them and sends this layer to a
     # single channel (Base Color / Roughness / Metallic / Alpha).
@@ -855,7 +901,7 @@ def _draw_paint_fill(col, active, tlm):
         ir.label(text=active.image_name, icon='IMAGE_RGB_ALPHA')
         if active.image:
             w, h = active.image.size
-            ir.label(text=f"{w}×{h}")
+            ir.label(text=f"{w}Ã—{h}")
 
     col.separator(factor=0.6)
     _draw_mask_block(col, active)
@@ -869,7 +915,7 @@ def _draw_paint_fill(col, active, tlm):
         fr.prop(active, "fresnel_ior", text="IOR")
         fr.prop(active, "fresnel_strength", text="Str", slider=True)
 
-    # ── Image Mapping (paint + PBR image layers) ────────────────────────────
+    # â”€â”€ Image Mapping (paint + PBR image layers) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     # Collapsible: Source / Interpolation / Projection / Extension plus
     # Location/Rotation/Scale (per-axis). Mirrors the layout of Blender's
     # native ShaderNodeTexImage panel so users moving between addons
@@ -950,7 +996,7 @@ def _draw_pbr_channels(col, layer, tlm):
         bumpr.prop(layer, "bump_strength", text="Str", slider=True)
         bumpr.prop(layer, "bump_distance", text="Dist", slider=True)
 
-    # PBR Channels list — toggles here are ADDITIONAL channels beyond the
+    # PBR Channels list â€” toggles here are ADDITIONAL channels beyond the
     # main "Output" target chosen at the top of the panel. Cumulative
     # semantics: a layer routed to ROUGHNESS with use_metallic=True drives
     # both. base_color is omitted because it has no toggle (only reachable
@@ -1003,7 +1049,7 @@ def _draw_pbr_channels(col, layer, tlm):
                 if layer.layer_type == "PROCEDURAL":
                     pc.prop(layer, "proc_emission_threshold", slider=True, text="Threshold")
                     pc.prop(layer, "proc_emission_falloff", slider=True, text="Falloff")
-                    # ── Selective emission ───────────────────────────
+                    # â”€â”€ Selective emission â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                     # Gates the procedural emission to a subset of regions
                     # (random cells / noise blobs / painted mask) instead
                     # of lighting up the entire procedural pattern.
@@ -1028,7 +1074,7 @@ def _draw_pbr_channels(col, layer, tlm):
             op = ch_row.operator("tlm.add_channel_image", text="", icon='ADD', emboss=False)
             op.channel = ch_id
 
-    # ── Branching: per-channel blend mode overrides ─────────────────────────
+    # â”€â”€ Branching: per-channel blend mode overrides â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     # Shows a collapsible section with 5 dropdowns (one per overridable channel).
     # INHERIT = use the main blend_mode. Any other value = branching override.
     # Only meaningful when at least one channel is enabled.
@@ -1076,11 +1122,11 @@ def _draw_group_assignment(col, active, tlm):
         gc = col.column(align=True)
         gc.scale_y = 0.85
         for g in groups:
-            op = gc.operator("tlm.move_to_group", text=f"→ {g.name}", icon='FILE_FOLDER')
+            op = gc.operator("tlm.move_to_group", text=f"â†’ {g.name}", icon='FILE_FOLDER')
             op.group_name = g.name
 
 
-# Each section is a small standalone draw function — used by both the
+# Each section is a small standalone draw function â€” used by both the
 # Properties-tab and Viewport-sidebar variants of the per-section panels.
 # No wrapper "TLM Settings" panel anymore: each section is a direct
 # sibling sub-panel of the Texture Layers main panel, collapsed by
@@ -1115,7 +1161,7 @@ def _draw_composite_section(layout, tlm):
     comp.prop(tlm, "use_base_color_alpha",
               text="Use Paint Alpha", icon='IMAGE_ALPHA', toggle=True)
     # Eevee transparency mode. AUTO picks Hashed when an alpha layer
-    # exists, Opaque otherwise — the right default 95% of the time.
+    # exists, Opaque otherwise â€” the right default 95% of the time.
     # Manual override for the rare glass / forced-cutout cases.
     comp.prop(tlm, "alpha_blend_method", text="Alpha Mode")
     ops_row = comp.row(align=True)
@@ -1174,8 +1220,8 @@ def _draw_performance_section(layout, tlm):
 
 def _draw_bake_section(layout, tlm):
     bake = layout.column(align=True)
-    bake.operator("tlm.bake_pbr", text="Bake PBR Maps…", icon='EXPORT')
-    op = bake.operator("tlm.bake_pbr", text="PBR Channels…",
+    bake.operator("tlm.bake_pbr", text="Bake PBR Mapsâ€¦", icon='EXPORT')
+    op = bake.operator("tlm.bake_pbr", text="PBR Channelsâ€¦",
                        icon='NODE_COMPOSITING')
     op.preset = 'CUSTOM'
 
@@ -1216,7 +1262,7 @@ def _draw_presets_section(layout, tlm):
             dop = urow.operator("tlm.delete_preset", text="", icon='TRASH')
             dop.preset_name = pname
     layout.operator("tlm.save_preset",
-                    text="Save Current as Preset…", icon='FILE_TICK')
+                    text="Save Current as Presetâ€¦", icon='FILE_TICK')
 
 
 def _draw_io_section(layout, tlm):
@@ -1244,7 +1290,7 @@ class TLM_PT_MainPanel(Panel):
 
 # Each macro-section gets its own collapsible Panel attached as a child
 # of the Texture Layers main panel. Five Panels for the Properties tab,
-# five mirror Panels for the Viewport sidebar — they share the same
+# five mirror Panels for the Viewport sidebar â€” they share the same
 # _draw_*_section helper so behavior stays identical between contexts.
 # All default to CLOSED so the panel doesn't grow visually before the
 # user clicks into a section.
@@ -1280,7 +1326,7 @@ def _make_section_panel(idname, label, icon, parent_id, draw_fn,
     return _Section
 
 
-# ── Properties → Material → child sections ──────────────────────────────
+# â”€â”€ Properties â†’ Material â†’ child sections â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 TLM_PT_PropsCanvas    = _make_section_panel(
     "TLM_PT_props_canvas",    "Canvas",          'IMAGE_DATA',
     "TLM_PT_main_panel", _draw_canvas_section,
@@ -1329,7 +1375,7 @@ class TLM_PT_ViewportPanel(Panel):
         draw_tlm_main(self.layout, context)
 
 
-# ── Viewport sidebar → TLM tab → child sections ─────────────────────────
+# â”€â”€ Viewport sidebar â†’ TLM tab â†’ child sections â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 TLM_PT_ViewCanvas    = _make_section_panel(
     "TLM_PT_view_canvas",    "Canvas",          'IMAGE_DATA',
     "TLM_PT_viewport_panel", _draw_canvas_section,

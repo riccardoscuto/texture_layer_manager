@@ -53,6 +53,40 @@ def _subscribe_msgbus():
     )
 
 
+# ── Depsgraph handler: hot-update NDOTL/NDOTH sun direction ────────────────
+# When the user moves or rotates a Sun light, refresh the baked sun vector
+# in all TLM materials' NDOTL/NDOTH dot-product nodes. Avoids needing to
+# rebuild the entire material on every sun pose change.
+_last_sun_pose = None  # cache the last Sun matrix to detect changes
+
+
+def _on_depsgraph_update_post(scene, depsgraph):
+    """Detect Sun light pose changes and refresh NDOTL/NDOTH nodes."""
+    global _last_sun_pose
+    try:
+        # Find the first Sun in the scene
+        sun_obj = None
+        for obj in scene.objects:
+            if obj.type == 'LIGHT' and obj.data.type == 'SUN':
+                sun_obj = obj
+                break
+        if sun_obj is None:
+            _last_sun_pose = None
+            return
+        # Compute a cheap pose signature (matrix row 2 = the sun direction we care about)
+        z_axis = sun_obj.matrix_world.col[2].to_3d().normalized()
+        pose_signature = (round(z_axis.x, 4), round(z_axis.y, 4), round(z_axis.z, 4))
+        if pose_signature == _last_sun_pose:
+            return  # nothing changed at the precision we care about
+        _last_sun_pose = pose_signature
+        # Sun moved → walk all TLM materials and refresh their baked vectors
+        from . import compositing
+        n = compositing.hot_update_sun_direction()
+        # No print here — too chatty on every depsgraph update
+    except Exception:
+        pass  # never crash the depsgraph from a hot-update handler
+
+
 def register():
     # Print loaded version + module path so the user can verify in the
     # System Console that Blender actually picked up the latest code
@@ -61,6 +95,9 @@ def register():
     for mod in modules:
         mod.register()
     _subscribe_msgbus()
+    # Register depsgraph handler for NDOTL/NDOTH sun hot-update
+    if _on_depsgraph_update_post not in bpy.app.handlers.depsgraph_update_post:
+        bpy.app.handlers.depsgraph_update_post.append(_on_depsgraph_update_post)
 
 
 def unregister():
@@ -71,6 +108,9 @@ def unregister():
     _invalidate_pending = False
 
     bpy.msgbus.clear_by_owner(_msgbus_owner)
+    # Remove depsgraph handler
+    if _on_depsgraph_update_post in bpy.app.handlers.depsgraph_update_post:
+        bpy.app.handlers.depsgraph_update_post.remove(_on_depsgraph_update_post)
     for mod in reversed(modules):
         mod.unregister()
 

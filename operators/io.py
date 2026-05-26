@@ -12,13 +12,13 @@ from ._common import _get_material, _can_edit_tlm_stack, _ensure_nodes, composit
 from .pbr import CHANNEL_INFO
 
 
-# ─── Export / Import JSON ─────────────────────────────────────────────────────
+# â”€â”€â”€ Export / Import JSON â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 def _image_to_png_b64(image):
     """
     Encode a bpy.data.images image as a base64 PNG string.
-    Pure Python — no external deps beyond numpy (already required).
+    Pure Python â€” no external deps beyond numpy (already required).
     """
     if image is None:
         return None
@@ -31,7 +31,7 @@ def _image_to_png_b64(image):
     image.pixels.foreach_get(buf)
     buf = buf.reshape((h, w, 4))
 
-    # Flip vertically (Blender bottom-up → PNG top-down)
+    # Flip vertically (Blender bottom-up â†’ PNG top-down)
     buf = buf[::-1, :, :]
 
     # Convert to uint8
@@ -45,11 +45,11 @@ def _image_to_png_b64(image):
     # PNG signature
     sig = b'\x89PNG\r\n\x1a\n'
 
-    # IHDR — RGBA 8-bit (color type 6)
+    # IHDR â€” RGBA 8-bit (color type 6)
     ihdr_data = struct.pack('>II', w, h) + bytes([8, 6, 0, 0, 0])
     ihdr = png_chunk(b'IHDR', ihdr_data)
 
-    # IDAT — prepend filter byte 0 to each scanline, then compress.
+    # IDAT â€” prepend filter byte 0 to each scanline, then compress.
     # Using numpy to build the raw byte stream is significantly faster than
     # string concatenation in a Python loop on large images.
     filter_col = np.zeros((h, 1), dtype=np.uint8)
@@ -109,9 +109,9 @@ def _layer_to_dict(layer):
         "group_name":        layer.group_name,
         "collapsed":         layer.collapsed,
         "use_clipping_mask": layer.use_clipping_mask,
-        # Routing — which BSDF input this layer drives
+        # Routing â€” which BSDF input this layer drives
         "output_channel":    getattr(layer, 'output_channel', 'BASE_COLOR'),
-        # Branching — per-channel blend mode overrides
+        # Branching â€” per-channel blend mode overrides
         "blend_mode_base_color":   getattr(layer, 'blend_mode_base_color',   'INHERIT'),
         "blend_mode_roughness":    getattr(layer, 'blend_mode_roughness',    'INHERIT'),
         "blend_mode_metallic":     getattr(layer, 'blend_mode_metallic',     'INHERIT'),
@@ -183,6 +183,7 @@ def _layer_to_dict(layer):
         d["proc_wave_phase_offset"]= round(getattr(layer, 'proc_wave_phase_offset', 0.0), 4)
         d["proc_gradient_type"]    = layer.proc_gradient_type
         d["proc_contrast"]         = round(layer.proc_contrast, 4)
+        d["proc_ramp_center"]      = round(getattr(layer, 'proc_ramp_center', 0.5), 4)
         d["proc_vector_distortion"]= round(layer.proc_vector_distortion, 4)
         d["proc_coord_type"]       = layer.proc_coord_type
         d["proc_marble_distortion"]= round(layer.proc_marble_distortion, 4)
@@ -195,15 +196,23 @@ def _layer_to_dict(layer):
         if d["use_proc_color3"]:
             d["proc_color3"]          = list(layer.proc_color3)
             d["proc_color3_position"] = round(layer.proc_color3_position, 4)
-        # Feature A — Advanced coordinates (POLAR / SPHERICAL / SWIRL / CYLINDRICAL)
+        # ColorRamp controls (manual stops + mode + interpolation)
+        d["proc_use_manual_stops"]      = getattr(layer, 'proc_use_manual_stops', False)
+        d["proc_color1_position"]       = round(getattr(layer, 'proc_color1_position', 0.0), 4)
+        d["proc_color2_position"]       = round(getattr(layer, 'proc_color2_position', 1.0), 4)
+        d["proc_color_ramp_mode"]       = getattr(layer, 'proc_color_ramp_mode', 'RGB')
+        d["proc_color_ramp_interpolation"] = getattr(
+            layer, 'proc_color_ramp_interpolation', 'LINEAR'
+        )
+        # Feature A â€” Advanced coordinates (POLAR / SPHERICAL / SWIRL / CYLINDRICAL)
         d["proc_coord_transform"]  = getattr(layer, 'proc_coord_transform', 'NONE')
         d["proc_swirl_amount"]     = round(getattr(layer, 'proc_swirl_amount', 2.0), 4)
-        # Feature B — Voronoi random per cell
+        # Feature B â€” Voronoi random per cell
         d["proc_voronoi_random_color"] = getattr(layer, 'proc_voronoi_random_color', False)
         d["proc_voronoi_random_seed"]  = round(getattr(layer, 'proc_voronoi_random_seed', 0.0), 4)
 
     elif layer.layer_type == "REFERENCE":
-        # Reference layers reuse another layer's pattern — only the source name
+        # Reference layers reuse another layer's pattern â€” only the source name
         # is distinctive; everything else is in the common mask/PBR sections.
         d["reference_layer_name"] = getattr(layer, 'reference_layer_name', "")
 
@@ -230,10 +239,12 @@ def _layer_to_dict(layer):
         d["fresnel_strength"]  = round(getattr(layer, 'fresnel_strength', 1.0), 4)
         d["use_mask"]          = layer.use_mask
         d["mask_image_name"]   = layer.mask_image_name
-        # Feature C — Advanced combinable masks
+        # Feature C â€” Advanced combinable masks
         d["mask_source"]        = getattr(layer, 'mask_source', 'IMAGE')
         d["mask_invert"]        = getattr(layer, 'mask_invert', False)
         d["mask_ao_distance"]   = round(getattr(layer, 'mask_ao_distance', 0.5), 4)
+        d["mask_wireframe_size"] = round(getattr(layer, 'mask_wireframe_size', 0.01), 4)
+        d["mask_wireframe_use_pixel_size"] = getattr(layer, 'mask_wireframe_use_pixel_size', True)
         d["use_mask_b"]         = getattr(layer, 'use_mask_b', False)
         d["mask_source_b"]      = getattr(layer, 'mask_source_b', 'POINTINESS')
         d["mask_image_name_b"]  = getattr(layer, 'mask_image_name_b', "")
@@ -241,14 +252,14 @@ def _layer_to_dict(layer):
         d["mask_ao_distance_b"] = round(getattr(layer, 'mask_ao_distance_b', 0.5), 4)
         d["mask_combine"]       = getattr(layer, 'mask_combine', 'MULTIPLY')
         d["mask_contrast"]      = round(getattr(layer, 'mask_contrast', 0.5), 4)
-        # Mask refinement — Levels (input range + gamma + output range)
+        # Mask refinement â€” Levels (input range + gamma + output range)
         d["use_mask_levels"]     = getattr(layer, 'use_mask_levels', False)
         d["mask_levels_in_min"]  = round(getattr(layer, 'mask_levels_in_min', 0.0), 4)
         d["mask_levels_in_max"]  = round(getattr(layer, 'mask_levels_in_max', 1.0), 4)
         d["mask_levels_gamma"]   = round(getattr(layer, 'mask_levels_gamma', 1.0), 4)
         d["mask_levels_out_min"] = round(getattr(layer, 'mask_levels_out_min', 0.0), 4)
         d["mask_levels_out_max"] = round(getattr(layer, 'mask_levels_out_max', 1.0), 4)
-        # Mask refinement — Softness + Blur
+        # Mask refinement â€” Softness + Blur
         d["mask_softness"]       = round(getattr(layer, 'mask_softness', 0.0), 4)
         d["mask_blur"]           = round(getattr(layer, 'mask_blur', 0.0), 4)
         # Smart-generator parameters (shared across EDGE_WEAR/DIRT/CURVATURE_SMART)
@@ -258,7 +269,7 @@ def _layer_to_dict(layer):
         d["mask_gen_sharpness"]      = round(getattr(layer, 'mask_gen_sharpness', 0.5), 4)
         # Image texture mapping config (Source / Interpolation /
         # Projection / Extension + Box blend). Triplanar used to live
-        # here as a custom feature — now replaced by paint_projection
+        # here as a custom feature â€” now replaced by paint_projection
         # = 'BOX' which uses Blender's native triplanar.
         d["paint_interpolation"]    = getattr(layer, 'paint_interpolation', 'Linear')
         d["paint_projection"]       = getattr(layer, 'paint_projection', 'FLAT')
@@ -314,16 +325,16 @@ def _dict_to_layer(d, tlm):
     layer.locked     = d.get("locked", False)
     layer.opacity    = d.get("opacity", 1.0)
     # Use the shared blend-mode normaliser so legacy .tlm files saved
-    # in TLM ≤ 0.3 (title-case names like "Screen") don't silently
+    # in TLM â‰¤ 0.3 (title-case names like "Screen") don't silently
     # collapse to MIX. operators/presets.py also goes through this.
     layer.blend_mode = _normalize_blend_mode(d.get("blend_mode"))
-    # GROUP layers are always root-level — discard any stray parent to
+    # GROUP layers are always root-level â€” discard any stray parent to
     # block nested-group states from arriving via external files.
     _raw_group = d.get("group_name", "")
     layer.group_name = "" if layer.layer_type == "GROUP" else _raw_group
     layer.collapsed         = d.get("collapsed", False)
     layer.use_clipping_mask = d.get("use_clipping_mask", False)
-    # Routing — default BASE_COLOR keeps pre-routing presets working.
+    # Routing â€” default BASE_COLOR keeps pre-routing presets working.
     # Legacy 'AUTO' (older builds) falls through to BASE_COLOR via the
     # alias in _layer_contributes_to.
     _out_ch = d.get("output_channel", "BASE_COLOR")
@@ -333,7 +344,7 @@ def _dict_to_layer(d, tlm):
         layer.output_channel = _out_ch
     except (TypeError, ValueError):
         layer.output_channel = "BASE_COLOR"
-    # Branching — per-channel blend mode overrides (INHERIT default = backward-compat)
+    # Branching â€” per-channel blend mode overrides (INHERIT default = backward-compat)
     layer.blend_mode_base_color   = d.get("blend_mode_base_color",   "INHERIT")
     layer.blend_mode_roughness    = d.get("blend_mode_roughness",    "INHERIT")
     layer.blend_mode_metallic     = d.get("blend_mode_metallic",     "INHERIT")
@@ -352,7 +363,7 @@ def _dict_to_layer(d, tlm):
             img = _png_b64_to_image(img_data, img_name, 0, 0)
             layer.image_name = img.name
         else:
-            # No pixel data — create blank image
+            # No pixel data â€” create blank image
             res = int(tlm.resolution)
             img = bpy.data.images.new(img_name, width=res, height=res, alpha=True)
             img.pixels[:] = [0.0] * (res * res * 4)
@@ -364,8 +375,8 @@ def _dict_to_layer(d, tlm):
 
     elif layer.layer_type == "PROCEDURAL":
         # Back-compat migrations for removed proc_types/props:
-        # • CLOUDS was merged into NOISE (identical underlying node).
-        # • proc_checker_scale was merged into the shared proc_scale.
+        # â€¢ CLOUDS was merged into NOISE (identical underlying node).
+        # â€¢ proc_checker_scale was merged into the shared proc_scale.
         _proc_type_raw = d.get("proc_type", "NOISE")
         if _proc_type_raw == "CLOUDS":
             _proc_type_raw = "NOISE"
@@ -427,6 +438,7 @@ def _dict_to_layer(d, tlm):
         layer.proc_wave_phase_offset= d.get("proc_wave_phase_offset", 0.0)
         layer.proc_gradient_type    = d.get("proc_gradient_type", "LINEAR")
         layer.proc_contrast         = d.get("proc_contrast", 0.5)
+        layer.proc_ramp_center      = d.get("proc_ramp_center", 0.5)
         layer.proc_vector_distortion= d.get("proc_vector_distortion", 0.0)
         layer.proc_coord_type       = d.get("proc_coord_type", "GENERATED")
         layer.proc_marble_distortion= d.get("proc_marble_distortion", 5.0)
@@ -439,10 +451,18 @@ def _dict_to_layer(d, tlm):
         if layer.use_proc_color3:
             layer.proc_color3          = d.get("proc_color3", [0.5, 0.5, 0.5, 1])
             layer.proc_color3_position = d.get("proc_color3_position", 0.5)
-        # Feature A — Advanced coordinates
+        # ColorRamp controls (manual stops + mode + interpolation)
+        layer.proc_use_manual_stops      = d.get("proc_use_manual_stops", False)
+        layer.proc_color1_position       = d.get("proc_color1_position", 0.0)
+        layer.proc_color2_position       = d.get("proc_color2_position", 1.0)
+        layer.proc_color_ramp_mode       = d.get("proc_color_ramp_mode", "RGB")
+        layer.proc_color_ramp_interpolation = d.get(
+            "proc_color_ramp_interpolation", "LINEAR"
+        )
+        # Feature A â€” Advanced coordinates
         layer.proc_coord_transform  = d.get("proc_coord_transform", "NONE")
         layer.proc_swirl_amount     = d.get("proc_swirl_amount", 2.0)
-        # Feature B — Voronoi random per cell
+        # Feature B â€” Voronoi random per cell
         layer.proc_voronoi_random_color = d.get("proc_voronoi_random_color", False)
         layer.proc_voronoi_random_seed  = d.get("proc_voronoi_random_seed", 0.0)
 
@@ -450,7 +470,7 @@ def _dict_to_layer(d, tlm):
         layer.reference_layer_name = d.get("reference_layer_name", "")
 
     elif layer.layer_type == "ADJUSTMENT":
-        # CURVES was removed in favour of LEVELS+BRIGHT_CONTRAST — remap
+        # CURVES was removed in favour of LEVELS+BRIGHT_CONTRAST â€” remap
         # legacy presets so they still load without an enum error.
         adj_t = d.get("adj_type", "HUE_SAT")
         if adj_t == "CURVES":
@@ -478,10 +498,12 @@ def _dict_to_layer(d, tlm):
         layer.fresnel_strength  = d.get("fresnel_strength", 1.0)
         layer.use_mask          = d.get("use_mask", False)
         layer.mask_image_name   = d.get("mask_image_name", "")
-        # Feature C — Advanced combinable masks
+        # Feature C â€” Advanced combinable masks
         layer.mask_source        = d.get("mask_source", "IMAGE")
         layer.mask_invert        = d.get("mask_invert", False)
         layer.mask_ao_distance   = d.get("mask_ao_distance", 0.5)
+        layer.mask_wireframe_size = d.get("mask_wireframe_size", 0.01)
+        layer.mask_wireframe_use_pixel_size = d.get("mask_wireframe_use_pixel_size", True)
         layer.use_mask_b         = d.get("use_mask_b", False)
         layer.mask_source_b      = d.get("mask_source_b", "POINTINESS")
         layer.mask_image_name_b  = d.get("mask_image_name_b", "")
@@ -489,14 +511,14 @@ def _dict_to_layer(d, tlm):
         layer.mask_ao_distance_b = d.get("mask_ao_distance_b", 0.5)
         layer.mask_combine       = d.get("mask_combine", "MULTIPLY")
         layer.mask_contrast      = d.get("mask_contrast", 0.5)
-        # Mask refinement — Levels
+        # Mask refinement â€” Levels
         layer.use_mask_levels     = d.get("use_mask_levels", False)
         layer.mask_levels_in_min  = d.get("mask_levels_in_min", 0.0)
         layer.mask_levels_in_max  = d.get("mask_levels_in_max", 1.0)
         layer.mask_levels_gamma   = d.get("mask_levels_gamma", 1.0)
         layer.mask_levels_out_min = d.get("mask_levels_out_min", 0.0)
         layer.mask_levels_out_max = d.get("mask_levels_out_max", 1.0)
-        # Mask refinement — Softness + Blur
+        # Mask refinement â€” Softness + Blur
         layer.mask_softness       = d.get("mask_softness", 0.0)
         layer.mask_blur           = d.get("mask_blur", 0.0)
         # Smart generator parameters
@@ -504,7 +526,7 @@ def _dict_to_layer(d, tlm):
         layer.mask_gen_breakup       = d.get("mask_gen_breakup", 0.3)
         layer.mask_gen_breakup_scale = d.get("mask_gen_breakup_scale", 15.0)
         layer.mask_gen_sharpness     = d.get("mask_gen_sharpness", 0.5)
-        # Image texture mapping config — Triplanar removed in favour
+        # Image texture mapping config â€” Triplanar removed in favour
         # of paint_projection='BOX'. Legacy files that still carry
         # use_triplanar=True are auto-migrated below.
         layer.paint_interpolation    = d.get("paint_interpolation", "Linear")
@@ -634,7 +656,7 @@ class TLM_OT_ImportJSON(Operator):
 
         # Schema validation: top-level must be a dict, "layers" must be a list.
         # A malformed file (corrupted, hand-edited, future version) shouldn't
-        # crash Blender — fail soft with a user-visible error.
+        # crash Blender â€” fail soft with a user-visible error.
         if not isinstance(data, dict):
             self.report({'ERROR'}, "Invalid .tlm file: top-level must be an object")
             return {'CANCELLED'}
@@ -683,7 +705,7 @@ class TLM_OT_ImportJSON(Operator):
         return {'FINISHED'}
 
 
-# ─── Layer da Clipboard ───────────────────────────────────────────────────────
+# â”€â”€â”€ Layer da Clipboard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class TLM_OT_LayerFromClipboard(Operator):
     """Create a new layer from an image in the clipboard."""
@@ -718,7 +740,7 @@ class TLM_OT_LayerFromClipboard(Operator):
         # finally block can clean up if an exception fires after the
         # blank image was created but before it gets renamed into a
         # real Clipboard_N layer image. Without this, repeated failed
-        # paste attempts left TLM_Clipboard_Temp / .001 / .002 …
+        # paste attempts left TLM_Clipboard_Temp / .001 / .002 â€¦
         # accumulating in bpy.data.images.
         temp_img = None
         committed = False
