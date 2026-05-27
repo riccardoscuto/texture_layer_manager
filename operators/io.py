@@ -667,6 +667,7 @@ class TLM_OT_ExportJSON(Operator):
                 # + Cycles Displacement node Scale/Midlevel. Without these,
                 # a rocky/brick preset round-trip loses the chunky silhouette.
                 "use_displacement":          getattr(tlm, 'use_displacement', False),
+                "displacement_method":       getattr(tlm, 'displacement_method', 'DISPLACEMENT'),
                 "displacement_strength":     getattr(tlm, 'displacement_strength', 0.1),
                 "displacement_midlevel":     getattr(tlm, 'displacement_midlevel', 0.5),
                 "displacement_adaptive":     getattr(tlm, 'displacement_adaptive', True),
@@ -758,6 +759,7 @@ class TLM_OT_ImportJSON(Operator):
                 ('use_base_color_alpha',           False),
                 ('alpha_blend_method',             'AUTO'),
                 ('use_displacement',               False),
+                ('displacement_method',            'DISPLACEMENT'),
                 ('displacement_strength',          0.1),
                 ('displacement_midlevel',          0.5),
                 ('displacement_adaptive',          True),

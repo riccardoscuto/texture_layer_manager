@@ -511,6 +511,11 @@ class TLM_OT_ApplyPreset(Operator):
                     pass  # unknown enum value — keep default
             if 'use_displacement' in preset_material:
                 tlm.use_displacement = preset_material['use_displacement']
+            if 'displacement_method' in preset_material:
+                try:
+                    tlm.displacement_method = preset_material['displacement_method']
+                except (TypeError, ValueError):
+                    pass
             if 'displacement_strength' in preset_material:
                 tlm.displacement_strength = preset_material['displacement_strength']
             if 'displacement_midlevel' in preset_material:
@@ -1102,6 +1107,7 @@ class TLM_OT_SavePreset(Operator):
             "use_base_color_alpha":           getattr(tlm, 'use_base_color_alpha', False),
             "alpha_blend_method":             getattr(tlm, 'alpha_blend_method', 'AUTO'),
             "use_displacement":               getattr(tlm, 'use_displacement', False),
+            "displacement_method":            getattr(tlm, 'displacement_method', 'DISPLACEMENT'),
             "displacement_strength":          getattr(tlm, 'displacement_strength', 0.1),
             "displacement_midlevel":          getattr(tlm, 'displacement_midlevel', 0.5),
             "displacement_adaptive":          getattr(tlm, 'displacement_adaptive', True),

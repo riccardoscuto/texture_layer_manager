@@ -454,16 +454,20 @@ def _ensure_displacement_setup(mat):
         return
 
     # ── 1. Material displacement method ──
+    # Read user-chosen method from tlm.displacement_method (enum:
+    # BUMP / DISPLACEMENT / BOTH). Defaults to DISPLACEMENT for the
+    # geometric silhouette break that this feature was designed for.
+    desired = getattr(mat.tlm, 'displacement_method', 'DISPLACEMENT')
     # New-style API (Blender 4.x+ / 5.x): mat.displacement_method
     if hasattr(mat, 'displacement_method'):
         try:
-            mat.displacement_method = 'DISPLACEMENT'
+            mat.displacement_method = desired
         except (AttributeError, TypeError, RuntimeError):
             pass
     # Old-style API (pre-4.x): mat.cycles.displacement_method
     elif hasattr(mat, 'cycles') and hasattr(mat.cycles, 'displacement_method'):
         try:
-            mat.cycles.displacement_method = 'DISPLACEMENT'
+            mat.cycles.displacement_method = desired
         except (AttributeError, TypeError, RuntimeError):
             pass
 
@@ -2635,6 +2639,23 @@ class TLM_MaterialProperties(PropertyGroup):
                     "(otherwise Cycles falls back to bump-like shading). Off "
                     "if you've already set this up manually.",
         default=True,
+        update=lambda self, ctx: _on_displacement_change(self, ctx),
+    )
+    displacement_method: EnumProperty(
+        name="Displacement Method",
+        description="How Cycles converts the Displacement output to surface deformation.\n"
+                    "• Bump Only: shading normal only (no silhouette break, no subdiv needed). "
+                    "Same as Bump but uses the unified Displacement chain.\n"
+                    "• Displacement Only (default): real vertex movement — silhouette breaks. "
+                    "Requires Cycles + Adaptive Subdivision.\n"
+                    "• Both: large vertices move (Displacement) and fine details survive as "
+                    "Bump on top. Best for chunky materials with micro-grain.",
+        items=[
+            ('BUMP',         "Bump Only",         "Shading normal only (default Blender behaviour). No silhouette break, no subdiv required.", 0),
+            ('DISPLACEMENT', "Displacement Only", "Real vertex movement, silhouette breaks. Needs Adaptive Subdivision.",                       1),
+            ('BOTH',         "Both",              "Vertex displacement + bump in one — combine big shapes with micro detail.",                  2),
+        ],
+        default='DISPLACEMENT',
         update=lambda self, ctx: _on_displacement_change(self, ctx),
     )
 

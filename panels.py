@@ -1091,7 +1091,20 @@ def _draw_pbr_channels(col, layer, tlm):
     dispr.prop(layer, "use_displacement", text="Add to Displace",
                icon='MOD_SUBSURF', toggle=True)
     if layer.use_displacement:
-        dispr.prop(layer, "displacement_scale", text="Scale", slider=True)
+        dispr.prop(layer, "displacement_scale", text="Layer Scale", slider=True)
+        # Convenience shortcuts to the MATERIAL-level Displacement params.
+        # These are shared across all displacement layers (the Cycles
+        # Displacement node is per-material, not per-layer), so editing
+        # them here is identical to editing them in Composite — just
+        # saves a scroll. Boxed so it's visually clear these are shared.
+        if tlm.use_displacement:
+            shared = pc.box().column(align=True)
+            shared.scale_y = 0.9
+            shared.label(text="Material Displacement (shared):",
+                         icon='MOD_SUBSURF')
+            shared.prop(tlm, "displacement_method", text="Method")
+            shared.prop(tlm, "displacement_strength", text="Strength", slider=True)
+            shared.prop(tlm, "displacement_midlevel", text="Midlevel", slider=True)
         # Safety hint: if user manually turned the master OFF after
         # opting layers in, surface that the layer is currently silent.
         if not tlm.use_displacement:
@@ -1310,10 +1323,13 @@ def _draw_composite_section(layout, tlm):
     disp_box.prop(tlm, "use_displacement", text="Displacement (Master)",
                   icon='MOD_SUBSURF', toggle=True)
     if tlm.use_displacement:
+        disp_box.prop(tlm, "displacement_method", text="Method")
         disp_box.prop(tlm, "displacement_strength", text="Strength", slider=True)
         disp_box.prop(tlm, "displacement_midlevel", text="Midlevel", slider=True)
-        disp_box.prop(tlm, "displacement_adaptive", text="Auto Adaptive Subdiv",
-                      icon='MESH_GRID', toggle=True)
+        # Adaptive Subdiv is meaningless for BUMP method — hide it.
+        if tlm.displacement_method != 'BUMP':
+            disp_box.prop(tlm, "displacement_adaptive", text="Auto Adaptive Subdiv",
+                          icon='MESH_GRID', toggle=True)
 
     # ── 5. Actions ──
     comp.separator(factor=0.6)
