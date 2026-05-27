@@ -32,6 +32,10 @@ from . import (
     _factor_socket,
     _a_socket,
     _b_socket,
+    # _build_proc_color_ramp + _ramp_stops live in procedurals.py
+    # (loaded BEFORE hot_update in __init__.py's import order).
+    _build_proc_color_ramp,
+    _ramp_stops,
 )
 # Module-level constants from __init__.py (TLM_PREFIX is used by tags
 # the hot handlers stamp on nodes; the others are lookup tables used
@@ -66,8 +70,6 @@ __all__ = [
     '_clamped_ramp_position',
     'hot_update_sun_direction',
     '_find_first_sun_direction',
-    '_build_proc_color_ramp',
-    '_ramp_stops',
     '_hot_proc_color',
     '_hot_vector_distortion',
     '_hot_marble_distortion',
@@ -490,98 +492,6 @@ def _find_first_sun_direction():
         pass
     # Fallback: light coming from top-front-right (good portrait default)
     return (0.4, -0.3, 0.85)
-
-
-def _build_proc_color_ramp(node_tree, layer, x, y, fac_out):
-    """Build the standard TLM ColorRamp for a procedural layer.
-
-    Centralised so every proc_type that has a ColorRamp behaves the
-    same way — Manual Stops, color mode, interpolation, extra stops,
-    Color 3 legacy. Previously the MARBLE branch had its own inline
-    copy of this logic that fell out of sync as new features landed.
-
-    Returns the ColorRamp.outputs["Color"] socket.
-    """
-    cr = node_tree.nodes.new("ShaderNodeValToRGB")
-    cr.name = f"{TLM_PREFIX}proc_cr_{_next_id()}"
-    cr.label = "Proc Color"
-    cr.location = (x + 180, y)
-    _tag(cr, layer.name, "proc_cr")
-
-    # Stop positions: two modes — Manual or computed-from-contrast.
-    # GRADIENT + FRESNEL force contrast=0, center=0.5 so the ColorRamp
-    # stops sit at the full 0..1 range. Without this, Fresnel.Fac (which
-    # follows Schlick's non-linear distribution — most pixels concentrate
-    # below 0.255 except at grazing angles) maps almost entirely to
-    # color1 and color2 is never visible. Treating Fresnel like a real
-    # gradient gives the expected face-to-edge sweep with user-set IOR.
-    if getattr(layer, 'proc_use_manual_stops', False) and layer.proc_type not in ('GRADIENT', 'FRESNEL'):
-        pos1 = max(0.0, min(1.0, getattr(layer, 'proc_color1_position', 0.0)))
-        pos2 = max(0.0, min(1.0, getattr(layer, 'proc_color2_position', 1.0)))
-        if abs(pos1 - pos2) < 1e-4:
-            pos2 = min(1.0, pos1 + 0.001)
-        stop_lo, stop_hi = pos1, pos2
-    else:
-        contrast = getattr(layer, 'proc_contrast', 0.5)
-        center = getattr(layer, 'proc_ramp_center', 0.5)
-        if layer.proc_type in ('GRADIENT', 'FRESNEL'):
-            contrast = 0.0
-            center = 0.5
-        stop_lo, stop_hi = _ramp_stops(contrast, center)
-
-    cr.color_ramp.elements[0].position = stop_lo
-    cr.color_ramp.elements[0].color = layer.proc_color1
-    cr.color_ramp.elements[1].position = stop_hi
-    cr.color_ramp.elements[1].color = layer.proc_color2
-
-    # Legacy Color 3 (kept for backward compat — migrated to extras on load).
-    if getattr(layer, 'use_proc_color3', False):
-        el = cr.color_ramp.elements.new(_clamped_ramp_position(layer.proc_color3_position))
-        el.color = layer.proc_color3
-
-    # Extra colour stops collection — N stops beyond Color1/Color2/Color3.
-    for extra in getattr(layer, 'proc_extra_color_stops', []):
-        el = cr.color_ramp.elements.new(_clamped_ramp_position(extra.position))
-        el.color = extra.color
-
-    # color_mode + interpolation — apply 1:1 to ShaderNodeValToRGB.
-    try:
-        cr.color_ramp.color_mode = getattr(layer, 'proc_color_ramp_mode', 'RGB')
-    except (TypeError, AttributeError):
-        pass
-    try:
-        cr.color_ramp.interpolation = getattr(
-            layer, 'proc_color_ramp_interpolation', 'LINEAR'
-        )
-    except (TypeError, AttributeError):
-        pass
-
-    node_tree.links.new(fac_out, cr.inputs["Fac"])
-    return cr.outputs["Color"]
-
-
-def _ramp_stops(contrast, center=0.5):
-    """Compute the two outer ColorRamp stop positions from contrast + center.
-
-    - ``contrast`` 0..1 → narrows the transition band (high contrast = sharp).
-      contrast=0.0 → band spans the full 0..1 range (soft gradient).
-      contrast=1.0 → band collapses to ~0.02 around ``center`` (razor sharp).
-    - ``center`` 0..1 → where along Fac the band sits.
-      center=0.5 → symmetric (legacy behaviour).
-      center=0.05 → band near Fac=0 (e.g. thin Color1 outline at low-Fac region).
-      center=0.95 → band near Fac=1 (thin highlight in high-Fac region).
-
-    Returns (stop_lo, stop_hi) both clamped to [0.0, 1.0] with stop_lo < stop_hi.
-    """
-    contrast = max(0.0, min(1.0, float(contrast)))
-    center = max(0.0, min(1.0, float(center)))
-    half_width = 0.5 - contrast * 0.49  # 0.5 at contrast=0, 0.01 at contrast=1
-    stop_lo = center - half_width
-    stop_hi = center + half_width
-    # Clamp to legal range and keep them ordered with at least 0.001 between.
-    stop_lo = max(0.0, min(0.998, stop_lo))
-    stop_hi = max(stop_lo + 0.001, min(1.0, stop_hi))
-    return stop_lo, stop_hi
 
 
 def _hot_proc_color(node_tree, layer, prop_name):
