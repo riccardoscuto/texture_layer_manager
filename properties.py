@@ -1955,9 +1955,9 @@ class TLM_LayerItem(PropertyGroup):
     proc_use_manual_stops: BoolProperty(
         name="Manual Stops",
         description="Drag each colour stop position directly (overrides Contrast + Ramp Center). "
-                    "Off: stop positions are derived from Contrast + Ramp Center (default). "
-                    "On: use Color1 Pos / Color2 Pos / Color3 Pos sliders.",
-        default=False, update=_on_layer_update,
+                    "On (default): use Color1 Pos / Color2 Pos / extras Pos sliders for direct stop placement. "
+                    "Off: positions are derived from Contrast + Ramp Center (legacy artist-friendly model).",
+        default=True, update=_on_layer_update,
     )
     proc_color1_position: FloatProperty(
         name="Color 1 Pos",

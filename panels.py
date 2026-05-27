@@ -360,76 +360,21 @@ def _draw_procedural(col, active, tlm):
     col.prop(active, "proc_type")
 
     # Read shared state once
-    use_manual = getattr(active, 'proc_use_manual_stops', False)
+    use_manual = getattr(active, 'proc_use_manual_stops', True)
     proc_t = active.proc_type
+    pt = proc_t
     # GRADIENT/FRESNEL force a 0..1 ramp internally — manual stops + contrast
     # are hidden for these.
     manual_supported = proc_t not in ('GRADIENT', 'FRESNEL')
 
-    # ── COLLAPSIBLE 1/3: Color Ramp ────────────────────────────────────
+    # ── SECTION 1/4: PBR Channels (collapsible) ─────────────────────────
+    # First section so the user sees routing options up top — most layers
+    # need at least one channel toggle (use_bump / use_roughness / etc.)
+    # and burying them at the bottom is what made the panel feel buried.
     col.separator(factor=0.4)
-    n_extras = len(active.proc_extra_color_stops)
-    badge_col = f" (+{n_extras})" if n_extras else ""
-    hdr_color = col.row(align=True)
-    hdr_color.prop(active, "show_proc_color_section",
-                   text=f"Color Ramp{badge_col}",
-                   icon='TRIA_DOWN' if active.show_proc_color_section else 'TRIA_RIGHT',
-                   emboss=False)
-    if active.show_proc_color_section:
-        cbox = col.box().column(align=True)
-        cbox.scale_y = 0.95
-        cr = cbox.row(align=True)
-        cr.prop(active, "proc_color1", text="")
-        cr.prop(active, "proc_color2", text="")
-        if use_manual and manual_supported:
-            pos12 = cbox.row(align=True)
-            pos12.prop(active, "proc_color1_position", text="Pos 1", slider=True)
-            pos12.prop(active, "proc_color2_position", text="Pos 2", slider=True)
-        # Legacy Color 3 row (only when the flag is True, i.e. loaded
-        # from an old preset). New presets use the extras collection.
-        legacy_c3 = active.use_proc_color3
-        if legacy_c3:
-            c3r = cbox.row(align=True)
-            c3r.prop(active, "use_proc_color3", text="",
-                     icon='REMOVE', toggle=True)
-            c3r.prop(active, "proc_color3", text="")
-            c3r.prop(active, "proc_color3_position", text="Pos", slider=True)
-        # Extra color stops collection
-        label_offset = 4 if legacy_c3 else 3
-        for idx, stop in enumerate(active.proc_extra_color_stops):
-            sr = cbox.row(align=True)
-            sr.prop(stop, "color", text="")
-            sr.prop(stop, "position", text=f"Pos {idx + label_offset}", slider=True)
-            del_op = sr.operator("tlm.remove_proc_color_stop", text="", icon='X')
-            del_op.index = idx
-        add_row = cbox.row(align=True)
-        add_row.operator("tlm.add_proc_color_stop", text="Add Color Stop", icon='ADD')
-        # Mode + interp + manual stops (only proc types that use ColorRamp)
-        uses_color_ramp = proc_t not in ('STRIPES', 'HEX_GRID')
-        if uses_color_ramp:
-            mi_row = cbox.row(align=True)
-            mi_row.prop(active, "proc_color_ramp_mode", text="")
-            mi_row.prop(active, "proc_color_ramp_interpolation", text="")
-            if manual_supported:
-                ms_row = cbox.row(align=True)
-                ms_row.prop(active, "proc_use_manual_stops",
-                            text="Manual Stops", toggle=True,
-                            icon='IPO_LINEAR' if not use_manual else 'IPO_CONSTANT')
-        # Contrast + Ramp Center live here too (they shape the ramp).
-        # Hidden for proc types that bypass the ramp.
-        if proc_t not in ('CHECKER', 'GRADIENT', 'BRICK', 'MAGIC', 'FRESNEL'):
-            cr_row = cbox.row(align=True)
-            cr_row.enabled = not use_manual
-            cr_row.prop(active, "proc_contrast", slider=True)
-            cr_row.prop(active, "proc_ramp_center", slider=True, text="Center")
+    _draw_pbr_channels(col, active, tlm)
 
-    # ── CORE: proc_scale (visible per ALL procs except GRADIENT) ─────
-    pt = active.proc_type
-    if pt != 'GRADIENT':
-        col.separator(factor=0.4)
-        col.prop(active, "proc_scale", slider=False)
-
-    # ── COLLAPSIBLE 2/3: Pattern Params (per-proc-type knobs) ──────────
+    # ── SECTION 2/4: Pattern Params (per-proc-type knobs + Scale) ───────
     col.separator(factor=0.4)
     hdr_pat = col.row(align=True)
     hdr_pat.prop(active, "show_proc_pattern_section",
@@ -437,8 +382,8 @@ def _draw_procedural(col, active, tlm):
                  icon='TRIA_DOWN' if active.show_proc_pattern_section else 'TRIA_RIGHT',
                  emboss=False)
     if not active.show_proc_pattern_section:
-        # Pattern section is folded — skip the per-type knob block entirely
-        # and jump down to mapping / Fresnel / mask sections below.
+        # Pattern section folded — skip the per-type knob block entirely
+        # and jump down to mapping / Color Ramp / Fresnel / mask sections.
         _draw_procedural_advanced_tail(col, active, tlm)
         return
     pbox = col.box().column(align=True)
@@ -447,6 +392,11 @@ def _draw_procedural(col, active, tlm):
     # live inside the collapsible box. The pt branches below mirror the
     # exact controls they showed pre-refactor.
     col_pat = pbox
+    # Scale lives INSIDE Pattern Params — it's the most fundamental knob
+    # of every procedural (other than GRADIENT which has no scale).
+    if pt != 'GRADIENT':
+        col_pat.prop(active, "proc_scale", slider=False)
+        col_pat.separator(factor=0.3)
     if pt == 'NOISE':
         col_pat.prop(active, "proc_detail",         slider=True)
         col_pat.prop(active, "proc_roughness_proc", slider=True, text="Roughness")
@@ -583,11 +533,18 @@ def _draw_procedural(col, active, tlm):
 
 
 def _draw_procedural_advanced_tail(col, active, tlm):
-    """Draw the post-pattern part of a PROCEDURAL layer: Mapping
-    (collapsible), Fresnel legacy, Mask, Clipping, PBR Channels, Group
-    assignment. Called from both branches of the Pattern collapsible
-    so the rest of the UI is always reachable."""
-    # ── COLLAPSIBLE 3/3: Mapping ──────────────────────────────────────
+    """Draw post-Pattern sections of a PROCEDURAL layer in the new order:
+       Section 3/4 = Mapping (collapsible)
+       Section 4/4 = Color Ramp (collapsible) — last because it's stylistic
+                      tuning after the pattern + mapping are dialled in.
+       Then: Fresnel Rim, Mask, Clipping, Group assignment.
+    PBR Channels is drawn at the TOP of the panel by the caller — not here.
+    """
+    use_manual = getattr(active, 'proc_use_manual_stops', True)
+    proc_t = active.proc_type
+    manual_supported = proc_t not in ('GRADIENT', 'FRESNEL')
+
+    # ── SECTION 3/4: Mapping ──────────────────────────────────────────
     col.separator(factor=0.4)
     hdr_map = col.row(align=True)
     hdr_map.prop(active, "show_proc_mapping_section",
@@ -619,8 +576,7 @@ def _draw_procedural_advanced_tail(col, active, tlm):
         map_box.prop(active, "proc_coord_type", text="Coords")
         if active.proc_coord_type == 'OBJECT':
             map_box.prop(active, "proc_normalize_coords", text="Normalize Scale")
-
-    # ── Coordinate transform (polar / spherical / swirl / cylindrical) ──
+        # Coordinate transform (polar/spherical/swirl/cylindrical)
         map_box.prop(active, "proc_coord_transform", text="Transform")
         if active.proc_coord_transform == 'SWIRL':
             map_box.prop(active, "proc_swirl_amount", slider=True, text="Swirl")
@@ -628,7 +584,6 @@ def _draw_procedural_advanced_tail(col, active, tlm):
             map_box.label(text="Tip: integer Scale = seamless wrap", icon='INFO')
         elif active.proc_coord_transform == 'SPHERICAL':
             map_box.label(text="Tip: pattern wraps X, poles compress", icon='INFO')
-
         # Smart warnings for Generated coordinates
         if active.proc_coord_type == 'GENERATED':
             import bpy as _bpy
@@ -643,16 +598,74 @@ def _draw_procedural_advanced_tail(col, active, tlm):
                     ratio = max(dims) / max(min(dims), 0.001)
                     if ratio > 1.3:
                         map_box.label(text="Anisotropic shape: try Object coords", icon='INFO')
-
-    # Contrast controls the ColorRamp stop positions. Hidden for the proc
-    # types that bypass the ramp (CHECKER / BRICK / MAGIC output Color
-    # directly) and for GRADIENT + FRESNEL where contrast is forced to 0
-    # in the build path so the full ramp sweep is always available.
         # Vector distortion lives inside Mapping (it warps the coords).
         map_box.prop(active, "proc_vector_distortion", slider=True, text="Vec Distort")
 
-    # NOTE: Contrast + Ramp Center moved into the Color Ramp collapsible
-    # above (they shape the ramp stops, so they belong with the colours).
+    # ── SECTION 4/4: Color Ramp ──────────────────────────────────────
+    # Final section in the new order — stylistic colour tuning happens
+    # after the pattern + mapping are dialled in. Internal order:
+    #   Mode/Interp dropdowns + Manual Stops toggle → Color pickers (with
+    #   Pos sliders when Manual Stops is on) → extras + Add Stop button
+    #   → Contrast/Center (legacy auto-positions, disabled when Manual
+    #   Stops is on which is the new default).
+    col.separator(factor=0.4)
+    n_extras = len(active.proc_extra_color_stops)
+    badge_col = f" (+{n_extras})" if n_extras else ""
+    hdr_color = col.row(align=True)
+    hdr_color.prop(active, "show_proc_color_section",
+                   text=f"Color Ramp{badge_col}",
+                   icon='TRIA_DOWN' if active.show_proc_color_section else 'TRIA_RIGHT',
+                   emboss=False)
+    if active.show_proc_color_section:
+        cbox = col.box().column(align=True)
+        cbox.scale_y = 0.95
+        # Mode / Interpolation dropdowns FIRST (only proc types using ColorRamp)
+        uses_color_ramp = proc_t not in ('STRIPES', 'HEX_GRID')
+        if uses_color_ramp:
+            mi_row = cbox.row(align=True)
+            mi_row.prop(active, "proc_color_ramp_mode", text="")
+            mi_row.prop(active, "proc_color_ramp_interpolation", text="")
+            if manual_supported:
+                ms_row = cbox.row(align=True)
+                ms_row.prop(active, "proc_use_manual_stops",
+                            text="Manual Stops", toggle=True,
+                            icon='IPO_LINEAR' if not use_manual else 'IPO_CONSTANT')
+            cbox.separator(factor=0.3)
+        # THEN colour pickers + per-stop positions
+        cr = cbox.row(align=True)
+        cr.prop(active, "proc_color1", text="")
+        cr.prop(active, "proc_color2", text="")
+        if use_manual and manual_supported:
+            pos12 = cbox.row(align=True)
+            pos12.prop(active, "proc_color1_position", text="Pos 1", slider=True)
+            pos12.prop(active, "proc_color2_position", text="Pos 2", slider=True)
+        # Legacy Color 3 row (only when the flag is True from old presets)
+        legacy_c3 = active.use_proc_color3
+        if legacy_c3:
+            c3r = cbox.row(align=True)
+            c3r.prop(active, "use_proc_color3", text="",
+                     icon='REMOVE', toggle=True)
+            c3r.prop(active, "proc_color3", text="")
+            c3r.prop(active, "proc_color3_position", text="Pos", slider=True)
+        # Extra color stops collection
+        label_offset = 4 if legacy_c3 else 3
+        for idx, stop in enumerate(active.proc_extra_color_stops):
+            sr = cbox.row(align=True)
+            sr.prop(stop, "color", text="")
+            sr.prop(stop, "position", text=f"Pos {idx + label_offset}", slider=True)
+            del_op = sr.operator("tlm.remove_proc_color_stop", text="", icon='X')
+            del_op.index = idx
+        # Add Color Stop button
+        add_row = cbox.row(align=True)
+        add_row.operator("tlm.add_proc_color_stop", text="Add Color Stop", icon='ADD')
+        # Contrast + Ramp Center (legacy auto-positions, disabled when
+        # Manual Stops is on which is now the default).
+        if proc_t not in ('CHECKER', 'GRADIENT', 'BRICK', 'MAGIC', 'FRESNEL'):
+            cbox.separator(factor=0.3)
+            cr_row = cbox.row(align=True)
+            cr_row.enabled = not use_manual
+            cr_row.prop(active, "proc_contrast", slider=True)
+            cr_row.prop(active, "proc_ramp_center", slider=True, text="Center")
 
     # ── Fresnel legacy rim modifier (per-layer) ────────────────────────
     col.separator(factor=0.4)
@@ -663,12 +676,10 @@ def _draw_procedural_advanced_tail(col, active, tlm):
         fr.prop(active, "fresnel_ior", text="IOR")
         fr.prop(active, "fresnel_strength", text="Str", slider=True)
 
-    # Mask / Clipping / PBR Channels / Group are already collapsible.
+    # Mask / Clipping / Group assignment (already collapsible).
     col.separator(factor=0.4)
     _draw_mask_block(col, active)
     _draw_clipping_mask(col, active, tlm)
-    col.separator(factor=0.4)
-    _draw_pbr_channels(col, active, tlm)
     col.separator(factor=0.4)
     _draw_group_assignment(col, active, tlm)
 
