@@ -1023,9 +1023,11 @@ def _draw_pbr_channels(col, layer, tlm):
     # Displacement (real geometric) — separate from Bump because Bump only
     # perturbs the shading normal while Displacement moves vertices.
     # Per-layer toggle stacks cumulatively into Material Output.Displacement
-    # when mat.tlm.use_displacement is on.
+    # when mat.tlm.use_displacement is on. Label is "Add to Displace"
+    # (verb form, per-layer scope) to disambiguate from the material-level
+    # master switch in the Composite section, labelled "Displacement (Master)".
     dispr = pc.row(align=True)
-    dispr.prop(layer, "use_displacement", text="Displace",
+    dispr.prop(layer, "use_displacement", text="Add to Displace",
                icon='MOD_SUBSURF', toggle=True)
     if layer.use_displacement:
         dispr.prop(layer, "displacement_scale", text="Scale", slider=True)
@@ -1226,10 +1228,12 @@ def _draw_composite_section(layout, tlm):
 
     # ── True geometric Displacement ──
     # Master toggle wires the layer stack's displacement contributions to
-    # Material Output.Displacement. Per-layer use_displacement = which
-    # layers feed into the height stack.
+    # Material Output.Displacement. Per-layer use_displacement (labelled
+    # "Add to Displace" in the PBR Channels section) selects which layers
+    # feed into the height stack. The "(Master)" suffix here disambiguates
+    # from the per-layer toggle.
     disp_row = comp.row(align=True)
-    disp_row.prop(tlm, "use_displacement", text="Displacement",
+    disp_row.prop(tlm, "use_displacement", text="Displacement (Master)",
                   icon='MOD_SUBSURF', toggle=True)
     if tlm.use_displacement:
         comp.prop(tlm, "displacement_strength", text="Strength", slider=True)
