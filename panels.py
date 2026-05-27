@@ -687,6 +687,15 @@ def _draw_mask_slot(box, active, slot):
     if src == 'WIREFRAME':
         box.prop(active, "mask_wireframe_size", slider=True, text="Size")
         box.prop(active, "mask_wireframe_use_pixel_size", text="Use Pixel Size")
+    if src == 'VORONOI':
+        # Per-slot Voronoi mask params. Pair scale with a colour layer's
+        # proc_scale for the cobblestone alignment trick.
+        feat_prop  = 'mask_voronoi_feature_b'    if is_b else 'mask_voronoi_feature'
+        scale_prop = 'mask_voronoi_scale_b'      if is_b else 'mask_voronoi_scale'
+        rand_prop  = 'mask_voronoi_randomness_b' if is_b else 'mask_voronoi_randomness'
+        box.prop(active, feat_prop, text="Feature")
+        box.prop(active, scale_prop, slider=True, text="Scale")
+        box.prop(active, rand_prop, slider=True, text="Randomness")
     # POINTINESS, EDGE_WEAR, CURVATURE_SMART: no per-slot parameter.
     # Shared smart-generator tuning shown once below in its own sub-box.
     box.prop(active, inv_prop, text=f"Invert {slot}")

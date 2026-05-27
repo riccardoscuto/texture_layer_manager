@@ -823,6 +823,8 @@ class TLM_LayerItem(PropertyGroup):
             # â”€â”€ Light-angle source â€” for anime cel-shading and NdotL effects â”€â”€
             ('NDOTL',           "Light Angle (NdotL)",    "Normal Ã— Sun direction (world space), remapped to [0,1]. 1 = surface fully lit, 0 = surface in shadow. Pair with proc_contrast=1.0 ColorRamp for HARD binary cel-shading (anime/toon look). Uses the first Sun light in the scene; rebuild material after moving the Sun.", 7),
             ('NDOTH',           "Half-Vector (NdotH)",    "Normal Ã— Half-Vector between Sun and View. Peaks at the classic Phong specular highlight position (between sun and camera). Use for stylized toon specular highlights (anime sparkle), with proc_contrast=1.0 ColorRamp for a hard-edged shaped highlight.", 8),
+            # ── Procedural-driven mask ──
+            ('VORONOI',         "Voronoi",                "Use a Voronoi pattern as the mask. Pick F1 (cell distance, peaks at cell centres) or DISTANCE_TO_EDGE (peaks at cell centres, 0 at edges = ideal for crack/joint masks). Pair with mask_invert to flip. Use the SAME mask_voronoi_scale as a layer's proc_scale to align the mask cells with the layer's pattern (e.g. cobblestone: stone colour Voronoi and dirt mask Voronoi share scale so dirt lands exactly between stones).", 9),
         ],
         default='IMAGE',
         update=_on_mask_source_change,
@@ -847,6 +849,31 @@ class TLM_LayerItem(PropertyGroup):
         description="Maximum distance for AO ray in mask A. Larger = broader cavities",
         default=0.5, min=0.01, max=10.0,
         update=_make_hot_callback("mask_ao_distance"),
+    )
+    # ── Voronoi mask (when mask_source = 'VORONOI') ──
+    mask_voronoi_feature: EnumProperty(
+        name="Voronoi Feature A",
+        description="Which Voronoi output drives the mask",
+        items=[
+            ('F1', "F1 (Distance to Cell)",
+             "Distance to nearest cell centre. 0 at centre, increases outward — peaks at cell edges. Use mask_invert for centre-peaks."),
+            ('DISTANCE_TO_EDGE', "Distance to Edge",
+             "Distance to the nearest cell edge. 0 at edges (cracks), peaks at cell centres. Ideal for cobblestone joints — invert for crack-only mask."),
+        ],
+        default='DISTANCE_TO_EDGE',
+        update=_on_layer_update,
+    )
+    mask_voronoi_scale: FloatProperty(
+        name="Voronoi Scale A",
+        description="Cell density of the Voronoi mask. Match the scale of a layer's proc_scale to align mask cells with the layer pattern (cobblestone trick)",
+        default=10.0, min=0.1, max=200.0,
+        update=_make_hot_callback("mask_voronoi_scale"),
+    )
+    mask_voronoi_randomness: FloatProperty(
+        name="Voronoi Randomness A",
+        description="Cell-centre jitter. 0 = grid, 1 = fully scattered",
+        default=1.0, min=0.0, max=1.0,
+        update=_make_hot_callback("mask_voronoi_randomness"),
     )
     mask_wireframe_size: FloatProperty(
         name="Wireframe Size",
@@ -914,6 +941,7 @@ class TLM_LayerItem(PropertyGroup):
             ('FRESNEL',         "Fresnel",                 "Viewing-angle gradient â€” 0 facing, 1 grazing",                       6),
             ('NDOTL',           "Light Angle (NdotL)",     "Normal Â· Sun direction in [0,1] â€” for anime/toon shading",            7),
             ('NDOTH',           "Half-Vector (NdotH)",     "Normal Â· Half-Vector (sun+view) â€” for toon specular highlights",       8),
+            ('VORONOI',         "Voronoi",                 "Voronoi pattern mask (see Mask A description for details)",         9),
         ],
         default='POINTINESS',
         update=_on_mask_source_change,
@@ -938,6 +966,28 @@ class TLM_LayerItem(PropertyGroup):
         description="Maximum distance for AO ray in mask B",
         default=0.5, min=0.01, max=10.0,
         update=_make_hot_callback("mask_ao_distance_b"),
+    )
+    mask_voronoi_feature_b: EnumProperty(
+        name="Voronoi Feature B",
+        description="Which Voronoi output drives the secondary mask",
+        items=[
+            ('F1', "F1 (Distance to Cell)", "0 at centre, peaks at edges"),
+            ('DISTANCE_TO_EDGE', "Distance to Edge", "0 at edges, peaks at centres"),
+        ],
+        default='DISTANCE_TO_EDGE',
+        update=_on_layer_update,
+    )
+    mask_voronoi_scale_b: FloatProperty(
+        name="Voronoi Scale B",
+        description="Cell density of the secondary Voronoi mask",
+        default=10.0, min=0.1, max=200.0,
+        update=_make_hot_callback("mask_voronoi_scale_b"),
+    )
+    mask_voronoi_randomness_b: FloatProperty(
+        name="Voronoi Randomness B",
+        description="Cell-centre jitter on the secondary Voronoi mask",
+        default=1.0, min=0.0, max=1.0,
+        update=_make_hot_callback("mask_voronoi_randomness_b"),
     )
 
     mask_combine: EnumProperty(

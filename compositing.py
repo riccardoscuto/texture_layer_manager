@@ -2702,6 +2702,61 @@ def _build_mask_slot(node_tree, layer, slot, uv_map, x, y, name_tag=""):
         val = mr.outputs["Result"]
     elif source in ('EDGE_WEAR', 'DIRT', 'CURVATURE_SMART'):
         val = _build_smart_generator(node_tree, layer, source, ao_distance, x, y, name_tag)
+    elif source == 'VORONOI':
+        # Voronoi-driven procedural mask — the "Stone+Dirt mask alignment"
+        # trick from cobblestone-style reference materials. Builds a
+        # ShaderNodeTexVoronoi reading object-space coordinates and emits
+        # either F1 or Distance-to-Edge as the fac. Pair the mask's scale
+        # with a colour layer's proc_scale to lock the mask cells onto
+        # the same cell layout (dirt lands EXACTLY between stones).
+        if slot == 'a':
+            v_feature    = getattr(layer, 'mask_voronoi_feature', 'DISTANCE_TO_EDGE')
+            v_scale      = getattr(layer, 'mask_voronoi_scale', 10.0)
+            v_randomness = getattr(layer, 'mask_voronoi_randomness', 1.0)
+        else:
+            v_feature    = getattr(layer, 'mask_voronoi_feature_b', 'DISTANCE_TO_EDGE')
+            v_scale      = getattr(layer, 'mask_voronoi_scale_b', 10.0)
+            v_randomness = getattr(layer, 'mask_voronoi_randomness_b', 1.0)
+
+        # Object-space coords so mask follows the geometry, not the UVs
+        tex_coord = node_tree.nodes.new("ShaderNodeTexCoord")
+        tex_coord.name = f"{TLM_PREFIX}mask_vorocoord_{name_tag}_{_next_id()}"
+        tex_coord.location = (x - 480, y - 100)
+        _tag(tex_coord, layer.name, f"mask_vorocoord_{name_tag}")
+
+        voro = node_tree.nodes.new("ShaderNodeTexVoronoi")
+        voro.name = f"{TLM_PREFIX}mask_voronoi_{name_tag}_{_next_id()}"
+        voro.location = (x - 300, y - 100)
+        voro.feature = v_feature
+        voro.distance = 'EUCLIDEAN'
+        voro.inputs["Scale"].default_value = v_scale
+        voro.inputs["Randomness"].default_value = v_randomness
+        _tag(voro, layer.name, f"mask_voronoi_{name_tag}")
+        node_tree.links.new(tex_coord.outputs["Object"], voro.inputs["Vector"])
+
+        # Voronoi Distance output is NOT normalised to 0..1:
+        # * Scale parameter divides the input coords by N — so cell width
+        #   in input space is 1/N. The DTE peak (cell-centre distance to
+        #   nearest edge) is roughly half a cell width = 0.5/N.
+        # * For scale=10 the peak is ~0.05 — way below 1.0. Without
+        #   remapping, the "mask high" plateau is only 5% and dirt
+        #   barely registers anywhere; with bad remapping it becomes
+        #   ~100% everywhere and dirt floods the whole surface.
+        # Auto-compute From Max = 0.5/scale so the mask is properly
+        # normalised at whatever cell density the user picked.
+        mr = node_tree.nodes.new("ShaderNodeMapRange")
+        mr.name = f"{TLM_PREFIX}mask_vorange_{name_tag}_{_next_id()}"
+        mr.location = (x - 200, y - 100)
+        mr.clamp = True
+        mr.inputs["From Min"].default_value = 0.0
+        # Auto-normalise based on scale. Safe lower bound on scale to
+        # avoid div-by-zero, even though properties.py min is 0.1.
+        mr.inputs["From Max"].default_value = 0.5 / max(v_scale, 0.1)
+        mr.inputs["To Min"].default_value = 0.0
+        mr.inputs["To Max"].default_value = 1.0
+        _tag(mr, layer.name, f"mask_vorange_{name_tag}")
+        node_tree.links.new(voro.outputs["Distance"], mr.inputs["Value"])
+        val = mr.outputs["Result"]
 
     if val is None:
         return None

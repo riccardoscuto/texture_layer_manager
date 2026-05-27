@@ -209,24 +209,30 @@ def build_rocky_chunky_pile():
     stone_col.proc_use_color3 = True
     stone_col.proc_color3 = STONE_VAR_C
 
-    # ── 03. Dirt crack overlay (DIRT mask) ---------------------------
-    # Solid warm brown gated by TLM's built-in DIRT mask (AO-based cavity
-    # detection × noise grunge). With displaced geometry, AO cavities land
-    # naturally in the gaps between pebbles. mask_ao_distance=0.06 keeps
-    # the coverage tight so dirt doesn't bleed onto stone faces.
+    # ── 03. Dirt crack overlay (VORONOI mask) ------------------------
+    # Solid warm brown gated by a Voronoi DTE mask MATCHING the cobble
+    # cell layout (same scale as layer 02 Stone Color Random and layer
+    # 05 MACRO Displacement). With mask_invert=True the mask peaks at
+    # cell EDGES (cracks) and falls to zero at cell CENTRES (stones) —
+    # dirt lands EXACTLY between the same stones the displacement raises.
+    # Map Range auto-normalises Voronoi DTE output by scale (see
+    # compositing._build_mask_slot 'VORONOI' branch).
     dirt = _add_proc(mat, "03 Dirt Crack Overlay", "VORONOI",
-                     output="BASE_COLOR", blend="MIX", opacity=0.85)
+                     output="BASE_COLOR", blend="MIX", opacity=1.0)
     _set_voronoi(dirt, feature="DISTANCE_TO_EDGE", scale=COBBLE_SCALE,
                  randomness=1.0, contrast=0.0, center=0.5)
     dirt.proc_color1 = DIRT_COLOR
     dirt.proc_color2 = DIRT_COLOR    # uniform brown — the MASK gates it
     dirt.use_mask = True
-    dirt.mask_source = 'DIRT'
-    dirt.mask_ao_distance = 0.06     # tight crack-only coverage
+    dirt.mask_source = 'VORONOI'
+    dirt.mask_voronoi_feature = 'DISTANCE_TO_EDGE'
+    dirt.mask_voronoi_scale = COBBLE_SCALE
+    dirt.mask_voronoi_randomness = 1.0
+    dirt.mask_invert = True          # peaks at edges = cracks
 
-    # ── 04. Moss tint (DIRT mask, sparse) ----------------------------
-    # Same DIRT mask but lower opacity → only the deepest cavities
-    # get the olive moss accent.
+    # ── 04. Moss tint (VORONOI mask, sparse) -------------------------
+    # Same VORONOI mask architecture but lower opacity → moss tinged
+    # crack accent on top of the dirt brown.
     moss = _add_proc(mat, "04 Moss Tint", "VORONOI",
                      output="BASE_COLOR", blend="OVERLAY", opacity=0.60)
     _set_voronoi(moss, feature="DISTANCE_TO_EDGE",
@@ -235,8 +241,11 @@ def build_rocky_chunky_pile():
     moss.proc_color1 = MOSS_COLOR
     moss.proc_color2 = MOSS_COLOR
     moss.use_mask = True
-    moss.mask_source = 'DIRT'
-    moss.mask_ao_distance = 0.06
+    moss.mask_source = 'VORONOI'
+    moss.mask_voronoi_feature = 'DISTANCE_TO_EDGE'
+    moss.mask_voronoi_scale = COBBLE_SCALE
+    moss.mask_voronoi_randomness = 1.0
+    moss.mask_invert = True
 
     # ── 05. MACRO Displacement (Voronoi F1) --------------------------
     # SAME scale as layer 02 ensures each colour cell IS a physical
