@@ -426,7 +426,11 @@ def _build_mask_slot(node_tree, layer, slot, uv_map, x, y, name_tag=""):
         # anime/toon cel-shading. The sun direction is baked from the first
         # Sun light in the scene at build time (changes to the sun require
         # rebuilding the material via the rebuild button).
-        sun_dir = _find_first_sun_direction()
+        # Late import — _find_first_sun_direction lives in hot_update.py
+        # which loads AFTER masks.py. At call time the package is fully
+        # initialised so this resolves fine.
+        from . import _find_first_sun_direction as _fsd
+        sun_dir = _fsd()
         # Build the geometry → normal → dot-product chain
         geo = node_tree.nodes.new("ShaderNodeNewGeometry")
         geo.name = f"{TLM_PREFIX}mask_ndotl_geo_{name_tag}_{_next_id()}"
@@ -461,7 +465,11 @@ def _build_mask_slot(node_tree, layer, slot, uv_map, x, y, name_tag=""):
         # camera = the classic Phong specular highlight position. With a
         # narrow ColorRamp (proc_contrast=1.0) this gives a small "anime
         # toon highlight" shape on convex peaks aligned with the light.
-        sun_dir = _find_first_sun_direction()
+        # Late import — _find_first_sun_direction lives in hot_update.py
+        # which loads AFTER masks.py. At call time the package is fully
+        # initialised so this resolves fine.
+        from . import _find_first_sun_direction as _fsd
+        sun_dir = _fsd()
 
         geo = node_tree.nodes.new("ShaderNodeNewGeometry")
         geo.name = f"{TLM_PREFIX}mask_ndoth_geo_{name_tag}_{_next_id()}"
