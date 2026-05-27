@@ -793,33 +793,48 @@ def _draw_mask_block(col, active):
         _draw_mask_slot(bbox, active, 'B')
         mbox.prop(active, "mask_combine", text="Combine")
 
-    # â”€â”€ Contrast â”€â”€
+    # ── Contrast (always visible — most common knob) ──
     mbox.prop(active, "mask_contrast", slider=True, text="Contrast")
 
-    # â”€â”€ Image-only: Blur â”€â”€
-    # Blur taps the UV input, so it only makes sense when the primary source is IMAGE.
-    if active.mask_source == 'IMAGE':
-        mbox.prop(active, "mask_blur", slider=True, text="Blur")
-
-    # â”€â”€ Mask Refinement section (Levels + Softness) â”€â”€
-    mbox.separator(factor=0.5)
-    rrow = mbox.row(align=True)
-    rrow.prop(active, "use_mask_levels", text="Levels",
-              icon='IPO_LINEAR', toggle=True)
-    rrow.prop(active, "mask_softness", slider=True, text="Softness")
-    if active.use_mask_levels:
-        lbox = mbox.box().column(align=True)
-        lbox.scale_y = 0.85
-        lbox.label(text="Input:", icon='ARROW_LEFTRIGHT')
-        ir = lbox.row(align=True)
-        ir.prop(active, "mask_levels_in_min", text="Black", slider=True)
-        ir.prop(active, "mask_levels_in_max", text="White", slider=True)
-        lbox.prop(active, "mask_levels_gamma", text="Gamma", slider=True)
-        lbox.separator(factor=0.3)
-        lbox.label(text="Output:", icon='ARROW_LEFTRIGHT')
-        o_r = lbox.row(align=True)
-        o_r.prop(active, "mask_levels_out_min", text="Black", slider=True)
-        o_r.prop(active, "mask_levels_out_max", text="White", slider=True)
+    # ── Refinement (Levels / Softness / Blur) — collapsible ─────────────
+    # Count active refinements so the collapsed header shows a badge.
+    refine_count = (
+        (1 if active.use_mask_levels else 0)
+        + (1 if active.mask_softness > 1e-4 else 0)
+        + (1 if active.mask_source == 'IMAGE' and active.mask_blur > 1e-4 else 0)
+    )
+    refine_badge = f" ({refine_count})" if refine_count else ""
+    mbox.separator(factor=0.4)
+    ref_hdr = mbox.row(align=True)
+    ref_hdr.prop(active, "show_mask_refinement",
+                 text=f"Refinement{refine_badge}",
+                 icon='TRIA_DOWN' if active.show_mask_refinement else 'TRIA_RIGHT',
+                 emboss=False)
+    if active.show_mask_refinement:
+        rbox = mbox.box().column(align=True)
+        rbox.scale_y = 0.9
+        # Softness — softens the mask transition without remapping
+        rbox.prop(active, "mask_softness", slider=True, text="Softness")
+        # Image-only: Blur — taps the UV input
+        if active.mask_source == 'IMAGE':
+            rbox.prop(active, "mask_blur", slider=True, text="Blur")
+        # Levels — input/output remap + gamma
+        rbox.separator(factor=0.3)
+        rbox.prop(active, "use_mask_levels", text="Levels",
+                  icon='IPO_LINEAR', toggle=True)
+        if active.use_mask_levels:
+            lbox = rbox.box().column(align=True)
+            lbox.scale_y = 0.85
+            lbox.label(text="Input:", icon='ARROW_LEFTRIGHT')
+            ir = lbox.row(align=True)
+            ir.prop(active, "mask_levels_in_min", text="Black", slider=True)
+            ir.prop(active, "mask_levels_in_max", text="White", slider=True)
+            lbox.prop(active, "mask_levels_gamma", text="Gamma", slider=True)
+            lbox.separator(factor=0.3)
+            lbox.label(text="Output:", icon='ARROW_LEFTRIGHT')
+            o_r = lbox.row(align=True)
+            o_r.prop(active, "mask_levels_out_min", text="Black", slider=True)
+            o_r.prop(active, "mask_levels_out_max", text="White", slider=True)
 
 
 def _draw_reference(col, active, tlm):
@@ -1217,6 +1232,15 @@ def _perf_metric(layout, label, value, icon='BLANK1'):
 
 
 def _draw_composite_section(layout, tlm):
+    """Material-level composite controls, organised into logical groups:
+       1. Build mode (Auto Composite / Editable)
+       2. Surface (BSDF IOR + Alpha)
+       3. Volume (Absorption + Scatter sub-toggles)
+       4. Displacement (Master + Strength/Midlevel/Adaptive)
+       5. Actions (Rebuild / Flatten / Convert / Refresh thumbs)
+    Each group is a labelled sub-block, not a separate collapsible —
+    they're small enough to fit, the grouping just reads better.
+    """
     comp = layout.column(align=True)
     if tlm.shader_editable:
         box = comp.box()
@@ -1226,55 +1250,55 @@ def _draw_composite_section(layout, tlm):
                      text="Return to TLM Managed", icon='FILE_REFRESH')
         return
 
+    # ── 1. Build mode ──
     ac_icon = 'LINKED' if tlm.auto_composite else 'UNLINKED'
     comp.prop(tlm, "auto_composite", text="Auto Composite",
               icon=ac_icon, toggle=True)
-    comp.prop(tlm, "use_base_color_alpha",
-              text="Use Paint Alpha", icon='IMAGE_ALPHA', toggle=True)
-    # Eevee transparency mode. AUTO picks Hashed when an alpha layer
-    # exists, Opaque otherwise â€” the right default 95% of the time.
-    # Manual override for the rare glass / forced-cutout cases.
-    comp.prop(tlm, "alpha_blend_method", text="Alpha Mode")
 
-    # Material-level BSDF IOR. Most materials sit at 1.45 (glass default)
-    # so this is rarely touched, but ice / water / gem presets need it.
-    comp.prop(tlm, "bsdf_ior", text="IOR", slider=True)
+    # ── 2. Surface ──
+    comp.separator(factor=0.6)
+    surf_box = comp.box().column(align=True)
+    surf_box.label(text="Surface", icon='NODE_MATERIAL')
+    surf_box.prop(tlm, "bsdf_ior", text="IOR", slider=True)
+    surf_box.prop(tlm, "use_base_color_alpha",
+                  text="Use Paint Alpha", icon='IMAGE_ALPHA', toggle=True)
+    surf_box.prop(tlm, "alpha_blend_method", text="Alpha Mode")
 
-    # ── Volume Absorption + Volume Scatter ──
-    # Off by default. Both ON → combined via Add Shader inside the
-    # rebuild (ice = absorption + light scatter, jade = absorption +
-    # heavy scatter, etc.).
-    va_row = comp.row(align=True)
-    va_row.prop(tlm, "use_volume_absorption", text="Volume Absorption",
-                icon='OUTLINER_DATA_VOLUME',
-                toggle=True)
+    # ── 3. Volume (combined absorption + scatter sub-toggles) ──
+    comp.separator(factor=0.6)
+    vol_box = comp.box().column(align=True)
+    vol_box.label(text="Volume", icon='OUTLINER_DATA_VOLUME')
+    vol_box.prop(tlm, "use_volume_absorption", text="Absorption",
+                 icon='OUTLINER_DATA_VOLUME', toggle=True)
     if tlm.use_volume_absorption:
-        comp.prop(tlm, "volume_absorption_color", text="Abs Color")
-        comp.prop(tlm, "volume_absorption_density", text="Abs Density", slider=True)
-
-    vs_row = comp.row(align=True)
-    vs_row.prop(tlm, "use_volume_scatter", text="Volume Scatter",
-                icon='OUTLINER_OB_VOLUME',
-                toggle=True)
+        vol_box.prop(tlm, "volume_absorption_color", text="Color")
+        vol_box.prop(tlm, "volume_absorption_density", text="Density", slider=True)
+    vol_box.separator(factor=0.3)
+    vol_box.prop(tlm, "use_volume_scatter", text="Scatter",
+                 icon='OUTLINER_OB_VOLUME', toggle=True)
     if tlm.use_volume_scatter:
-        comp.prop(tlm, "volume_scatter_color", text="Scatter Color")
-        comp.prop(tlm, "volume_scatter_density", text="Scatter Density", slider=True)
-        comp.prop(tlm, "volume_scatter_anisotropy", text="Anisotropy", slider=True)
+        vol_box.prop(tlm, "volume_scatter_color", text="Color")
+        vol_box.prop(tlm, "volume_scatter_density", text="Density", slider=True)
+        vol_box.prop(tlm, "volume_scatter_anisotropy", text="Anisotropy", slider=True)
 
-    # ── True geometric Displacement ──
+    # ── 4. Displacement ──
     # Master toggle wires the layer stack's displacement contributions to
     # Material Output.Displacement. Per-layer use_displacement (labelled
     # "Add to Displace" in the PBR Channels section) selects which layers
-    # feed into the height stack. The "(Master)" suffix here disambiguates
-    # from the per-layer toggle.
-    disp_row = comp.row(align=True)
-    disp_row.prop(tlm, "use_displacement", text="Displacement (Master)",
+    # feed into the height stack.
+    comp.separator(factor=0.6)
+    disp_box = comp.box().column(align=True)
+    disp_box.label(text="Displacement", icon='MOD_SUBSURF')
+    disp_box.prop(tlm, "use_displacement", text="Displacement (Master)",
                   icon='MOD_SUBSURF', toggle=True)
     if tlm.use_displacement:
-        comp.prop(tlm, "displacement_strength", text="Strength", slider=True)
-        comp.prop(tlm, "displacement_midlevel", text="Midlevel", slider=True)
-        comp.prop(tlm, "displacement_adaptive", text="Auto Adaptive Subdiv",
-                  icon='MESH_GRID', toggle=True)
+        disp_box.prop(tlm, "displacement_strength", text="Strength", slider=True)
+        disp_box.prop(tlm, "displacement_midlevel", text="Midlevel", slider=True)
+        disp_box.prop(tlm, "displacement_adaptive", text="Auto Adaptive Subdiv",
+                      icon='MESH_GRID', toggle=True)
+
+    # ── 5. Actions ──
+    comp.separator(factor=0.6)
     ops_row = comp.row(align=True)
     ops_row.operator("tlm.rebuild_composite", text="Rebuild", icon='FILE_REFRESH')
     ops_row.operator("tlm.flatten_layers",    text="Flatten", icon='IMAGE_ZDEPTH')

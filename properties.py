@@ -1464,6 +1464,14 @@ class TLM_LayerItem(PropertyGroup):
                     "Coordinate preset/type, Transform, Vector Distortion",
         default=False,
     )
+    # UI state — collapsible Mask Refinement section (Levels + Softness + Blur).
+    # Collapsed by default since refinement is advanced — most users set up the
+    # mask source and don't need to remap Levels.
+    show_mask_refinement: BoolProperty(
+        name="Show Mask Refinement",
+        description="Expand Levels (Input/Output/Gamma) + Softness + Blur controls",
+        default=False,
+    )
 
     @property
     def roughness_image(self):
