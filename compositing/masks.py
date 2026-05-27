@@ -37,12 +37,6 @@ __all__ = [
     '_build_blurred_image_mask',
     '_build_mask_slot',
     '_apply_mask',
-    '_BASE_LAYER_WIDTH',
-    '_PROC_LAYER_WIDTH',
-    '_CHANNEL_LAYOUT_ORDER',
-    '_CHANNEL_Y_GAP',
-    '_CHANNEL_ROUTE_OFFSET',
-    '_LAYER_COLUMN_GAP',
 ]
 
 
@@ -347,7 +341,6 @@ def _build_blurred_image_mask(node_tree, img, uv_map, blur, x, y, name_tag="",
     node_tree.links.new(uv.outputs["UV"], group.inputs["UV"])
 
     return group.outputs["Value"]
-
 
 
 def _build_mask_slot(node_tree, layer, slot, uv_map, x, y, name_tag=""):
@@ -776,55 +769,5 @@ def _apply_mask(node_tree, mix_node, layer, uv_map, x, y, layer_alpha=None):
     else:
         node_tree.links.new(mult.outputs["Value"], _factor_socket(mix_node))
     return mult
-
-
-# ── Layer width helper ────────────────────────────────────────────────────────
-
-_BASE_LAYER_WIDTH = {
-    # Width = full span of sub-nodes + padding. These are intentionally tight:
-    # the graph should keep the lane style without leaving giant blank gaps.
-    'PAINT':        900,
-    'FILL':         720,
-    'ADJUSTMENT':   820,
-    'PROCEDURAL':   980,
-    'REFERENCE':    980,
-    'GROUP':        900,
-}
-
-_PROC_LAYER_WIDTH = {
-    # Most procedural types are a compact tex -> ramp chain.  Only the
-    # hand-built math topologies need extra horizontal room.
-    'GRADIENT':     900,
-    'WHITE_NOISE':  900,
-    'CHECKER':      940,
-    'MAGIC':        980,
-    'NOISE':       1020,
-    'VORONOI':     1020,
-    'WAVE':        1020,
-    'MUSGRAVE':    1020,
-    'BRICK':       1120,
-    'DOTS':        1120,
-    'CRACKS':      1120,
-    'GABOR':       1120,
-    'STRIPES':     1180,
-    'HEX_GRID':    1180,
-    'RIDGED':      1260,
-    'MARBLE':      1360,
-}
-
-
-_CHANNEL_LAYOUT_ORDER = (
-    'base_color',
-    'roughness',
-    'metallic',
-    'normal',
-    'emission',
-    'transmission',
-    'alpha',
-    'bump',
-)
-_CHANNEL_Y_GAP = 560
-_CHANNEL_ROUTE_OFFSET = 160
-_LAYER_COLUMN_GAP = 90
 
 

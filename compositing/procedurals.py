@@ -34,7 +34,8 @@ from . import (
     _b_socket,
     _result_socket,
     _enabled_socket,
-    _set_factor,
+    # _set_factor lives in channels.py (loaded AFTER procedurals) —
+    # procedurals doesn't call it directly, only docstrings mention it.
 )
 from . import TLM_PREFIX  # noqa: F401
 
