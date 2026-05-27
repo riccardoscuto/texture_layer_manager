@@ -290,6 +290,8 @@ def _layer_to_dict(layer):
         d["use_bump"]          = layer.use_bump
         d["bump_strength"]     = round(layer.bump_strength, 4)
         d["bump_distance"]     = round(layer.bump_distance, 4)
+        d["use_displacement"]  = getattr(layer, 'use_displacement', False)
+        d["displacement_scale"] = round(getattr(layer, 'displacement_scale', 1.0), 4)
         d["use_normal"]        = getattr(layer, 'use_normal', False)
         d["normal_image_name"]    = getattr(layer, 'normal_image_name', "")
         d["normal_strength"]   = round(getattr(layer, 'normal_strength', 1.0), 4)
@@ -566,6 +568,8 @@ def _dict_to_layer(d, tlm):
         layer.use_bump             = d.get("use_bump", False)
         layer.bump_strength        = d.get("bump_strength", 0.5)
         layer.bump_distance        = d.get("bump_distance", 0.05)
+        layer.use_displacement     = d.get("use_displacement", False)
+        layer.displacement_scale   = d.get("displacement_scale", 1.0)
         layer.use_normal           = d.get("use_normal", False)
         layer.normal_image_name    = d.get("normal_image_name", "")
         layer.normal_strength      = d.get("normal_strength", 1.0)
@@ -637,6 +641,13 @@ class TLM_OT_ExportJSON(Operator):
                 "use_emission_output":       getattr(tlm, 'use_emission_output', False),
                 "use_base_color_alpha":      getattr(tlm, 'use_base_color_alpha', False),
                 "alpha_blend_method":        getattr(tlm, 'alpha_blend_method', 'AUTO'),
+                # Real geometric Displacement — material-level master switch
+                # + Cycles Displacement node Scale/Midlevel. Without these,
+                # a rocky/brick preset round-trip loses the chunky silhouette.
+                "use_displacement":          getattr(tlm, 'use_displacement', False),
+                "displacement_strength":     getattr(tlm, 'displacement_strength', 0.1),
+                "displacement_midlevel":     getattr(tlm, 'displacement_midlevel', 0.5),
+                "displacement_adaptive":     getattr(tlm, 'displacement_adaptive', True),
             },
             "layers":      [_layer_to_dict(l) for l in tlm.layers],
         }
@@ -724,6 +735,10 @@ class TLM_OT_ImportJSON(Operator):
                 ('use_emission_output',            False),
                 ('use_base_color_alpha',           False),
                 ('alpha_blend_method',             'AUTO'),
+                ('use_displacement',               False),
+                ('displacement_strength',          0.1),
+                ('displacement_midlevel',          0.5),
+                ('displacement_adaptive',          True),
             ):
                 if prop_name in mp:
                     try:

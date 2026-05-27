@@ -355,6 +355,126 @@ def _on_volume_absorption_change(material_props, context):
         compositing.rebuild_node_tree(mat)
 
 
+def _on_displacement_change(material_props, context):
+    """Structural — full rebuild so the Displacement node and Material
+    Output wiring is created or torn down. Also triggers the adaptive
+    subdivision auto-setup (cycles experimental + mesh subsurf adaptive)
+    when `displacement_adaptive` is True.
+    """
+    mat = _resolve_owning_material(material_props, context)
+    if mat is None:
+        return
+    try:
+        from . import compositing
+    except ImportError:
+        import importlib
+        compositing = importlib.import_module(__package__ + ".compositing")
+    # Auto-setup Cycles + mesh adaptive subdivision when displacement is on
+    if material_props.use_displacement and material_props.displacement_adaptive:
+        _ensure_displacement_setup(mat)
+    if getattr(mat.tlm, 'auto_composite', True):
+        compositing.rebuild_node_tree(mat)
+
+
+def _on_displacement_param_change(material_props, context):
+    """Hot-update for strength + midlevel — pokes the ShaderNodeDisplacement
+    inputs directly. If the node doesn't exist (displacement off), no-op."""
+    mat = _resolve_owning_material(material_props, context)
+    if mat is None or not mat.use_nodes or not mat.node_tree:
+        return
+    nt = mat.node_tree
+    disp = next((n for n in nt.nodes if n.bl_idname == 'ShaderNodeDisplacement'), None)
+    if disp is None:
+        return
+    try:
+        s = disp.inputs.get("Scale")
+        if s is not None and not s.is_linked:
+            s.default_value = material_props.displacement_strength
+        m = disp.inputs.get("Midlevel")
+        if m is not None and not m.is_linked:
+            m.default_value = material_props.displacement_midlevel
+    except (AttributeError, KeyError):
+        pass
+
+
+def _ensure_displacement_setup(mat):
+    """Configure Cycles + every mesh using this material for TRUE
+    geometric displacement (silhouette break, not just bump):
+
+      1. ``mat.displacement_method = 'DISPLACEMENT'``
+         In Blender 5.1+ this lives directly on the material (used to be
+         ``mat.cycles.displacement_method`` pre-3.x). Defaults to ``BUMP``
+         which means the Displacement output is collapsed back to a bump
+         normal — invisible on the silhouette. Forcing ``DISPLACEMENT``
+         actually moves vertices.
+         Older Blender exposes it via ``mat.cycles.displacement_method``;
+         we try both with hasattr guards.
+
+      2. On older Blender (pre-5.1) also ``scene.cycles.feature_set =
+         'EXPERIMENTAL'`` — required for adaptive subd back then. Removed
+         in 5.1.
+
+      3. Each MESH using the material gets a SUBSURF modifier with the
+         modifier-level ``use_adaptive_subdivision = True`` (Blender 5.1+
+         exposes the flag here, not on ``obj.cycles`` like pre-5.x).
+
+    Skips gracefully when the renderer isn't Cycles or the API is missing.
+    """
+    scene = bpy.context.scene
+    if scene.render.engine != 'CYCLES':
+        return
+
+    # ── 1. Material displacement method ──
+    # New-style API (Blender 4.x+ / 5.x): mat.displacement_method
+    if hasattr(mat, 'displacement_method'):
+        try:
+            mat.displacement_method = 'DISPLACEMENT'
+        except (AttributeError, TypeError, RuntimeError):
+            pass
+    # Old-style API (pre-4.x): mat.cycles.displacement_method
+    elif hasattr(mat, 'cycles') and hasattr(mat.cycles, 'displacement_method'):
+        try:
+            mat.cycles.displacement_method = 'DISPLACEMENT'
+        except (AttributeError, TypeError, RuntimeError):
+            pass
+
+    # ── 2. feature_set EXPERIMENTAL (only on old Blender) ──
+    cycles = getattr(scene, 'cycles', None)
+    if cycles is not None and hasattr(cycles, 'feature_set'):
+        try:
+            cycles.feature_set = 'EXPERIMENTAL'
+        except (AttributeError, TypeError, RuntimeError):
+            pass
+
+    # ── 3. Mesh-level adaptive subdivision ──
+    for obj in bpy.data.objects:
+        if obj.type != 'MESH':
+            continue
+        if not any(slot.material is mat for slot in obj.material_slots):
+            continue
+        # Find or create a SUBSURF modifier
+        sub = next((m for m in obj.modifiers if m.type == 'SUBSURF'), None)
+        if sub is None:
+            try:
+                sub = obj.modifiers.new(name="TLM_Adaptive_Subdiv", type='SUBSURF')
+                sub.levels = 1
+                sub.render_levels = 1
+            except (RuntimeError, AttributeError):
+                continue
+        # Modifier-level adaptive flag (5.1+ canonical location)
+        if hasattr(sub, 'use_adaptive_subdivision'):
+            try:
+                sub.use_adaptive_subdivision = True
+            except (AttributeError, TypeError, RuntimeError):
+                pass
+        # Object-level fallback (pre-5.x)
+        if hasattr(obj.cycles, 'use_adaptive_subdivision'):
+            try:
+                obj.cycles.use_adaptive_subdivision = True
+            except (AttributeError, TypeError, RuntimeError):
+                pass
+
+
 def _on_volume_scatter_change(material_props, context):
     """Structural toggle for use_volume_scatter — triggers full rebuild
     so the Volume Scatter shader appears/disappears and the combine
@@ -1205,6 +1325,33 @@ class TLM_LayerItem(PropertyGroup):
         name="Bump Distance", description="Scale of the bump displacement",
         default=0.05, min=0.001, max=1.0,
         update=_make_hot_callback("bump_distance"),
+    )
+
+    # ── True geometric displacement ──
+    # Layers with use_displacement=True contribute a HEIGHT signal that
+    # gets summed across the stack and wired to Material Output.Displacement.
+    # Unlike Bump (which only perturbs the shading normal — silhouette
+    # stays smooth), real Displacement moves the actual mesh vertices via
+    # Cycles' adaptive subdivision feature. Required for chunky materials
+    # like rocky terrain, brick walls, sci-fi panels with deep grooves —
+    # anywhere the SILHOUETTE needs to break, not just the shading.
+    use_displacement: BoolProperty(
+        name="Displacement",
+        description="Contribute this layer's texture to the material's "
+                    "displacement height. Needs mat.tlm.use_displacement on. "
+                    "Cumulative — multiple layers' heights sum together "
+                    "exactly like Bump.",
+        default=False,
+        update=_on_layer_update,
+    )
+    displacement_scale: FloatProperty(
+        name="Displacement Scale",
+        description="Per-layer height contribution before the material-level "
+                    "displacement_strength multiplier. Positive pushes outward, "
+                    "negative pushes inward. 1.0 = full layer height, "
+                    "0.5 = half, 0.0 = no contribution.",
+        default=1.0, min=-5.0, max=5.0,
+        update=_make_hot_callback("displacement_scale"),
     )
 
     # UI state â€” collapsible PBR section
@@ -2318,6 +2465,52 @@ class TLM_MaterialProperties(PropertyGroup):
         default=0.0, min=-1.0, max=1.0,
         subtype='FACTOR',
         update=lambda self, ctx: _on_volume_scatter_param_change(self, ctx),
+    )
+
+    # ── True geometric Displacement (material-level master switch) ──
+    # Wires a ShaderNodeDisplacement to Material Output.Displacement when
+    # ON. Each PROCEDURAL/PAINT layer with its own `use_displacement=True`
+    # contributes a height summed into the displacement node's Height
+    # input. Requires Cycles + Adaptive Subdivision on the mesh for actual
+    # vertex movement (else falls back to bump-style normal perturbation).
+    # When `displacement_adaptive` is True, the rebuild auto-configures
+    # cycles.feature_set='EXPERIMENTAL' + Subsurf modifier with adaptive
+    # subdivision on every mesh using this material.
+    use_displacement: BoolProperty(
+        name="Displacement",
+        description="Wire the layer stack's displacement contributions to "
+                    "Material Output.Displacement. Unlike Bump (shading-only), "
+                    "this moves real geometry (silhouette breaks). Needs "
+                    "Cycles + Adaptive Subdivision for visible effect.",
+        default=False,
+        update=lambda self, ctx: _on_displacement_change(self, ctx),
+    )
+    displacement_strength: FloatProperty(
+        name="Displacement Strength",
+        description="Master multiplier on the displacement height. 0 = flat. "
+                    "0.05-0.20 = typical (small details). 0.5+ = dramatic chunky "
+                    "displacement (rocky pile, brick wall). Combined with "
+                    "per-layer displacement_scale.",
+        default=0.1, min=0.0, max=5.0,
+        update=lambda self, ctx: _on_displacement_param_change(self, ctx),
+    )
+    displacement_midlevel: FloatProperty(
+        name="Midlevel",
+        description="Height value treated as 'neutral' (no displacement). "
+                    "0.5 (default) means values around 0.5 stay at the original "
+                    "surface; >0.5 pushes out; <0.5 pushes in.",
+        default=0.5, min=0.0, max=1.0, subtype='FACTOR',
+        update=lambda self, ctx: _on_displacement_param_change(self, ctx),
+    )
+    displacement_adaptive: BoolProperty(
+        name="Adaptive Subdivision",
+        description="Auto-enable Cycles experimental + add a Subsurf modifier "
+                    "with adaptive subdivision on meshes using this material. "
+                    "Required for the displacement to actually move geometry "
+                    "(otherwise Cycles falls back to bump-like shading). Off "
+                    "if you've already set this up manually.",
+        default=True,
+        update=lambda self, ctx: _on_displacement_change(self, ctx),
     )
 
     # use_custom_slots: BoolProperty(

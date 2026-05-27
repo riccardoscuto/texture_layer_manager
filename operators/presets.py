@@ -509,6 +509,14 @@ class TLM_OT_ApplyPreset(Operator):
                     tlm.alpha_blend_method = preset_material['alpha_blend_method']
                 except (TypeError, ValueError):
                     pass  # unknown enum value — keep default
+            if 'use_displacement' in preset_material:
+                tlm.use_displacement = preset_material['use_displacement']
+            if 'displacement_strength' in preset_material:
+                tlm.displacement_strength = preset_material['displacement_strength']
+            if 'displacement_midlevel' in preset_material:
+                tlm.displacement_midlevel = preset_material['displacement_midlevel']
+            if 'displacement_adaptive' in preset_material:
+                tlm.displacement_adaptive = preset_material['displacement_adaptive']
 
         # Per-layer apply isolated in a closure so a single malformed entry
         # can be rolled back without aborting the whole preset import.
@@ -768,6 +776,8 @@ class TLM_OT_ApplyPreset(Operator):
                 layer.use_bump             = ld.get("use_bump", False)
                 layer.bump_strength        = ld.get("bump_strength", 0.5)
                 layer.bump_distance        = ld.get("bump_distance", 0.05)
+                layer.use_displacement     = ld.get("use_displacement", False)
+                layer.displacement_scale   = ld.get("displacement_scale", 1.0)
                 layer.use_normal           = ld.get("use_normal", False)
                 layer.normal_image_name    = ld.get("normal_image_name", "")
                 layer.normal_strength      = ld.get("normal_strength", 1.0)
@@ -1024,6 +1034,8 @@ class TLM_OT_SavePreset(Operator):
                 d["use_bump"]             = layer.use_bump
                 d["bump_strength"]        = layer.bump_strength
                 d["bump_distance"]        = layer.bump_distance
+                d["use_displacement"]     = getattr(layer, 'use_displacement', False)
+                d["displacement_scale"]   = getattr(layer, 'displacement_scale', 1.0)
                 d["use_normal"]           = getattr(layer, 'use_normal', False)
                 d["normal_image_name"]    = getattr(layer, 'normal_image_name', "")
                 d["normal_strength"]      = getattr(layer, 'normal_strength', 1.0)
@@ -1067,6 +1079,10 @@ class TLM_OT_SavePreset(Operator):
             "use_emission_output":            getattr(tlm, 'use_emission_output', False),
             "use_base_color_alpha":           getattr(tlm, 'use_base_color_alpha', False),
             "alpha_blend_method":             getattr(tlm, 'alpha_blend_method', 'AUTO'),
+            "use_displacement":               getattr(tlm, 'use_displacement', False),
+            "displacement_strength":          getattr(tlm, 'displacement_strength', 0.1),
+            "displacement_midlevel":          getattr(tlm, 'displacement_midlevel', 0.5),
+            "displacement_adaptive":          getattr(tlm, 'displacement_adaptive', True),
         }
         data = {
             "preset_name": self.preset_name,

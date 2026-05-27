@@ -1020,6 +1020,16 @@ def _draw_pbr_channels(col, layer, tlm):
         bumpr.prop(layer, "bump_strength", text="Str", slider=True)
         bumpr.prop(layer, "bump_distance", text="Dist", slider=True)
 
+    # Displacement (real geometric) — separate from Bump because Bump only
+    # perturbs the shading normal while Displacement moves vertices.
+    # Per-layer toggle stacks cumulatively into Material Output.Displacement
+    # when mat.tlm.use_displacement is on.
+    dispr = pc.row(align=True)
+    dispr.prop(layer, "use_displacement", text="Displace",
+               icon='MOD_SUBSURF', toggle=True)
+    if layer.use_displacement:
+        dispr.prop(layer, "displacement_scale", text="Scale", slider=True)
+
     # PBR Channels list â€” toggles here are ADDITIONAL channels beyond the
     # main "Output" target chosen at the top of the panel. Cumulative
     # semantics: a layer routed to ROUGHNESS with use_metallic=True drives
@@ -1213,6 +1223,19 @@ def _draw_composite_section(layout, tlm):
         comp.prop(tlm, "volume_scatter_color", text="Scatter Color")
         comp.prop(tlm, "volume_scatter_density", text="Scatter Density", slider=True)
         comp.prop(tlm, "volume_scatter_anisotropy", text="Anisotropy", slider=True)
+
+    # ── True geometric Displacement ──
+    # Master toggle wires the layer stack's displacement contributions to
+    # Material Output.Displacement. Per-layer use_displacement = which
+    # layers feed into the height stack.
+    disp_row = comp.row(align=True)
+    disp_row.prop(tlm, "use_displacement", text="Displacement",
+                  icon='MOD_SUBSURF', toggle=True)
+    if tlm.use_displacement:
+        comp.prop(tlm, "displacement_strength", text="Strength", slider=True)
+        comp.prop(tlm, "displacement_midlevel", text="Midlevel", slider=True)
+        comp.prop(tlm, "displacement_adaptive", text="Auto Adaptive Subdiv",
+                  icon='MESH_GRID', toggle=True)
     ops_row = comp.row(align=True)
     ops_row.operator("tlm.rebuild_composite", text="Rebuild", icon='FILE_REFRESH')
     ops_row.operator("tlm.flatten_layers",    text="Flatten", icon='IMAGE_ZDEPTH')

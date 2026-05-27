@@ -5758,6 +5758,43 @@ def rebuild_node_tree(material):
             elif sct_node:
                 node_tree.links.new(sct_node.outputs["Volume"], vol_in)
 
+        # ── Displacement ─────────────────────────────────────────────────
+        # When `mat.tlm.use_displacement=True` AND at least one layer has
+        # `use_displacement=True`, build a cumulative height stack and wire
+        # it to Material Output.Displacement via ShaderNodeDisplacement.
+        # Tear down first so toggle-off leaves no orphans.
+        if mat_out is not None:
+            stale_disp = [n for n in node_tree.nodes
+                          if n.bl_idname == 'ShaderNodeDisplacement'
+                          and n.name.startswith(TLM_PREFIX)]
+            for n in stale_disp:
+                node_tree.nodes.remove(n)
+            disp_in = mat_out.inputs.get("Displacement")
+            if disp_in is not None and disp_in.is_linked:
+                for l in list(node_tree.links):
+                    if l.to_node is mat_out and l.to_socket is disp_in:
+                        node_tree.links.remove(l)
+            if (getattr(tlm, 'use_displacement', False)
+                    and disp_in is not None
+                    and _channel_used(expanded, 'use_displacement')):
+                height_out = _build_displacement_channel(
+                    node_tree, expanded, uv_map, start_x, ch_y.get('bump', shader_y),
+                    x_step,
+                )
+                if height_out is not None:
+                    disp_node = node_tree.nodes.new('ShaderNodeDisplacement')
+                    disp_node.name = f"{TLM_PREFIX}displacement_{_next_id()}"
+                    disp_node.label = "Displacement (TLM)"
+                    disp_node.location = (shader_x, shader_y - 620)
+                    disp_node.inputs["Scale"].default_value = getattr(
+                        tlm, 'displacement_strength', 0.1
+                    )
+                    disp_node.inputs["Midlevel"].default_value = getattr(
+                        tlm, 'displacement_midlevel', 0.5
+                    )
+                    node_tree.links.new(height_out, disp_node.inputs["Height"])
+                    node_tree.links.new(disp_node.outputs["Displacement"], disp_in)
+
         # â”€â”€ Base Color â€” built from root_layers to preserve GROUP alpha for clipping mask â”€
         bc_out, bc_alpha = _build_base_color(node_tree, root_layers, group_children, uv_map, start_x, ch_y['base_color'], x_step)
         if bc_out:
@@ -6946,7 +6983,84 @@ _CHANNEL_USE_FLAG = {
     'emission':     'use_emission',
     'transmission': 'use_transmission',
     'bump':         'use_bump',
+    'displacement': 'use_displacement',
 }
+
+
+def _build_displacement_channel(node_tree, layers, uv_map, start_x, y_base, x_step):
+    """Build the displacement height stack. Each layer with use_displacement=True
+    contributes a scalar height; heights are SUMMED across the stack (per-layer
+    `displacement_scale` multiplies the contribution). Returns the final summed
+    height socket, or None if no layer contributes.
+
+    Unlike _build_bump_channel (which has per-layer Bump nodes with their own
+    Strength/Distance and blends as Normal vectors), displacement uses a single
+    cumulative ADD chain on the scalar fac. Modulators (mask / opacity / fresnel)
+    are NOT applied here — they'd require treating displacement as a full
+    channel pipeline with per-layer mix nodes. Future enhancement.
+    """
+    current = None
+    positions = _layer_positions(layers, start_x, y_base)
+
+    for i, layer in enumerate(layers):
+        if layer.layer_type == "ADJUSTMENT":
+            continue
+        if not _layer_contributes_to(layer, 'displacement'):
+            continue
+
+        x, y = positions[i]
+        fac_out = None
+
+        if layer.layer_type == "PROCEDURAL":
+            fac_out = _build_proc_fac_node(node_tree, layer, f"disp_{i}", x, y, uv_map)
+        elif layer.layer_type == "PAINT" and layer.image:
+            tex = node_tree.nodes.new("ShaderNodeTexImage")
+            tex.name = f"{TLM_PREFIX}disp_img_{_next_id()}"
+            tex.image = layer.image
+            tex.location = (x, y)
+            try:
+                tex.image.colorspace_settings.name = "Non-Color"
+            except Exception:
+                pass
+            uv = node_tree.nodes.new("ShaderNodeUVMap")
+            uv.name = f"{TLM_PREFIX}disp_uv_{_next_id()}"
+            uv.uv_map = uv_map
+            uv.location = (x - 220, y)
+            node_tree.links.new(uv.outputs["UV"], tex.inputs["Vector"])
+            sep = node_tree.nodes.new("ShaderNodeSeparateColor")
+            sep.name = f"{TLM_PREFIX}disp_sep_{_next_id()}"
+            sep.location = (x + 220, y)
+            node_tree.links.new(tex.outputs["Color"], sep.inputs["Color"])
+            fac_out = sep.outputs["Red"]
+
+        if fac_out is None:
+            continue
+
+        # Apply per-layer displacement_scale via a Multiply (skip when 1.0)
+        scale = getattr(layer, 'displacement_scale', 1.0)
+        if abs(scale - 1.0) > 1e-4:
+            scl = node_tree.nodes.new("ShaderNodeMath")
+            scl.operation = 'MULTIPLY'
+            scl.name = f"{TLM_PREFIX}disp_scale_{_next_id()}"
+            scl.location = (x + 380, y)
+            node_tree.links.new(fac_out, scl.inputs[0])
+            scl.inputs[1].default_value = scale
+            fac_out = scl.outputs["Value"]
+
+        # Accumulate via ADD
+        if current is None:
+            current = fac_out
+        else:
+            add = node_tree.nodes.new("ShaderNodeMath")
+            add.operation = 'ADD'
+            add.use_clamp = False  # heights can exceed [0,1]; midlevel clamps later
+            add.name = f"{TLM_PREFIX}disp_add_{_next_id()}"
+            add.location = (x + 540, y)
+            node_tree.links.new(current, add.inputs[0])
+            node_tree.links.new(fac_out, add.inputs[1])
+            current = add.outputs["Value"]
+
+    return current
 
 
 def _layer_contributes_to(layer, channel_id):
@@ -6993,7 +7107,7 @@ def _channel_used(layers, flag_attr):
         'use_roughness': 'roughness', 'use_metallic': 'metallic',
         'use_normal': 'normal', 'use_emission': 'emission',
         'use_transmission': 'transmission', 'use_alpha': 'alpha',
-        'use_bump': 'bump',
+        'use_bump': 'bump', 'use_displacement': 'displacement',
     }
     channel_id = flag_to_channel.get(flag_attr)
     if channel_id is None:
