@@ -355,6 +355,35 @@ def _on_volume_absorption_change(material_props, context):
         compositing.rebuild_node_tree(mat)
 
 
+def _on_layer_use_displacement_change(layer, context):
+    """Per-layer ``use_displacement`` toggle handler.
+
+    Two responsibilities:
+
+    1. **Auto-enable the material-level master** (`tlm.use_displacement`)
+       when the per-layer toggle flips False → True. Without this, users
+       hit a confusing UX gotcha: clicking "Add to Displace" on a layer
+       does nothing if they haven't separately enabled the master in the
+       Composite section.
+
+    2. **Trigger the standard deferred rebuild** via ``_on_layer_update``
+       so the displacement node graph gets re-wired.
+
+    Flipping the master OFF here when ALL layers are off would be
+    symmetric — but a power user might want the master on with no
+    layers (e.g. about to add a layer next), so leave that case alone.
+    """
+    if layer.use_displacement:
+        try:
+            mat = layer.id_data
+            if (mat is not None and isinstance(mat, bpy.types.Material)
+                    and not mat.tlm.use_displacement):
+                mat.tlm.use_displacement = True
+        except (AttributeError, ReferenceError):
+            pass
+    _on_layer_update(layer, context)
+
+
 def _on_displacement_change(material_props, context):
     """Structural — full rebuild so the Displacement node and Material
     Output wiring is created or torn down. Also triggers the adaptive
@@ -1404,11 +1433,12 @@ class TLM_LayerItem(PropertyGroup):
     use_displacement: BoolProperty(
         name="Displacement",
         description="Contribute this layer's texture to the material's "
-                    "displacement height. Needs mat.tlm.use_displacement on. "
-                    "Cumulative — multiple layers' heights sum together "
-                    "exactly like Bump.",
+                    "displacement height. Cumulative — multiple layers' "
+                    "heights sum together exactly like Bump. Activating "
+                    "this auto-enables the material-level Displacement "
+                    "master (in Composite) if it was off.",
         default=False,
-        update=_on_layer_update,
+        update=_on_layer_use_displacement_change,
     )
     displacement_scale: FloatProperty(
         name="Displacement Scale",

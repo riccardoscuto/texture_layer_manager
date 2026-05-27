@@ -1083,15 +1083,22 @@ def _draw_pbr_channels(col, layer, tlm):
 
     # Displacement (real geometric) — separate from Bump because Bump only
     # perturbs the shading normal while Displacement moves vertices.
-    # Per-layer toggle stacks cumulatively into Material Output.Displacement
-    # when mat.tlm.use_displacement is on. Label is "Add to Displace"
-    # (verb form, per-layer scope) to disambiguate from the material-level
-    # master switch in the Composite section, labelled "Displacement (Master)".
+    # Per-layer toggle stacks cumulatively into Material Output.Displacement.
+    # Activating "Add to Displace" auto-enables the material-level
+    # Displacement master (see _on_layer_use_displacement_change in
+    # properties.py), so the user no longer has to flip two toggles.
     dispr = pc.row(align=True)
     dispr.prop(layer, "use_displacement", text="Add to Displace",
                icon='MOD_SUBSURF', toggle=True)
     if layer.use_displacement:
         dispr.prop(layer, "displacement_scale", text="Scale", slider=True)
+        # Safety hint: if user manually turned the master OFF after
+        # opting layers in, surface that the layer is currently silent.
+        if not tlm.use_displacement:
+            warn = pc.row(align=True)
+            warn.alert = True
+            warn.label(text="Master OFF in Composite — layer is silent",
+                       icon='ERROR')
 
     # PBR Channels list — toggles here are ADDITIONAL channels beyond the
     # main "Output" target chosen at the top of the panel. Cumulative
