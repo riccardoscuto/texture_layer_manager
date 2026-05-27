@@ -875,6 +875,16 @@ class TLM_LayerItem(PropertyGroup):
         default=1.0, min=0.0, max=1.0,
         update=_make_hot_callback("mask_voronoi_randomness"),
     )
+    mask_voronoi_edge_width: FloatProperty(
+        name="Voronoi Edge Width A",
+        description="How far the edge zone of the DTE mask extends INTO the cell (with mask_invert). "
+                    "1.0 = full smooth gradient edge→centre. Lower values (~0.3) make the mask hit "
+                    "saturation closer to the edge, producing thinner crack-only bands. Higher values "
+                    "(>1.0) would extend beyond cell boundaries (clamped). For cobblestone dirt "
+                    "filling broad areas between stones, use 1.0; for thin crack-only ink, use 0.3.",
+        default=1.0, min=0.05, max=2.0,
+        update=_make_hot_callback("mask_voronoi_edge_width"),
+    )
     mask_wireframe_size: FloatProperty(
         name="Wireframe Size",
         description="Thickness of the real mesh-edge mask when mask source = WIREFRAME",
@@ -988,6 +998,12 @@ class TLM_LayerItem(PropertyGroup):
         description="Cell-centre jitter on the secondary Voronoi mask",
         default=1.0, min=0.0, max=1.0,
         update=_make_hot_callback("mask_voronoi_randomness_b"),
+    )
+    mask_voronoi_edge_width_b: FloatProperty(
+        name="Voronoi Edge Width B",
+        description="Edge zone width for the secondary Voronoi mask (see slot A description)",
+        default=1.0, min=0.05, max=2.0,
+        update=_make_hot_callback("mask_voronoi_edge_width_b"),
     )
 
     mask_combine: EnumProperty(

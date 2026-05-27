@@ -2713,10 +2713,12 @@ def _build_mask_slot(node_tree, layer, slot, uv_map, x, y, name_tag=""):
             v_feature    = getattr(layer, 'mask_voronoi_feature', 'DISTANCE_TO_EDGE')
             v_scale      = getattr(layer, 'mask_voronoi_scale', 10.0)
             v_randomness = getattr(layer, 'mask_voronoi_randomness', 1.0)
+            v_edge_width = getattr(layer, 'mask_voronoi_edge_width', 1.0)
         else:
             v_feature    = getattr(layer, 'mask_voronoi_feature_b', 'DISTANCE_TO_EDGE')
             v_scale      = getattr(layer, 'mask_voronoi_scale_b', 10.0)
             v_randomness = getattr(layer, 'mask_voronoi_randomness_b', 1.0)
+            v_edge_width = getattr(layer, 'mask_voronoi_edge_width_b', 1.0)
 
         # Object-space coords so mask follows the geometry, not the UVs
         tex_coord = node_tree.nodes.new("ShaderNodeTexCoord")
@@ -2751,7 +2753,12 @@ def _build_mask_slot(node_tree, layer, slot, uv_map, x, y, name_tag=""):
         mr.inputs["From Min"].default_value = 0.0
         # Auto-normalise based on scale. Safe lower bound on scale to
         # avoid div-by-zero, even though properties.py min is 0.1.
-        mr.inputs["From Max"].default_value = 0.5 / max(v_scale, 0.1)
+        # edge_width scales how much of the cell width is mapped to
+        # 0..1. With invert=True, this controls how broad the "edge band"
+        # of the mask is. edge_width=1.0 → smooth gradient edge→centre
+        # (broad bands); edge_width=0.3 → mask saturates well before
+        # centre, producing thin crack ink.
+        mr.inputs["From Max"].default_value = (0.5 * v_edge_width) / max(v_scale, 0.1)
         mr.inputs["To Min"].default_value = 0.0
         mr.inputs["To Max"].default_value = 1.0
         _tag(mr, layer.name, f"mask_vorange_{name_tag}")

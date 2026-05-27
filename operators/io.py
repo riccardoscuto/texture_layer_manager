@@ -253,6 +253,7 @@ def _layer_to_dict(layer):
         d["mask_voronoi_feature"]    = getattr(layer, 'mask_voronoi_feature', 'DISTANCE_TO_EDGE')
         d["mask_voronoi_scale"]      = round(getattr(layer, 'mask_voronoi_scale', 10.0), 4)
         d["mask_voronoi_randomness"] = round(getattr(layer, 'mask_voronoi_randomness', 1.0), 4)
+        d["mask_voronoi_edge_width"] = round(getattr(layer, 'mask_voronoi_edge_width', 1.0), 4)
         d["use_mask_b"]         = getattr(layer, 'use_mask_b', False)
         d["mask_source_b"]      = getattr(layer, 'mask_source_b', 'POINTINESS')
         d["mask_image_name_b"]  = getattr(layer, 'mask_image_name_b', "")
@@ -261,6 +262,7 @@ def _layer_to_dict(layer):
         d["mask_voronoi_feature_b"]    = getattr(layer, 'mask_voronoi_feature_b', 'DISTANCE_TO_EDGE')
         d["mask_voronoi_scale_b"]      = round(getattr(layer, 'mask_voronoi_scale_b', 10.0), 4)
         d["mask_voronoi_randomness_b"] = round(getattr(layer, 'mask_voronoi_randomness_b', 1.0), 4)
+        d["mask_voronoi_edge_width_b"] = round(getattr(layer, 'mask_voronoi_edge_width_b', 1.0), 4)
         d["mask_combine"]       = getattr(layer, 'mask_combine', 'MULTIPLY')
         d["mask_contrast"]      = round(getattr(layer, 'mask_contrast', 0.5), 4)
         # Mask refinement â€” Levels (input range + gamma + output range)
@@ -538,6 +540,7 @@ def _dict_to_layer(d, tlm):
             pass
         layer.mask_voronoi_scale      = d.get("mask_voronoi_scale", 10.0)
         layer.mask_voronoi_randomness = d.get("mask_voronoi_randomness", 1.0)
+        layer.mask_voronoi_edge_width = d.get("mask_voronoi_edge_width", 1.0)
         layer.use_mask_b         = d.get("use_mask_b", False)
         layer.mask_source_b      = d.get("mask_source_b", "POINTINESS")
         layer.mask_image_name_b  = d.get("mask_image_name_b", "")
@@ -549,6 +552,7 @@ def _dict_to_layer(d, tlm):
             pass
         layer.mask_voronoi_scale_b      = d.get("mask_voronoi_scale_b", 10.0)
         layer.mask_voronoi_randomness_b = d.get("mask_voronoi_randomness_b", 1.0)
+        layer.mask_voronoi_edge_width_b = d.get("mask_voronoi_edge_width_b", 1.0)
         layer.mask_combine       = d.get("mask_combine", "MULTIPLY")
         layer.mask_contrast      = d.get("mask_contrast", 0.5)
         # Mask refinement â€” Levels

@@ -228,7 +228,8 @@ def build_rocky_chunky_pile():
     dirt.mask_voronoi_feature = 'DISTANCE_TO_EDGE'
     dirt.mask_voronoi_scale = COBBLE_SCALE
     dirt.mask_voronoi_randomness = 1.0
-    dirt.mask_invert = True          # peaks at edges = cracks
+    dirt.mask_voronoi_edge_width = 1.5  # broad bands between stones
+    dirt.mask_invert = True             # peaks at edges = cracks
 
     # ── 04. Moss tint (VORONOI mask, sparse) -------------------------
     # Same VORONOI mask architecture but lower opacity → moss tinged
@@ -245,6 +246,7 @@ def build_rocky_chunky_pile():
     moss.mask_voronoi_feature = 'DISTANCE_TO_EDGE'
     moss.mask_voronoi_scale = COBBLE_SCALE
     moss.mask_voronoi_randomness = 1.0
+    moss.mask_voronoi_edge_width = 1.5
     moss.mask_invert = True
 
     # ── 05. MACRO Displacement (Voronoi F1) --------------------------
@@ -285,7 +287,7 @@ def build_rocky_chunky_pile():
     bump_cracks.proc_color1 = BLACK
     bump_cracks.proc_color2 = WHITE
     bump_cracks.use_bump = True
-    bump_cracks.bump_strength = 0.45
+    bump_cracks.bump_strength = 0.30
     bump_cracks.bump_distance = 0.040
 
     # ── 08. Stone bump grain (high-freq Noise) -----------------------
@@ -298,7 +300,7 @@ def build_rocky_chunky_pile():
     bump_grain.proc_color1 = BLACK
     bump_grain.proc_color2 = WHITE
     bump_grain.use_bump = True
-    bump_grain.bump_strength = 0.10
+    bump_grain.bump_strength = 0.05
     bump_grain.bump_distance = 0.004
 
     # ── 09. Roughness cracks ----------------------------------------
@@ -328,7 +330,7 @@ def build_rocky_chunky_pile():
     # punchier specular reflection than the default IOR gives.
     tlm.bsdf_ior = 1.65
     tlm.use_displacement = True
-    tlm.displacement_strength = 0.42
+    tlm.displacement_strength = 0.18
     tlm.displacement_midlevel = 0.5
     tlm.displacement_adaptive = True
 

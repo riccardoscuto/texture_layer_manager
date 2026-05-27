@@ -693,9 +693,11 @@ def _draw_mask_slot(box, active, slot):
         feat_prop  = 'mask_voronoi_feature_b'    if is_b else 'mask_voronoi_feature'
         scale_prop = 'mask_voronoi_scale_b'      if is_b else 'mask_voronoi_scale'
         rand_prop  = 'mask_voronoi_randomness_b' if is_b else 'mask_voronoi_randomness'
+        edge_prop  = 'mask_voronoi_edge_width_b' if is_b else 'mask_voronoi_edge_width'
         box.prop(active, feat_prop, text="Feature")
         box.prop(active, scale_prop, slider=True, text="Scale")
         box.prop(active, rand_prop, slider=True, text="Randomness")
+        box.prop(active, edge_prop, slider=True, text="Edge Width")
     # POINTINESS, EDGE_WEAR, CURVATURE_SMART: no per-slot parameter.
     # Shared smart-generator tuning shown once below in its own sub-box.
     box.prop(active, inv_prop, text=f"Invert {slot}")
