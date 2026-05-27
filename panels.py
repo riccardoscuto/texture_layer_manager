@@ -342,7 +342,9 @@ def _draw_active_layer(layout, active, tlm, mat):
 
 
 def _draw_procedural(col, active, tlm):
-    # Blend mode + Opacity at top (same position as Fill/Paint)
+    # ── CORE ROW: blend + opacity + output channel + proc_type ────────
+    # These four are the "what kind of layer is this" essentials — never
+    # collapsible because hiding them would orphan the user.
     br = col.row(align=True)
     if getattr(active, 'output_channel', 'BASE_COLOR') == 'ALPHA':
         br.prop(active, "alpha_math_operation", text="")
@@ -356,296 +358,318 @@ def _draw_procedural(col, active, tlm):
 
     col.separator(factor=0.5)
     col.prop(active, "proc_type")
-    col.separator(factor=0.5)
 
-    # ── ColorRamp controls ───────────────────────────────────────────
-    # Color1 + Color2 are always shown side-by-side. Color3 is optional
-    # (toggle). When Manual Stops is enabled, each color also exposes
-    # its own Position slider (under the color picker) so each stop
-    # can be dragged independently, matching a raw ColorRamp's
-    # affordance. When Manual Stops is off, Contrast + Ramp Center
-    # compute the stops automatically (default artist-friendly model).
+    # Read shared state once
     use_manual = getattr(active, 'proc_use_manual_stops', False)
     proc_t = active.proc_type
-    # GRADIENT and FRESNEL are forced to a 0..1 ramp internally so the
-    # full sweep is always visible — Manual Stops would break their
-    # semantics, so the toggle (and Pos 1 / Pos 2 sliders) are hidden.
-    # Contrast + Ramp Center are also hidden for these types below.
+    # GRADIENT/FRESNEL force a 0..1 ramp internally — manual stops + contrast
+    # are hidden for these.
     manual_supported = proc_t not in ('GRADIENT', 'FRESNEL')
 
-    cr = col.row(align=True)
-    cr.prop(active, "proc_color1", text="")
-    cr.prop(active, "proc_color2", text="")
-    if use_manual and manual_supported:
-        pos12 = col.row(align=True)
-        pos12.prop(active, "proc_color1_position", text="Pos 1", slider=True)
-        pos12.prop(active, "proc_color2_position", text="Pos 2", slider=True)
+    # ── COLLAPSIBLE 1/3: Color Ramp ────────────────────────────────────
+    col.separator(factor=0.4)
+    n_extras = len(active.proc_extra_color_stops)
+    badge_col = f" (+{n_extras})" if n_extras else ""
+    hdr_color = col.row(align=True)
+    hdr_color.prop(active, "show_proc_color_section",
+                   text=f"Color Ramp{badge_col}",
+                   icon='TRIA_DOWN' if active.show_proc_color_section else 'TRIA_RIGHT',
+                   emboss=False)
+    if active.show_proc_color_section:
+        cbox = col.box().column(align=True)
+        cbox.scale_y = 0.95
+        cr = cbox.row(align=True)
+        cr.prop(active, "proc_color1", text="")
+        cr.prop(active, "proc_color2", text="")
+        if use_manual and manual_supported:
+            pos12 = cbox.row(align=True)
+            pos12.prop(active, "proc_color1_position", text="Pos 1", slider=True)
+            pos12.prop(active, "proc_color2_position", text="Pos 2", slider=True)
+        # Legacy Color 3 row (only when the flag is True, i.e. loaded
+        # from an old preset). New presets use the extras collection.
+        legacy_c3 = active.use_proc_color3
+        if legacy_c3:
+            c3r = cbox.row(align=True)
+            c3r.prop(active, "use_proc_color3", text="",
+                     icon='REMOVE', toggle=True)
+            c3r.prop(active, "proc_color3", text="")
+            c3r.prop(active, "proc_color3_position", text="Pos", slider=True)
+        # Extra color stops collection
+        label_offset = 4 if legacy_c3 else 3
+        for idx, stop in enumerate(active.proc_extra_color_stops):
+            sr = cbox.row(align=True)
+            sr.prop(stop, "color", text="")
+            sr.prop(stop, "position", text=f"Pos {idx + label_offset}", slider=True)
+            del_op = sr.operator("tlm.remove_proc_color_stop", text="", icon='X')
+            del_op.index = idx
+        add_row = cbox.row(align=True)
+        add_row.operator("tlm.add_proc_color_stop", text="Add Color Stop", icon='ADD')
+        # Mode + interp + manual stops (only proc types that use ColorRamp)
+        uses_color_ramp = proc_t not in ('STRIPES', 'HEX_GRID')
+        if uses_color_ramp:
+            mi_row = cbox.row(align=True)
+            mi_row.prop(active, "proc_color_ramp_mode", text="")
+            mi_row.prop(active, "proc_color_ramp_interpolation", text="")
+            if manual_supported:
+                ms_row = cbox.row(align=True)
+                ms_row.prop(active, "proc_use_manual_stops",
+                            text="Manual Stops", toggle=True,
+                            icon='IPO_LINEAR' if not use_manual else 'IPO_CONSTANT')
+        # Contrast + Ramp Center live here too (they shape the ramp).
+        # Hidden for proc types that bypass the ramp.
+        if proc_t not in ('CHECKER', 'GRADIENT', 'BRICK', 'MAGIC', 'FRESNEL'):
+            cr_row = cbox.row(align=True)
+            cr_row.enabled = not use_manual
+            cr_row.prop(active, "proc_contrast", slider=True)
+            cr_row.prop(active, "proc_ramp_center", slider=True, text="Center")
 
-    # Legacy Color 3 row — only shown if the underlying flag is True
-    # (i.e. loaded from a pre-collection .tlm preset that hasn't been
-    # migrated yet). New presets use the proc_extra_color_stops list
-    # below exclusively, so the row is hidden by default to avoid
-    # visual overlap with the "Add Color Stop" button.
-    legacy_c3 = active.use_proc_color3
-    if legacy_c3:
-        c3r = col.row(align=True)
-        c3r.prop(active, "use_proc_color3", text="",
-                 icon='REMOVE', toggle=True)
-        c3r.prop(active, "proc_color3", text="")
-        c3r.prop(active, "proc_color3_position", text="Pos", slider=True)
-
-    # Extra color stops (proc_extra_color_stops collection).
-    # Each row: color picker + Pos slider + per-row "X" delete button.
-    # Below the list: "+ Add Color Stop" wide button.
-    # The X button passes the row's index to the operator so it knows
-    # which stop to remove — no need to fiddle with the active index
-    # ourselves. Labels start at "Pos 3" because Color1 and Color2 are
-    # always present (Pos 1 + Pos 2). If the legacy Color 3 row is
-    # still visible, extras start at "Pos 4" instead to avoid collision.
-    label_offset = 4 if legacy_c3 else 3
-    for idx, stop in enumerate(active.proc_extra_color_stops):
-        sr = col.row(align=True)
-        sr.prop(stop, "color", text="")
-        sr.prop(stop, "position", text=f"Pos {idx + label_offset}", slider=True)
-        del_op = sr.operator("tlm.remove_proc_color_stop", text="", icon='X')
-        del_op.index = idx
-    add_row = col.row(align=True)
-    add_row.operator("tlm.add_proc_color_stop", text="Add Color Stop", icon='ADD')
-
-    # Color mode + interpolation enums — apply 1:1 to ShaderNodeValToRGB.
-    # Shown for all proc types that use a ColorRamp (i.e. not the
-    # Mix-topology procs Stripes / Hex Grid — those bypass ColorRamp).
-    uses_color_ramp = proc_t not in ('STRIPES', 'HEX_GRID')
-    if uses_color_ramp:
-        mi_row = col.row(align=True)
-        mi_row.prop(active, "proc_color_ramp_mode", text="")
-        mi_row.prop(active, "proc_color_ramp_interpolation", text="")
-        if manual_supported:
-            ms_row = col.row(align=True)
-            ms_row.prop(active, "proc_use_manual_stops",
-                        text="Manual Stops", toggle=True,
-                        icon='IPO_LINEAR' if not use_manual else 'IPO_CONSTANT')
-
-    col.separator(factor=0.5)
-
+    # ── CORE: proc_scale (visible per ALL procs except GRADIENT) ─────
     pt = active.proc_type
     if pt != 'GRADIENT':
+        col.separator(factor=0.4)
         col.prop(active, "proc_scale", slider=False)
-        col.separator(factor=0.5)
 
+    # ── COLLAPSIBLE 2/3: Pattern Params (per-proc-type knobs) ──────────
+    col.separator(factor=0.4)
+    hdr_pat = col.row(align=True)
+    hdr_pat.prop(active, "show_proc_pattern_section",
+                 text=f"Pattern Params · {pt.replace('_', ' ').title()}",
+                 icon='TRIA_DOWN' if active.show_proc_pattern_section else 'TRIA_RIGHT',
+                 emboss=False)
+    if not active.show_proc_pattern_section:
+        # Pattern section is folded — skip the per-type knob block entirely
+        # and jump down to mapping / Fresnel / mask sections below.
+        _draw_procedural_advanced_tail(col, active, tlm)
+        return
+    pbox = col.box().column(align=True)
+    pbox.scale_y = 0.95
+    # All per-proc-type knobs go inside `pbox` instead of `col` so they
+    # live inside the collapsible box. The pt branches below mirror the
+    # exact controls they showed pre-refactor.
+    col_pat = pbox
     if pt == 'NOISE':
-        col.prop(active, "proc_detail",         slider=True)
-        col.prop(active, "proc_roughness_proc", slider=True, text="Roughness")
-        col.prop(active, "proc_lacunarity",     slider=True)
-        col.prop(active, "proc_distortion",     slider=True)
+        col_pat.prop(active, "proc_detail",         slider=True)
+        col_pat.prop(active, "proc_roughness_proc", slider=True, text="Roughness")
+        col_pat.prop(active, "proc_lacunarity",     slider=True)
+        col_pat.prop(active, "proc_distortion",     slider=True)
     elif pt == 'VORONOI':
-        col.prop(active, "proc_voronoi_feature")
-        col.prop(active, "proc_voronoi_distance")
-        col.prop(active, "proc_randomness", slider=True)
-        col.prop(active, "proc_detail", slider=True)
-        col.prop(active, "proc_roughness_proc", slider=True, text="Roughness")
-        col.prop(active, "proc_lacunarity", slider=True)
-        vr = col.row(align=True)
+        col_pat.prop(active, "proc_voronoi_feature")
+        col_pat.prop(active, "proc_voronoi_distance")
+        col_pat.prop(active, "proc_randomness", slider=True)
+        col_pat.prop(active, "proc_detail", slider=True)
+        col_pat.prop(active, "proc_roughness_proc", slider=True, text="Roughness")
+        col_pat.prop(active, "proc_lacunarity", slider=True)
+        vr = col_pat.row(align=True)
         vr.prop(active, "proc_voronoi_random_color", text="Random Per Cell", toggle=True, icon='SEQ_CHROMA_SCOPE')
         if active.proc_voronoi_random_color:
             vr.prop(active, "proc_voronoi_random_seed", text="Seed")
     elif pt == 'WAVE':
-        wr = col.row(align=True)
+        wr = col_pat.row(align=True)
         wr.prop(active, "proc_wave_type",    text="")
         wr.prop(active, "proc_wave_profile", text="")
         if active.proc_wave_type == 'RINGS':
-            col.prop(active, "proc_wave_rings_direction", text="Rings Direction")
+            col_pat.prop(active, "proc_wave_rings_direction", text="Rings Direction")
         else:
-            col.prop(active, "proc_wave_bands_direction", text="Bands Direction")
-        col.prop(active, "proc_detail",            slider=True)
-        col.prop(active, "proc_wave_detail_scale", slider=True, text="Detail Scale")
-        col.prop(active, "proc_wave_detail_roughness", slider=True, text="Detail Roughness")
-        col.prop(active, "proc_distortion",        slider=True)
-        col.prop(active, "proc_wave_phase_offset", slider=True, text="Phase Offset")
+            col_pat.prop(active, "proc_wave_bands_direction", text="Bands Direction")
+        col_pat.prop(active, "proc_detail",            slider=True)
+        col_pat.prop(active, "proc_wave_detail_scale", slider=True, text="Detail Scale")
+        col_pat.prop(active, "proc_wave_detail_roughness", slider=True, text="Detail Roughness")
+        col_pat.prop(active, "proc_distortion",        slider=True)
+        col_pat.prop(active, "proc_wave_phase_offset", slider=True, text="Phase Offset")
     elif pt == 'GRADIENT':
-        col.prop(active, "proc_gradient_type")
+        col_pat.prop(active, "proc_gradient_type")
     elif pt == 'MUSGRAVE':
-        col.prop(active, "proc_detail",         slider=True)
-        col.prop(active, "proc_roughness_proc", slider=True, text="Roughness")
-        col.prop(active, "proc_lacunarity",     slider=True)
+        col_pat.prop(active, "proc_detail",         slider=True)
+        col_pat.prop(active, "proc_roughness_proc", slider=True, text="Roughness")
+        col_pat.prop(active, "proc_lacunarity",     slider=True)
     elif pt == 'MARBLE':
-        col.prop(active, "proc_marble_wave_type", text="Pattern")
+        col_pat.prop(active, "proc_marble_wave_type", text="Pattern")
         if active.proc_marble_wave_type == 'RINGS':
-            col.prop(active, "proc_marble_rings_direction", text="Rings Direction")
+            col_pat.prop(active, "proc_marble_rings_direction", text="Rings Direction")
         else:
-            col.prop(active, "proc_marble_bands_direction", text="Bands Direction")
-        col.prop(active, "proc_marble_wave_profile", text="Profile")
-        col.prop(active, "proc_detail", slider=True)
-        col.prop(active, "proc_roughness_proc", slider=True, text="Roughness")
-        col.prop(active, "proc_distortion", slider=True, text="Wave Distortion")
-        col.prop(active, "proc_marble_distortion", slider=True, text="Turbulence")
+            col_pat.prop(active, "proc_marble_bands_direction", text="Bands Direction")
+        col_pat.prop(active, "proc_marble_wave_profile", text="Profile")
+        col_pat.prop(active, "proc_detail", slider=True)
+        col_pat.prop(active, "proc_roughness_proc", slider=True, text="Roughness")
+        col_pat.prop(active, "proc_distortion", slider=True, text="Wave Distortion")
+        col_pat.prop(active, "proc_marble_distortion", slider=True, text="Turbulence")
     elif pt == 'BRICK':
         # Brick uses Color1/Color2 as the two brick variants and Color3
         # (when use_proc_color3 is on) as the mortar. The other Color UI
         # is shared above via the colour-pickers row, so here we only
         # surface the brick-specific layout knobs.
-        offr = col.row(align=True)
+        offr = col_pat.row(align=True)
         offr.prop(active, "proc_brick_offset",      text="Offset",  slider=True)
         offr.prop(active, "proc_brick_offset_freq", text="Frequency")
-        sqr = col.row(align=True)
+        sqr = col_pat.row(align=True)
         sqr.prop(active, "proc_brick_squash",      text="Squash",  slider=True)
         sqr.prop(active, "proc_brick_squash_freq", text="Frequency")
-        col.separator(factor=0.3)
-        mr = col.row(align=True)
+        col_pat.separator(factor=0.3)
+        mr = col_pat.row(align=True)
         mr.prop(active, "proc_brick_mortar_size",   text="Mortar Size",   slider=True)
         mr.prop(active, "proc_brick_mortar_smooth", text="Mortar Smooth", slider=True)
-        bw = col.row(align=True)
+        bw = col_pat.row(align=True)
         bw.prop(active, "proc_brick_width", text="Brick Width")
         bw.prop(active, "proc_brick_row_height", text="Row Height")
-        col.prop(active, "proc_brick_bias", text="Bias", slider=True)
+        col_pat.prop(active, "proc_brick_bias", text="Bias", slider=True)
         if not active.use_proc_color3:
-            col.label(text="Tip: enable Color 3 above to set mortar colour",
-                      icon='INFO')
+            col_pat.label(text="Tip: enable Color 3 above to set mortar colour",
+                          icon='INFO')
     elif pt == 'MAGIC':
-        col.prop(active, "proc_magic_depth",      text="Depth", slider=True)
-        col.prop(active, "proc_magic_distortion", text="Distortion", slider=True)
+        col_pat.prop(active, "proc_magic_depth",      text="Depth", slider=True)
+        col_pat.prop(active, "proc_magic_distortion", text="Distortion", slider=True)
     elif pt == 'WHITE_NOISE':
-        col.label(text="Pure per-pixel random â€” no extra params",
-                  icon='INFO')
+        col_pat.label(text="Pure per-pixel random â€” no extra params",
+                      icon='INFO')
     elif pt == 'STRIPES':
-        col.prop(active, "proc_stripe_direction", text="Direction")
-        col.prop(active, "proc_stripe_width",     slider=True)
-        col.prop(active, "proc_stripe_sharpness", slider=True)
-        col.prop(active, "proc_distortion", text="Distortion", slider=True)
-        col.prop(active, "proc_detail", text="Detail", slider=True)
-        col.prop(active, "proc_wave_detail_scale", text="Detail Scale", slider=True)
-        col.prop(active, "proc_wave_detail_roughness", text="Detail Roughness", slider=True)
-        col.prop(active, "proc_wave_phase_offset", text="Phase Offset", slider=True)
+        col_pat.prop(active, "proc_stripe_direction", text="Direction")
+        col_pat.prop(active, "proc_stripe_width",     slider=True)
+        col_pat.prop(active, "proc_stripe_sharpness", slider=True)
+        col_pat.prop(active, "proc_distortion", text="Distortion", slider=True)
+        col_pat.prop(active, "proc_detail", text="Detail", slider=True)
+        col_pat.prop(active, "proc_wave_detail_scale", text="Detail Scale", slider=True)
+        col_pat.prop(active, "proc_wave_detail_roughness", text="Detail Roughness", slider=True)
+        col_pat.prop(active, "proc_wave_phase_offset", text="Phase Offset", slider=True)
     elif pt == 'HEX_GRID':
-        col.prop(active, "proc_hex_edge_width", text="Edge Width", slider=True)
-        col.prop(active, "proc_randomness",     text="Randomness", slider=True)
-        col.prop(active, "proc_detail",         text="Detail", slider=True)
-        col.label(text="Tip: Randomness=0 gives the cleanest honeycomb",
-                  icon='INFO')
+        col_pat.prop(active, "proc_hex_edge_width", text="Edge Width", slider=True)
+        col_pat.prop(active, "proc_randomness",     text="Randomness", slider=True)
+        col_pat.prop(active, "proc_detail",         text="Detail", slider=True)
+        col_pat.label(text="Tip: Randomness=0 gives the cleanest honeycomb",
+                      icon='INFO')
     elif pt == 'GABOR':
         # Anisotropic Gabor noise â€” directional streak generator.
         # Brushed metal: high Anisotropy (0.9-1.0), Frequency 3-5.
-        col.prop(active, "proc_gabor_anisotropy", text="Anisotropy", slider=True)
-        col.prop(active, "proc_gabor_orientation", text="Orientation")
-        col.prop(active, "proc_gabor_frequency", text="Frequency", slider=True)
-        col.label(text="Tip: Anisotropy 1.0 = parallel streaks (brushed metal)",
-                  icon='INFO')
+        col_pat.prop(active, "proc_gabor_anisotropy", text="Anisotropy", slider=True)
+        col_pat.prop(active, "proc_gabor_orientation", text="Orientation")
+        col_pat.prop(active, "proc_gabor_frequency", text="Frequency", slider=True)
+        col_pat.label(text="Tip: Anisotropy 1.0 = parallel streaks (brushed metal)",
+                      icon='INFO')
     elif pt == 'DOTS':
         # Packed circular dots in a jittered grid. proc_scale sets
         # density (higher = more dots), proc_randomness jitters cell
         # positions (1.0 = full natural look, 0.0 = perfect lattice).
-        col.prop(active, "proc_dots_radius",   text="Radius",   slider=True)
-        col.prop(active, "proc_dots_softness", text="Softness", slider=True)
-        col.prop(active, "proc_randomness",    text="Randomness", slider=True)
-        col.prop(active, "proc_detail",        text="Detail", slider=True)
-        col.label(text="Tip: Radius 0.30, Softness 0.05 = clean polkadots",
-                  icon='INFO')
+        col_pat.prop(active, "proc_dots_radius",   text="Radius",   slider=True)
+        col_pat.prop(active, "proc_dots_softness", text="Softness", slider=True)
+        col_pat.prop(active, "proc_randomness",    text="Randomness", slider=True)
+        col_pat.prop(active, "proc_detail",        text="Detail", slider=True)
+        col_pat.label(text="Tip: Radius 0.30, Softness 0.05 = clean polkadots",
+                      icon='INFO')
     elif pt == 'RIDGED':
         # Ridged fractal noise â€” razor-like crests, ideal for mountains,
         # rock veins, lightning, crackle. Detail / Lacunarity reuse the
         # shared noise sliders shown above.
-        col.prop(active, "proc_detail", text="Detail", slider=True)
-        col.prop(active, "proc_roughness_proc", text="Roughness", slider=True)
-        col.prop(active, "proc_lacunarity", text="Lacunarity", slider=True)
-        col.prop(active, "proc_distortion", text="Distortion", slider=True)
-        col.prop(active, "proc_ridged_offset", text="Offset", slider=True)
-        col.prop(active, "proc_ridged_gain",   text="Gain",   slider=True)
-        col.label(text="Tip: Gain 3-4 + Detail 8 = razor-sharp ridges",
-                  icon='INFO')
+        col_pat.prop(active, "proc_detail", text="Detail", slider=True)
+        col_pat.prop(active, "proc_roughness_proc", text="Roughness", slider=True)
+        col_pat.prop(active, "proc_lacunarity", text="Lacunarity", slider=True)
+        col_pat.prop(active, "proc_distortion", text="Distortion", slider=True)
+        col_pat.prop(active, "proc_ridged_offset", text="Offset", slider=True)
+        col_pat.prop(active, "proc_ridged_gain",   text="Gain",   slider=True)
+        col_pat.label(text="Tip: Gain 3-4 + Detail 8 = razor-sharp ridges",
+                      icon='INFO')
     elif pt == 'CRACKS':
         # Voronoi distance-to-edge tuned for narrow organic veins.
         # Combine with proc_distortion (vector distortion above) for
         # the most natural-looking crack networks.
-        col.prop(active, "proc_cracks_width",     text="Width",     slider=True)
-        col.prop(active, "proc_cracks_sharpness", text="Sharpness", slider=True)
-        col.prop(active, "proc_randomness",       text="Randomness", slider=True)
-        col.prop(active, "proc_roughness_proc",   text="Roughness", slider=True)
-        col.label(text="Tip: add Vector Distortion above for organic cracks",
-                  icon='INFO')
+        col_pat.prop(active, "proc_cracks_width",     text="Width",     slider=True)
+        col_pat.prop(active, "proc_cracks_sharpness", text="Sharpness", slider=True)
+        col_pat.prop(active, "proc_randomness",       text="Randomness", slider=True)
+        col_pat.prop(active, "proc_roughness_proc",   text="Roughness", slider=True)
+        col_pat.label(text="Tip: add Vector Distortion above for organic cracks",
+                      icon='INFO')
+
+    # End of pattern params (col_pat box). Tail handles mapping + Fresnel
+    # + mask + pbr channels regardless of whether pattern section is open.
+    _draw_procedural_advanced_tail(col, active, tlm)
 
 
-    col.separator(factor=0.5)
-    map_box = col.box()
-    map_box.prop(active, "proc_mapping_type", text="Mapping Type")
-    loc_row = map_box.row(align=True)
-    loc_row.label(text="Location", icon='OBJECT_ORIGIN')
-    loc_row.prop(active, "proc_offset_x", text="X")
-    loc_row.prop(active, "proc_offset_y", text="Y")
-    loc_row.prop(active, "proc_offset_z", text="Z")
-    rot_row = map_box.row(align=True)
-    rot_row.label(text="Rotation", icon='DRIVER_ROTATIONAL_DIFFERENCE')
-    rot_row.prop(active, "proc_rotation_x", text="X")
-    rot_row.prop(active, "proc_rotation_y", text="Y")
-    rot_row.prop(active, "proc_rotation_z", text="Z")
-    scl_row = map_box.row(align=True)
-    scl_row.label(text="Scale", icon='EMPTY_ARROWS')
-    scl_row.prop(active, "proc_mapping_scale_x", text="X")
-    scl_row.prop(active, "proc_mapping_scale_y", text="Y")
-    scl_row.prop(active, "proc_mapping_scale_z", text="Z")
+def _draw_procedural_advanced_tail(col, active, tlm):
+    """Draw the post-pattern part of a PROCEDURAL layer: Mapping
+    (collapsible), Fresnel legacy, Mask, Clipping, PBR Channels, Group
+    assignment. Called from both branches of the Pattern collapsible
+    so the rest of the UI is always reachable."""
+    # ── COLLAPSIBLE 3/3: Mapping ──────────────────────────────────────
+    col.separator(factor=0.4)
+    hdr_map = col.row(align=True)
+    hdr_map.prop(active, "show_proc_mapping_section",
+                 text="Mapping",
+                 icon='TRIA_DOWN' if active.show_proc_mapping_section else 'TRIA_RIGHT',
+                 emboss=False)
+    if active.show_proc_mapping_section:
+        map_box = col.box().column(align=True)
+        map_box.scale_y = 0.95
+        map_box.prop(active, "proc_mapping_type", text="Mapping Type")
+        loc_row = map_box.row(align=True)
+        loc_row.label(text="Location", icon='OBJECT_ORIGIN')
+        loc_row.prop(active, "proc_offset_x", text="X")
+        loc_row.prop(active, "proc_offset_y", text="Y")
+        loc_row.prop(active, "proc_offset_z", text="Z")
+        rot_row = map_box.row(align=True)
+        rot_row.label(text="Rotation", icon='DRIVER_ROTATIONAL_DIFFERENCE')
+        rot_row.prop(active, "proc_rotation_x", text="X")
+        rot_row.prop(active, "proc_rotation_y", text="Y")
+        rot_row.prop(active, "proc_rotation_z", text="Z")
+        scl_row = map_box.row(align=True)
+        scl_row.label(text="Scale", icon='EMPTY_ARROWS')
+        scl_row.prop(active, "proc_mapping_scale_x", text="X")
+        scl_row.prop(active, "proc_mapping_scale_y", text="Y")
+        scl_row.prop(active, "proc_mapping_scale_z", text="Z")
 
-    col.prop(active, "proc_coord_preset", text="Preset")
-    col.prop(active, "proc_coord_type", text="Coords")
-
-    # Show normalize toggle only for Object coordinates
-    if active.proc_coord_type == 'OBJECT':
-        col.prop(active, "proc_normalize_coords", text="Normalize Scale")
+        map_box.separator(factor=0.4)
+        map_box.prop(active, "proc_coord_preset", text="Preset")
+        map_box.prop(active, "proc_coord_type", text="Coords")
+        if active.proc_coord_type == 'OBJECT':
+            map_box.prop(active, "proc_normalize_coords", text="Normalize Scale")
 
     # â”€â”€ Coordinate transform (polar / spherical / swirl / cylindrical) â”€â”€
-    col.prop(active, "proc_coord_transform", text="Transform")
-    if active.proc_coord_transform == 'SWIRL':
-        col.prop(active, "proc_swirl_amount", slider=True, text="Swirl")
-    if active.proc_coord_transform in {'POLAR', 'CYLINDRICAL'}:
-        col.label(text="Tip: use integer Scale for seamless wrap", icon='INFO')
-    elif active.proc_coord_transform == 'SPHERICAL':
-        col.label(text="Tip: pattern wraps X, poles compress", icon='INFO')
+        map_box.prop(active, "proc_coord_transform", text="Transform")
+        if active.proc_coord_transform == 'SWIRL':
+            map_box.prop(active, "proc_swirl_amount", slider=True, text="Swirl")
+        if active.proc_coord_transform in {'POLAR', 'CYLINDRICAL'}:
+            map_box.label(text="Tip: integer Scale = seamless wrap", icon='INFO')
+        elif active.proc_coord_transform == 'SPHERICAL':
+            map_box.label(text="Tip: pattern wraps X, poles compress", icon='INFO')
 
-    # Smart warnings for Generated coordinates
-    if active.proc_coord_type == 'GENERATED':
-        import bpy as _bpy
-        obj = _bpy.context.active_object
-        if obj:
-            s = obj.scale
-            tol = 0.02
-            if abs(s.x - 1.0) > tol or abs(s.y - 1.0) > tol or abs(s.z - 1.0) > tol:
-                col.label(text="Scale not applied \u2014 pattern may stretch", icon='ERROR')
-            dims = obj.dimensions
-            if dims.x > 0 and dims.y > 0 and dims.z > 0:
-                ratio = max(dims) / max(min(dims), 0.001)
-                if ratio > 1.3:
-                    col.label(text="Anisotropic shape \u2014 try Object coords", icon='INFO')
+        # Smart warnings for Generated coordinates
+        if active.proc_coord_type == 'GENERATED':
+            import bpy as _bpy
+            obj = _bpy.context.active_object
+            if obj:
+                s = obj.scale
+                tol = 0.02
+                if abs(s.x - 1.0) > tol or abs(s.y - 1.0) > tol or abs(s.z - 1.0) > tol:
+                    map_box.label(text="Scale not applied; pattern may stretch", icon='ERROR')
+                dims = obj.dimensions
+                if dims.x > 0 and dims.y > 0 and dims.z > 0:
+                    ratio = max(dims) / max(min(dims), 0.001)
+                    if ratio > 1.3:
+                        map_box.label(text="Anisotropic shape: try Object coords", icon='INFO')
 
     # Contrast controls the ColorRamp stop positions. Hidden for the proc
     # types that bypass the ramp (CHECKER / BRICK / MAGIC output Color
     # directly) and for GRADIENT + FRESNEL where contrast is forced to 0
     # in the build path so the full ramp sweep is always available.
-    if active.proc_type not in ('CHECKER', 'GRADIENT', 'BRICK', 'MAGIC', 'FRESNEL'):
-        cr_row = col.row(align=True)
-        # Contrast + Ramp Center are auto-computed stop positions.
-        # When Manual Stops is enabled (proc_use_manual_stops=True),
-        # the positions are taken from proc_color1/2_position instead,
-        # so these sliders no longer do anything — grey them out so the
-        # UI honestly reflects state.
-        cr_row.enabled = not getattr(active, 'proc_use_manual_stops', False)
-        cr_row.prop(active, "proc_contrast", slider=True)
-        cr_row.prop(active, "proc_ramp_center", slider=True, text="Center")
-    col.prop(active, "proc_vector_distortion", slider=True, text="Vec Distort")
+        # Vector distortion lives inside Mapping (it warps the coords).
+        map_box.prop(active, "proc_vector_distortion", slider=True, text="Vec Distort")
 
-    col.separator(factor=0.6)
+    # NOTE: Contrast + Ramp Center moved into the Color Ramp collapsible
+    # above (they shape the ramp stops, so they belong with the colours).
+
+    # ── Fresnel legacy rim modifier (per-layer) ────────────────────────
+    col.separator(factor=0.4)
     fr = col.row(align=True)
-    fr.prop(active, "use_fresnel_mask", text="Fresnel", icon='LIGHT_HEMI', toggle=True)
+    fr.prop(active, "use_fresnel_mask", text="Fresnel Rim",
+            icon='LIGHT_HEMI', toggle=True)
     if active.use_fresnel_mask:
         fr.prop(active, "fresnel_ior", text="IOR")
         fr.prop(active, "fresnel_strength", text="Str", slider=True)
 
-    col.separator(factor=0.6)
+    # Mask / Clipping / PBR Channels / Group are already collapsible.
+    col.separator(factor=0.4)
     _draw_mask_block(col, active)
-
     _draw_clipping_mask(col, active, tlm)
-
-    col.separator(factor=0.6)
+    col.separator(factor=0.4)
     _draw_pbr_channels(col, active, tlm)
-
-    col.separator(factor=0.5)
+    col.separator(factor=0.4)
     _draw_group_assignment(col, active, tlm)
 
 

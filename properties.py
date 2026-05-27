@@ -1443,6 +1443,27 @@ class TLM_LayerItem(PropertyGroup):
         description="Expand Extension + Location/Rotation/Scale for image textures",
         default=False,
     )
+    # UI state — collapsible sub-sections of a PROCEDURAL layer's panel.
+    # Defaults chosen so the most frequently tweaked controls are open
+    # (Color + Pattern) while the verbose Mapping block is folded.
+    show_proc_color_section: BoolProperty(
+        name="Show Color Ramp",
+        description="Expand the Color Ramp section: Color 1/2, extra stops, "
+                    "Mode + Interpolation, Manual Stops toggle, Contrast/Center",
+        default=True,
+    )
+    show_proc_pattern_section: BoolProperty(
+        name="Show Pattern Params",
+        description="Expand per-procedural pattern parameters "
+                    "(Detail / Roughness / Feature / Wave Profile / etc)",
+        default=True,
+    )
+    show_proc_mapping_section: BoolProperty(
+        name="Show Mapping",
+        description="Expand the Mapping block: Mapping Type, Location/Rotation/Scale, "
+                    "Coordinate preset/type, Transform, Vector Distortion",
+        default=False,
+    )
 
     @property
     def roughness_image(self):
