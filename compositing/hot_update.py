@@ -13,6 +13,7 @@ NDOTL / NDOTH masks).
 """
 
 import bpy
+import time as _time
 
 # Late imports from the package's __init__.py — these resolve at call
 # time because the parent __init__ defines them BEFORE doing
