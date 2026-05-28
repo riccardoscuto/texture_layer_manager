@@ -171,8 +171,14 @@ class TLM_UL_LayerList(UIList):
                     badge_row.label(text="", icon=badge_icon)
 
         if layer.layer_type not in ("GROUP", "ADJUSTMENT"):
-            op = row.operator("tlm.set_active_paint_layer", text="", icon='BRUSH_DATA', emboss=False)
-            op.layer_index = index
+            # "Paint on this layer" only makes sense for PAINT layers — Fill,
+            # Procedural and Reference don't have a paintable image canvas.
+            # The operator itself would just report a warning, so hide the
+            # icon entirely on those types to keep the row honest.
+            if layer.layer_type == "PAINT":
+                op = row.operator("tlm.set_active_paint_layer", text="",
+                                  icon='BRUSH_DATA', emboss=False)
+                op.layer_index = index
             clip_icon = 'CLIPUV_HLT' if layer.use_clipping_mask else 'CLIPUV_DEHLT'
             row.prop(layer, "use_clipping_mask", text="", icon=clip_icon, emboss=False)
             # Alpha uses Shader Math operations instead of artistic colour
