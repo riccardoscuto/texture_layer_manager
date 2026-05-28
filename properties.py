@@ -1506,6 +1506,16 @@ class TLM_LayerItem(PropertyGroup):
         description="Expand Levels (Input/Output/Gamma) + Softness + Blur controls",
         default=False,
     )
+    # UI state — collapsible "Surface Effects" section.
+    # Groups Fresnel Rim (per-layer), Displacement (per-layer toggle + shared
+    # material-level shortcut) and Volume (material-level shortcut) into one
+    # collapsible so the top-level layer panel stays readable. Collapsed by
+    # default since these are advanced — most layers don't use them.
+    show_surface_effects: BoolProperty(
+        name="Show Surface Effects",
+        description="Expand Fresnel Rim + Displacement + Volume controls",
+        default=False,
+    )
 
     @property
     def roughness_image(self):

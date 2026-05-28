@@ -667,18 +667,13 @@ def _draw_procedural_advanced_tail(col, active, tlm):
             cr_row.prop(active, "proc_contrast", slider=True)
             cr_row.prop(active, "proc_ramp_center", slider=True, text="Center")
 
-    # ── Fresnel legacy rim modifier (per-layer) ────────────────────────
-    col.separator(factor=0.4)
-    fr = col.row(align=True)
-    fr.prop(active, "use_fresnel_mask", text="Fresnel Rim",
-            icon='LIGHT_HEMI', toggle=True)
-    if active.use_fresnel_mask:
-        fr.prop(active, "fresnel_ior", text="IOR")
-        fr.prop(active, "fresnel_strength", text="Str", slider=True)
-
-    # Mask / Clipping / Group assignment (already collapsible).
+    # Mask + Surface Effects (Fresnel + Displacement + Volume) + Clipping +
+    # Group assignment. Order chosen so the most-edited block (Mask) sits
+    # closer to Pattern/Mapping/Color Ramp, with the advanced
+    # Surface-Effects collapsible right after.
     col.separator(factor=0.4)
     _draw_mask_block(col, active)
+    _draw_surface_effects(col, active, tlm)
     _draw_clipping_mask(col, active, tlm)
     col.separator(factor=0.4)
     _draw_group_assignment(col, active, tlm)
@@ -746,25 +741,25 @@ def _draw_mask_block(col, active):
     Mask Refinement section (Levels + Softness + Blur).
 
     UX:
-    - When use_mask=False: compact row with only the two add-paths
-      ("Add Mask" creates a paintable image; "Bake Smart" runs the smart-mask
-      bake operator). The toggle itself is implicit — both ops set use_mask=True.
-    - When use_mask=True: collapsible header (show_mask_section) + details box.
-      The mask source dropdown lives at the top of the details box.
+    - Collapsible header (show_mask_section) is ALWAYS shown so the layer
+      panel keeps a consistent section structure regardless of whether
+      a mask is configured. A small toggle on the right of the header
+      enables/disables the mask without losing settings.
+    - When the box is expanded with use_mask=False, the body shows the
+      two add-paths ("Add Mask" creates a paintable image; "Bake Smart"
+      runs the smart-mask bake operator).
+    - When use_mask=True, the body shows the full mask configuration.
     """
-    if not active.use_mask:
-        # Mask is off — show only the two ways to enable it.
-        mr = col.row(align=True)
-        mr.label(text="", icon='MOD_MASK')
-        mr.operator("tlm.add_layer_mask", text="Add Mask", icon='ADD')
-        mr.operator("tlm.add_smart_mask", text="Bake Smart Mask", icon='SHADERFX')
-        return
-
-    # Mask is on — collapsible header with quick-disable toggle.
+    # Always-visible collapsible header so the section is discoverable
+    # regardless of state. The mask icon doubles as the quick on/off toggle.
+    if active.use_mask:
+        head_text = f"Mask  ·  {active.mask_source.replace('_', ' ').title()}"
+    else:
+        head_text = "Mask"
     header = col.row(align=True)
     header.prop(
         active, "show_mask_section",
-        text=f"Mask  ·  {active.mask_source.replace('_', ' ').title()}",
+        text=head_text,
         icon='TRIA_DOWN' if active.show_mask_section else 'TRIA_RIGHT',
         emboss=False,
     )
@@ -774,6 +769,15 @@ def _draw_mask_block(col, active):
         return
 
     mbox = col.box().column(align=True)
+
+    # Mask is off — surface the two enabling paths INSIDE the collapsible
+    # box (so the structure stays consistent with the on-state).
+    if not active.use_mask:
+        mbox.label(text="No mask configured", icon='INFO')
+        mr = mbox.row(align=True)
+        mr.operator("tlm.add_layer_mask", text="Add Mask", icon='ADD')
+        mr.operator("tlm.add_smart_mask", text="Bake Smart Mask", icon='SHADERFX')
+        return
 
     # Source dropdown lives at the top of the details box.
     mbox.prop(active, "mask_source", text="Source")
@@ -848,6 +852,100 @@ def _draw_mask_block(col, active):
             o_r.prop(active, "mask_levels_out_max", text="White", slider=True)
 
 
+def _draw_surface_effects(col, active, tlm):
+    """Collapsible: Fresnel Rim + Displacement + Volume.
+
+    Three related "surface modifier" features grouped under one header to
+    keep the layer panel readable:
+
+      * Fresnel Rim   — per-layer view-angle modulator
+      * Displacement  — per-layer toggle + shortcut to the material-level
+                        master (since Cycles displacement is per-material,
+                        not per-layer)
+      * Volume        — material-level Absorption + Scatter (exposed here
+                        as a convenience so users don't have to leave the
+                        layer panel to enable glass/jade/wax materials)
+
+    Only meaningful on layers that contribute to surface shading
+    (PAINT, FILL, PROCEDURAL, REFERENCE). ADJUSTMENT and GROUP skip it.
+    """
+    n_active = (
+        (1 if active.use_fresnel_mask else 0)
+        + (1 if getattr(active, 'use_displacement', False) else 0)
+        + (1 if (tlm.use_volume_absorption or tlm.use_volume_scatter) else 0)
+    )
+    badge = f" ({n_active})" if n_active else ""
+
+    col.separator(factor=0.4)
+    hdr = col.row(align=True)
+    hdr.prop(active, "show_surface_effects",
+             text=f"Surface Effects{badge}",
+             icon='TRIA_DOWN' if active.show_surface_effects else 'TRIA_RIGHT',
+             emboss=False)
+    if not active.show_surface_effects:
+        return
+
+    sbox = col.box().column(align=True)
+    sbox.scale_y = 0.95
+
+    # ── Fresnel Rim (per-layer) ─────────────────────────────────────
+    sbox.label(text="Fresnel Rim", icon='LIGHT_HEMI')
+    fr = sbox.row(align=True)
+    fr.prop(active, "use_fresnel_mask", text="Enable", toggle=True)
+    if active.use_fresnel_mask:
+        fr.prop(active, "fresnel_ior",      text="IOR")
+        fr.prop(active, "fresnel_strength", text="Str", slider=True)
+
+    # ── Displacement (per-layer + material-level shortcut) ──────────
+    sbox.separator(factor=0.5)
+    sbox.label(text="Displacement", icon='MOD_SUBSURF')
+    dr = sbox.row(align=True)
+    dr.prop(active, "use_displacement",
+            text="Add to Displace", toggle=True)
+    if active.use_displacement:
+        dr.prop(active, "displacement_scale",
+                text="Layer Scale", slider=True)
+        if tlm.use_displacement:
+            shared = sbox.box().column(align=True)
+            shared.scale_y = 0.9
+            shared.label(text="Material Displacement (shared):",
+                         icon='MOD_SUBSURF')
+            shared.prop(tlm, "displacement_method",   text="Method")
+            shared.prop(tlm, "displacement_strength", text="Strength", slider=True)
+            shared.prop(tlm, "displacement_midlevel", text="Midlevel", slider=True)
+            if tlm.displacement_method != 'BUMP':
+                shared.prop(tlm, "displacement_adaptive",
+                            text="Auto Adaptive Subdiv",
+                            icon='MESH_GRID', toggle=True)
+        else:
+            warn = sbox.row(align=True)
+            warn.alert = True
+            warn.label(text="Master Displacement OFF — layer is silent",
+                       icon='ERROR')
+
+    # ── Volume (material-level shortcut) ─────────────────────────────
+    sbox.separator(factor=0.5)
+    sbox.label(text="Volume  (material-level)",
+               icon='OUTLINER_DATA_VOLUME')
+    sbox.prop(tlm, "use_volume_absorption",
+              text="Absorption",
+              icon='OUTLINER_DATA_VOLUME', toggle=True)
+    if tlm.use_volume_absorption:
+        sbox.prop(tlm, "volume_absorption_color",   text="Color")
+        sbox.prop(tlm, "volume_absorption_density", text="Density",
+                  slider=True)
+    sbox.separator(factor=0.2)
+    sbox.prop(tlm, "use_volume_scatter",
+              text="Scatter",
+              icon='OUTLINER_OB_VOLUME', toggle=True)
+    if tlm.use_volume_scatter:
+        sbox.prop(tlm, "volume_scatter_color",      text="Color")
+        sbox.prop(tlm, "volume_scatter_density",    text="Density",
+                  slider=True)
+        sbox.prop(tlm, "volume_scatter_anisotropy", text="Anisotropy",
+                  slider=True)
+
+
 def _draw_reference(col, active, tlm):
     """Reference layer UI — reuses another layer's pattern with its own blend/mask/channels."""
     br = col.row(align=True)
@@ -888,14 +986,7 @@ def _draw_reference(col, active, tlm):
     col.separator(factor=0.6)
     _draw_mask_block(col, active)
 
-    _draw_clipping_mask(col, active, tlm)
-
-    col.separator(factor=0.6)
-    fr = col.row(align=True)
-    fr.prop(active, "use_fresnel_mask", text="Fresnel", icon='LIGHT_HEMI', toggle=True)
-    if active.use_fresnel_mask:
-        fr.prop(active, "fresnel_ior", text="IOR")
-        fr.prop(active, "fresnel_strength", text="Str", slider=True)
+    _draw_surface_effects(col, active, tlm)
 
     col.separator(factor=0.6)
     # Note: Normal + Bump channels on a REFERENCE layer use this layer's own
@@ -905,6 +996,8 @@ def _draw_reference(col, active, tlm):
         col.label(text="Normal/Bump use THIS layer's images, not the reference's",
                   icon='INFO')
     _draw_pbr_channels(col, active, tlm)
+
+    _draw_clipping_mask(col, active, tlm)
 
     col.separator(factor=0.5)
     _draw_group_assignment(col, active, tlm)
@@ -991,14 +1084,7 @@ def _draw_paint_fill(col, active, tlm):
     col.separator(factor=0.6)
     _draw_mask_block(col, active)
 
-    _draw_clipping_mask(col, active, tlm)
-
-    col.separator(factor=0.6)
-    fr = col.row(align=True)
-    fr.prop(active, "use_fresnel_mask", text="Fresnel", icon='LIGHT_HEMI', toggle=True)
-    if active.use_fresnel_mask:
-        fr.prop(active, "fresnel_ior", text="IOR")
-        fr.prop(active, "fresnel_strength", text="Str", slider=True)
+    _draw_surface_effects(col, active, tlm)
 
     # ── Image Mapping (paint + PBR image layers) ────────────────────────────
     # Collapsible: Source / Interpolation / Projection / Extension plus
@@ -1049,6 +1135,8 @@ def _draw_paint_fill(col, active, tlm):
     col.separator(factor=0.6)
     _draw_pbr_channels(col, active, tlm)
 
+    _draw_clipping_mask(col, active, tlm)
+
     col.separator(factor=0.5)
     _draw_group_assignment(col, active, tlm)
 
@@ -1081,37 +1169,12 @@ def _draw_pbr_channels(col, layer, tlm):
         bumpr.prop(layer, "bump_strength", text="Str", slider=True)
         bumpr.prop(layer, "bump_distance", text="Dist", slider=True)
 
-    # Displacement (real geometric) — separate from Bump because Bump only
-    # perturbs the shading normal while Displacement moves vertices.
-    # Per-layer toggle stacks cumulatively into Material Output.Displacement.
-    # Activating "Add to Displace" auto-enables the material-level
-    # Displacement master (see _on_layer_use_displacement_change in
-    # properties.py), so the user no longer has to flip two toggles.
-    dispr = pc.row(align=True)
-    dispr.prop(layer, "use_displacement", text="Add to Displace",
-               icon='MOD_SUBSURF', toggle=True)
-    if layer.use_displacement:
-        dispr.prop(layer, "displacement_scale", text="Layer Scale", slider=True)
-        # Convenience shortcuts to the MATERIAL-level Displacement params.
-        # These are shared across all displacement layers (the Cycles
-        # Displacement node is per-material, not per-layer), so editing
-        # them here is identical to editing them in Composite — just
-        # saves a scroll. Boxed so it's visually clear these are shared.
-        if tlm.use_displacement:
-            shared = pc.box().column(align=True)
-            shared.scale_y = 0.9
-            shared.label(text="Material Displacement (shared):",
-                         icon='MOD_SUBSURF')
-            shared.prop(tlm, "displacement_method", text="Method")
-            shared.prop(tlm, "displacement_strength", text="Strength", slider=True)
-            shared.prop(tlm, "displacement_midlevel", text="Midlevel", slider=True)
-        # Safety hint: if user manually turned the master OFF after
-        # opting layers in, surface that the layer is currently silent.
-        if not tlm.use_displacement:
-            warn = pc.row(align=True)
-            warn.alert = True
-            warn.label(text="Master OFF in Composite — layer is silent",
-                       icon='ERROR')
+    # Displacement now lives in the Surface Effects collapsible — it's a
+    # geometric modifier (not a shading channel) and shares space with
+    # Fresnel + Volume there. The Bump row above is the only normal-
+    # modifying control that stays in PBR Channels, because Bump
+    # perturbs the shading normal (per-channel data flow) while
+    # Displacement moves vertices (per-material vertex flow).
 
     # PBR Channels list — toggles here are ADDITIONAL channels beyond the
     # main "Output" target chosen at the top of the panel. Cumulative
