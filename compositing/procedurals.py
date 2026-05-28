@@ -41,6 +41,7 @@ from . import TLM_PREFIX  # noqa: F401
 
 
 __all__ = [
+    '_clamped_ramp_position',
     '_build_proc_color_ramp',
     '_ramp_stops',
     '_proc_mapping_scale',
@@ -61,6 +62,10 @@ __all__ = [
     '_build_procedural_node',
     '_build_proc_fac_node',
 ]
+
+def _clamped_ramp_position(value):
+    return min(max(float(value), 0.001), 0.999)
+
 
 def _build_proc_color_ramp(node_tree, layer, x, y, fac_out):
     """Build the standard TLM ColorRamp for a procedural layer.

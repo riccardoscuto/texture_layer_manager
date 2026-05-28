@@ -4,6 +4,9 @@ import bpy
 
 from . import _next_id, _tag, _find_tagged
 from . import TLM_PREFIX  # noqa: F401
+# _LEGACY_BLEND_METHOD + _NEW_RENDER_METHOD live in procedurals.py
+# (loaded BEFORE output in __init__.py), so eager import works.
+from . import _LEGACY_BLEND_METHOD, _NEW_RENDER_METHOD
 
 
 __all__ = [

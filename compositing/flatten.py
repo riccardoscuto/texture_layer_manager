@@ -3,6 +3,9 @@
 import bpy
 
 from . import TLM_PREFIX  # noqa: F401
+# flatten loads LAST in __init__.py, so all sibling submodules' names are
+# already re-exported into the parent package namespace by this point.
+from . import _find_bsdf, rebuild_node_tree
 
 
 __all__ = [

@@ -28,6 +28,8 @@ from . import (
     _new_mix, _new_mix_scalar,
     _factor_socket,
     _a_socket, _b_socket, _result_socket,
+    _a_socket_scalar, _b_socket_scalar, _result_socket_scalar,
+    _enabled_socket, _USE_NEW_MIX,
 )
 from . import TLM_PREFIX  # noqa: F401
 

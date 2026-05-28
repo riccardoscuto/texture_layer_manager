@@ -32,10 +32,11 @@ from . import (
     _factor_socket,
     _a_socket,
     _b_socket,
-    # _build_proc_color_ramp + _ramp_stops live in procedurals.py
-    # (loaded BEFORE hot_update in __init__.py's import order).
+    # _build_proc_color_ramp + _ramp_stops + _clamped_ramp_position
+    # live in procedurals.py (loaded BEFORE hot_update in __init__.py).
     _build_proc_color_ramp,
     _ramp_stops,
+    _clamped_ramp_position,
 )
 # Module-level constants from __init__.py (TLM_PREFIX is used by tags
 # the hot handlers stamp on nodes; the others are lookup tables used
@@ -67,7 +68,6 @@ __all__ = [
     '_hot_proc_gabor',
     '_hot_proc_stripe',
     '_hot_proc_hex',
-    '_clamped_ramp_position',
     'hot_update_sun_direction',
     '_find_first_sun_direction',
     '_hot_proc_color',
@@ -419,11 +419,6 @@ def _hot_proc_hex(node_tree, layer, prop_name):
             n.inputs["From Min"].default_value = i_fmin
             n.inputs["From Max"].default_value = i_fmax
     return True
-
-
-def _clamped_ramp_position(value):
-    return min(max(float(value), 0.001), 0.999)
-
 
 def hot_update_sun_direction():
     """Walk all TLM materials, find NDOTL/NDOTH dot-product nodes, and
