@@ -859,18 +859,22 @@ def _draw_mask_block(col, active):
 
 
 def _draw_surface_effects(col, active, tlm):
-    """Collapsible: Fresnel Rim + Displacement + Volume.
+    """Collapsible: per-layer surface modifiers (Fresnel + Displacement opt-in).
 
-    Three related "surface modifier" features grouped under one header to
-    keep the layer panel readable:
+    Two features grouped under one header — both are PER-LAYER state:
 
-      * Fresnel Rim   — per-layer view-angle modulator
-      * Displacement  — per-layer toggle + shortcut to the material-level
-                        master (since Cycles displacement is per-material,
-                        not per-layer)
-      * Volume        — material-level Absorption + Scatter (exposed here
-                        as a convenience so users don't have to leave the
-                        layer panel to enable glass/jade/wax materials)
+      * Fresnel Rim          — per-layer view-angle modulator (use_fresnel_mask
+                               + fresnel_ior + fresnel_strength)
+      * Add to Displace      — per-layer flag opting this layer into the
+                               material-level displacement stack. The shared
+                               material-level settings (Method / Strength /
+                               Midlevel) live in the Composite section to
+                               avoid duplicating UI across multiple layers.
+
+    Material-level Volume Absorption / Scatter was moved OUT of this
+    collapsible (it lives only in Composite section) because per-layer
+    UI duplication created the impression those are per-layer toggles
+    when they're actually a single material datablock.
 
     Only meaningful on layers that contribute to surface shading
     (PAINT, FILL, PROCEDURAL, REFERENCE). ADJUSTMENT and GROUP skip it.
@@ -878,7 +882,6 @@ def _draw_surface_effects(col, active, tlm):
     n_active = (
         (1 if active.use_fresnel_mask else 0)
         + (1 if getattr(active, 'use_displacement', False) else 0)
-        + (1 if (tlm.use_volume_absorption or tlm.use_volume_scatter) else 0)
     )
     badge = f" ({n_active})" if n_active else ""
 
@@ -902,7 +905,7 @@ def _draw_surface_effects(col, active, tlm):
         fr.prop(active, "fresnel_ior",      text="IOR")
         fr.prop(active, "fresnel_strength", text="Str", slider=True)
 
-    # ── Displacement (per-layer + material-level shortcut) ──────────
+    # ── Displacement (per-layer opt-in only — shared settings in Composite) ──
     sbox.separator(factor=0.5)
     sbox.label(text="Displacement", icon='MOD_SUBSURF')
     dr = sbox.row(align=True)
@@ -911,45 +914,14 @@ def _draw_surface_effects(col, active, tlm):
     if active.use_displacement:
         dr.prop(active, "displacement_scale",
                 text="Layer Scale", slider=True)
-        if tlm.use_displacement:
-            shared = sbox.box().column(align=True)
-            shared.scale_y = 0.9
-            shared.label(text="Material Displacement (shared):",
-                         icon='MOD_SUBSURF')
-            shared.prop(tlm, "displacement_method",   text="Method")
-            shared.prop(tlm, "displacement_strength", text="Strength", slider=True)
-            shared.prop(tlm, "displacement_midlevel", text="Midlevel", slider=True)
-            if tlm.displacement_method != 'BUMP':
-                shared.prop(tlm, "displacement_adaptive",
-                            text="Auto Adaptive Subdiv",
-                            icon='MESH_GRID', toggle=True)
-        else:
+        if not tlm.use_displacement:
             warn = sbox.row(align=True)
             warn.alert = True
-            warn.label(text="Master Displacement OFF — layer is silent",
+            warn.label(text="Master Displacement OFF (see Composite section)",
                        icon='ERROR')
-
-    # ── Volume (material-level shortcut) ─────────────────────────────
-    sbox.separator(factor=0.5)
-    sbox.label(text="Volume  (material-level)",
-               icon='OUTLINER_DATA_VOLUME')
-    sbox.prop(tlm, "use_volume_absorption",
-              text="Absorption",
-              icon='OUTLINER_DATA_VOLUME', toggle=True)
-    if tlm.use_volume_absorption:
-        sbox.prop(tlm, "volume_absorption_color",   text="Color")
-        sbox.prop(tlm, "volume_absorption_density", text="Density",
-                  slider=True)
-    sbox.separator(factor=0.2)
-    sbox.prop(tlm, "use_volume_scatter",
-              text="Scatter",
-              icon='OUTLINER_OB_VOLUME', toggle=True)
-    if tlm.use_volume_scatter:
-        sbox.prop(tlm, "volume_scatter_color",      text="Color")
-        sbox.prop(tlm, "volume_scatter_density",    text="Density",
-                  slider=True)
-        sbox.prop(tlm, "volume_scatter_anisotropy", text="Anisotropy",
-                  slider=True)
+        else:
+            sbox.label(text="Shared settings live in the Composite section",
+                       icon='INFO')
 
 
 def _draw_reference(col, active, tlm):
@@ -1334,12 +1306,13 @@ def _perf_metric(layout, label, value, icon='BLANK1'):
 def _draw_composite_section(layout, tlm):
     """Material-level composite controls, organised into logical groups:
        1. Build mode (Auto Composite / Editable)
-       2. Surface (BSDF IOR + Alpha)
-       3. Volume (Absorption + Scatter sub-toggles)
-       4. Displacement (Master + Strength/Midlevel/Adaptive)
+       2. Surface (BSDF IOR + Alpha pipeline)
+       3. Volume (Absorption + Scatter — only shown when active to keep panel short)
+       4. Displacement (Master + Method/Strength/Midlevel/Adaptive)
        5. Actions (Rebuild / Flatten / Convert / Refresh thumbs)
-    Each group is a labelled sub-block, not a separate collapsible —
-    they're small enough to fit, the grouping just reads better.
+
+    Volume + Displacement collapse into a single info row when their master
+    toggle is off — keeps the section visually quiet when not in use.
     """
     comp = layout.column(align=True)
     if tlm.shader_editable:
@@ -1356,15 +1329,39 @@ def _draw_composite_section(layout, tlm):
               icon=ac_icon, toggle=True)
 
     # ── 2. Surface ──
+    # IOR + Alpha pipeline. IOR governs the BSDF.IOR socket which only has
+    # a perceptible effect when Transmission > 0 (glass / water / ice) or
+    # Specular tinting is in play; we still show it always because that's
+    # where users instinctively look for it.
     comp.separator(factor=0.6)
     surf_box = comp.box().column(align=True)
     surf_box.label(text="Surface", icon='NODE_MATERIAL')
-    surf_box.prop(tlm, "bsdf_ior", text="IOR", slider=True)
+    ior_row = surf_box.row(align=True)
+    ior_row.prop(tlm, "bsdf_ior", text="IOR", slider=True)
+    # Hint label: when IOR is a non-default value but transmission isn't in
+    # the active stack, the user's IOR setting is silent — make that clear.
+    if abs(tlm.bsdf_ior - 1.45) > 1e-3:
+        any_transmission = any(
+            (l.visible and (
+                getattr(l, 'use_transmission', False)
+                or getattr(l, 'output_channel', 'BASE_COLOR') == 'TRANSMISSION'))
+            for l in tlm.layers
+        )
+        if not any_transmission:
+            hint = surf_box.row(align=True)
+            hint.label(
+                text=f"IOR {tlm.bsdf_ior:.2f} affects glass/transmission only",
+                icon='INFO',
+            )
+    surf_box.separator(factor=0.3)
+    # Alpha pipeline — labelled clearly so the user knows what it does.
+    surf_box.label(text="Alpha:", icon='IMAGE_ALPHA')
     surf_box.prop(tlm, "use_base_color_alpha",
-                  text="Use Paint Alpha", icon='IMAGE_ALPHA', toggle=True)
-    surf_box.prop(tlm, "alpha_blend_method", text="Alpha Mode")
+                  text="Route PAINT image alpha → BSDF.Alpha",
+                  icon='IMAGE_ALPHA', toggle=True)
+    surf_box.prop(tlm, "alpha_blend_method", text="Blend Mode")
 
-    # ── 3. Volume (combined absorption + scatter sub-toggles) ──
+    # ── 3. Volume — quiet when off, expands when active ──
     comp.separator(factor=0.6)
     vol_box = comp.box().column(align=True)
     vol_box.label(text="Volume", icon='OUTLINER_DATA_VOLUME')
@@ -1384,12 +1381,12 @@ def _draw_composite_section(layout, tlm):
     # ── 4. Displacement ──
     # Master toggle wires the layer stack's displacement contributions to
     # Material Output.Displacement. Per-layer use_displacement (labelled
-    # "Add to Displace" in the PBR Channels section) selects which layers
-    # feed into the height stack.
+    # "Add to Displace" in the Surface Effects section of the layer panel)
+    # selects which layers feed into the height stack.
     comp.separator(factor=0.6)
     disp_box = comp.box().column(align=True)
     disp_box.label(text="Displacement", icon='MOD_SUBSURF')
-    disp_box.prop(tlm, "use_displacement", text="Displacement (Master)",
+    disp_box.prop(tlm, "use_displacement", text="Master",
                   icon='MOD_SUBSURF', toggle=True)
     if tlm.use_displacement:
         disp_box.prop(tlm, "displacement_method", text="Method")
@@ -1399,6 +1396,17 @@ def _draw_composite_section(layout, tlm):
         if tlm.displacement_method != 'BUMP':
             disp_box.prop(tlm, "displacement_adaptive", text="Auto Adaptive Subdiv",
                           icon='MESH_GRID', toggle=True)
+        # Count layers actually feeding the stack so the user knows whether
+        # the master toggle has any effect.
+        n_feeders = sum(1 for l in tlm.layers
+                        if l.visible and getattr(l, 'use_displacement', False))
+        if n_feeders == 0:
+            warn = disp_box.row(align=True)
+            warn.alert = True
+            warn.label(
+                text="No layer opted in — toggle 'Add to Displace' on a layer",
+                icon='ERROR',
+            )
 
     # ── 5. Actions ──
     comp.separator(factor=0.6)
@@ -1457,9 +1465,18 @@ def _draw_performance_section(layout, tlm):
 
 
 def _draw_bake_section(layout, tlm):
+    """Export the composited material to flat PNG textures on disk.
+
+    Distinct from per-layer "PBR Channels" (which is the layer's contribution
+    routing). These operators take the FINAL composited shader, render each
+    channel to an image, and save them as PNG — what you'd ship to Unity /
+    Unreal / Godot / glTF when the addon won't be installed at render time.
+    """
     bake = layout.column(align=True)
-    bake.operator("tlm.bake_pbr", text="Bake PBR Maps…", icon='EXPORT')
-    op = bake.operator("tlm.bake_pbr", text="PBR Channels…",
+    bake.label(text="Export composited material → PNG textures",
+               icon='INFO')
+    bake.operator("tlm.bake_pbr", text="Bake to PBR Textures…", icon='EXPORT')
+    op = bake.operator("tlm.bake_pbr", text="Custom Channels…",
                        icon='NODE_COMPOSITING')
     op.preset = 'CUSTOM'
 
@@ -1649,19 +1666,27 @@ TLM_PT_ViewIO        = _make_section_panel(
 classes = [
     TLM_UL_LayerList,
     TLM_PT_MainPanel,
-    TLM_PT_PropsCanvas,
+    # Sub-panel order = display order in the Properties tab.
+    # Most-used at the top, least-used at the bottom.
+    # Composite = material-level settings (IOR, Volume, Displacement, Actions).
+    # Presets = preset library.
+    # Bake & Export = export to PBR textures.
+    # Layer Stack I/O = JSON/TLM file exchange.
+    # Performance = debug metrics, only useful when troubleshooting.
+    # Canvas = default resolution + UV map for NEW layers (set once per project).
     TLM_PT_PropsComposite,
-    TLM_PT_PropsPerformance,
-    TLM_PT_PropsBake,
     TLM_PT_PropsPresets,
+    TLM_PT_PropsBake,
     TLM_PT_PropsIO,
+    TLM_PT_PropsPerformance,
+    TLM_PT_PropsCanvas,
     TLM_PT_ViewportPanel,
-    TLM_PT_ViewCanvas,
     TLM_PT_ViewComposite,
-    TLM_PT_ViewPerformance,
-    TLM_PT_ViewBake,
     TLM_PT_ViewPresets,
+    TLM_PT_ViewBake,
     TLM_PT_ViewIO,
+    TLM_PT_ViewPerformance,
+    TLM_PT_ViewCanvas,
 ]
 
 
