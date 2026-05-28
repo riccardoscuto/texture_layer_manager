@@ -1357,8 +1357,50 @@ def _draw_composite_section(layout, tlm):
     # Alpha pipeline — labelled clearly so the user knows what it does.
     surf_box.label(text="Alpha:", icon='IMAGE_ALPHA')
     surf_box.prop(tlm, "use_base_color_alpha",
-                  text="Route PAINT image alpha → BSDF.Alpha",
+                  text="Use PNG Alpha Channel  (foliage / decals)",
                   icon='IMAGE_ALPHA', toggle=True)
+
+    # Contextual hints for use_base_color_alpha. The toggle has very
+    # different effects depending on what the user's PAINT layers actually
+    # carry — so we surface the relevant guidance instead of relying on
+    # the (long) tooltip text the user might not read.
+    paint_layers_with_image = [
+        l for l in tlm.layers
+        if l.visible and l.layer_type == 'PAINT' and l.image is not None
+    ]
+    paint_pngs_with_alpha = [
+        l for l in paint_layers_with_image
+        if (l.image.depth in (32, 64, 128)  # 8/16/32-bit RGBA
+            or l.image.alpha_mode != 'NONE')
+        and l.image.source == 'FILE'
+        and bool(l.image.filepath)
+    ]
+    if tlm.use_base_color_alpha:
+        if not paint_layers_with_image:
+            hint = surf_box.row(align=True)
+            hint.alert = True
+            hint.label(
+                text="No PAINT layer — toggle has no effect",
+                icon='ERROR',
+            )
+        elif not paint_pngs_with_alpha:
+            # All paint layers use TLM-generated canvases (no real alpha
+            # channel) — toggle silently does nothing.
+            hint = surf_box.row(align=True)
+            hint.alert = True
+            hint.label(
+                text="Painted canvases have alpha=1. Use Output:Alpha instead",
+                icon='ERROR',
+            )
+    else:
+        # Toggle OFF but a PNG with alpha exists — suggest enabling.
+        if paint_pngs_with_alpha:
+            hint = surf_box.row(align=True)
+            hint.label(
+                text=f"PNG with alpha detected ({paint_pngs_with_alpha[0].image.name})",
+                icon='INFO',
+            )
+
     surf_box.prop(tlm, "alpha_blend_method", text="Blend Mode")
 
     # ── 3. Volume — quiet when off, expands when active ──

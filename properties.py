@@ -2722,12 +2722,17 @@ class TLM_MaterialProperties(PropertyGroup):
     # Default OFF — without this, an empty PAINT layer (alpha=0 everywhere)
     # would unintentionally hide the cube.
     use_base_color_alpha: BoolProperty(
-        name="Use Paint Alpha",
+        name="Use PNG Alpha Channel",
         description=(
-            "Wire the alpha of the base color chain (PAINT image alpha) to "
-            "BSDF.Alpha. Enable for cutout/decal/foliage workflows so an "
-            "empty/transparent paint shows through. Disable for additive "
-            "painting where new strokes should layer over a solid base"
+            "Wire the ALPHA CHANNEL of a PAINT layer's image to BSDF.Alpha. "
+            "Use this when a PAINT layer carries a PNG with real transparency "
+            "(foliage textures, decals, stickers) — the PNG's transparent "
+            "pixels become transparent on the material in one layer.\n\n"
+            "Different from a layer set to 'Output: Alpha':\n"
+            "  • This reads the IMAGE's alpha channel (transparent PNG pixels)\n"
+            "  • Output:Alpha reads the layer's RGB/value (paint a B&W mask)\n\n"
+            "Has NO effect on TLM-generated paint canvases (their alpha is "
+            "always 1.0) or on solid PNGs without an alpha channel"
         ),
         default=False,
         update=_on_layer_update,
