@@ -678,6 +678,9 @@ class TLM_LayerItem(PropertyGroup):
 
     layer_type: EnumProperty(
         name="Type",
+        description="Layer kind: Paint (image canvas), Fill (flat colour), "
+                    "Procedural (generated pattern), Adjustment (remap below), "
+                    "Group (folder), Reference (reuse another layer)",
         items=LAYER_TYPES,
         default="PAINT",
         update=_on_layer_update,
@@ -1270,32 +1273,38 @@ class TLM_LayerItem(PropertyGroup):
     )
     paint_rotation_x: FloatProperty(
         name="Rotation X", default=0.0, subtype='ANGLE',
-        soft_min=-6.2832, soft_max=6.2832,  # ±2Ï€
+        soft_min=-6.2832, soft_max=6.2832,  # ±2π
+        description="Rotate the UV/image around the X axis (radians)",
         update=_make_hot_callback("paint_rotation_x"),
     )
     paint_rotation_y: FloatProperty(
         name="Rotation Y", default=0.0, subtype='ANGLE',
         soft_min=-6.2832, soft_max=6.2832,
+        description="Rotate the UV/image around the Y axis (radians)",
         update=_make_hot_callback("paint_rotation_y"),
     )
     paint_rotation_z: FloatProperty(
         name="Rotation Z", default=0.0, subtype='ANGLE',
         soft_min=-6.2832, soft_max=6.2832,
+        description="Rotate the UV/image around the Z axis (radians) — main rotation for 2D paint",
         update=_make_hot_callback("paint_rotation_z"),
     )
     paint_scale_x: FloatProperty(
         name="Scale X", default=1.0, soft_min=0.01, soft_max=20.0,
         step=10, precision=3,
+        description="UV scale along X. >1 zooms out (tiling); <1 zooms in",
         update=_make_hot_callback("paint_scale_x"),
     )
     paint_scale_y: FloatProperty(
         name="Scale Y", default=1.0, soft_min=0.01, soft_max=20.0,
         step=10, precision=3,
+        description="UV scale along Y. >1 zooms out (tiling); <1 zooms in",
         update=_make_hot_callback("paint_scale_y"),
     )
     paint_scale_z: FloatProperty(
         name="Scale Z", default=1.0, soft_min=0.01, soft_max=20.0,
         step=10, precision=3,
+        description="Z scale — only meaningful with Box/Sphere/Tube projections",
         update=_make_hot_callback("paint_scale_z"),
     )
 
@@ -1457,6 +1466,9 @@ class TLM_LayerItem(PropertyGroup):
     # UI state — collapsible PBR section
     show_pbr_channels: BoolProperty(
         name="Show PBR Channels",
+        description="Expand the PBR Channels section: Bump + per-channel "
+                    "(Roughness / Metallic / Normal / Emission / Transmission / "
+                    "Alpha) toggles and their image/fill controls",
         default=False,
     )
     # UI state — collapsible Branching (per-channel blend overrides) section
@@ -1561,6 +1573,9 @@ class TLM_LayerItem(PropertyGroup):
 
     adj_type: EnumProperty(
         name="Adjustment",
+        description="Which remap to apply on the layers below: Hue/Saturation, "
+                    "Brightness/Contrast, Levels (in/out remap + gamma), or "
+                    "Color Balance (Lift/Gamma/Gain cinematic grading)",
         items=[
             ('HUE_SAT',        "Hue/Saturation",    "Adjust hue, saturation and value",             0),
             ('BRIGHT_CONTRAST', "Brightness/Contrast","Adjust brightness and contrast",              1),
@@ -1648,6 +1663,9 @@ class TLM_LayerItem(PropertyGroup):
 
     proc_type: EnumProperty(
         name="Type",
+        description="Procedural pattern generator. Each type has its own "
+                    "Pattern Params (Detail / Roughness / Feature / etc) and "
+                    "is composited via a shared ColorRamp for colour output",
         # Alphabetical order by display label so the dropdown is
         # scannable. Numeric identifiers are kept stable across versions
         # (changing them would re-shuffle existing presets/.tlm files).
@@ -2089,6 +2107,10 @@ class TLM_LayerItem(PropertyGroup):
     # Voronoi
     proc_voronoi_feature: EnumProperty(
         name="Feature",
+        description="Which Voronoi metric drives the output: F1=distance to "
+                    "nearest cell centre (filled cells), F2=second nearest, "
+                    "Edge=distance to cell edge (for cracks/joints), "
+                    "Radius=N-sphere radius",
         items=[
             ('F1',           "F1",           "Distance to nearest point",    0),
             ('F2',           "F2",           "Distance to second nearest",   1),
@@ -2101,6 +2123,9 @@ class TLM_LayerItem(PropertyGroup):
     )
     proc_voronoi_distance: EnumProperty(
         name="Distance",
+        description="Distance metric for cell shapes: Euclidean (round), "
+                    "Manhattan (axis-aligned), Chebychev (square cells), "
+                    "Minkowski (parametric)",
         items=[
             ('EUCLIDEAN', "Euclidean", "Standard straight-line distance",    0),
             ('MANHATTAN', "Manhattan", "Grid-based taxi-cab distance",       1),
@@ -2140,6 +2165,9 @@ class TLM_LayerItem(PropertyGroup):
     # Wave
     proc_wave_type: EnumProperty(
         name="Wave Type",
+        description="Wave layout: Bands = parallel stripes (use for wood "
+                    "planks / striated patterns), Rings = concentric rings "
+                    "(use for marble / wood end-grain / ripples)",
         items=[
             ('BANDS', "Bands", "Parallel bands",     0),
             ('RINGS', "Rings", "Concentric rings",    1),
@@ -2149,6 +2177,8 @@ class TLM_LayerItem(PropertyGroup):
     )
     proc_wave_profile: EnumProperty(
         name="Profile",
+        description="Cross-section of one wave cycle: Sine = smooth, "
+                    "Sawtooth = sharp ramp, Triangle = symmetric zigzag",
         items=[
             ('SIN',      "Sine",     "Smooth sine wave",         0),
             ('SAW',      "Sawtooth", "Sharp sawtooth ramp",      1),
@@ -2159,6 +2189,7 @@ class TLM_LayerItem(PropertyGroup):
     )
     proc_wave_bands_direction: EnumProperty(
         name="Bands Direction",
+        description="Axis along which the bands repeat",
         items=[
             ('X',        "X",        "Bands along the X axis", 0),
             ('Y',        "Y",        "Bands along the Y axis", 1),
@@ -2170,6 +2201,8 @@ class TLM_LayerItem(PropertyGroup):
     )
     proc_wave_rings_direction: EnumProperty(
         name="Rings Direction",
+        description="Axis perpendicular to the ring plane (Spherical = "
+                    "concentric 3D shells)",
         items=[
             ('X',         "X",         "Rings around the X axis", 0),
             ('Y',         "Y",         "Rings around the Y axis", 1),
@@ -2200,6 +2233,9 @@ class TLM_LayerItem(PropertyGroup):
     # Gradient
     proc_gradient_type: EnumProperty(
         name="Gradient Type",
+        description="Gradient shape: Linear/Quadratic/Easing/Diagonal go "
+                    "across the surface, Spherical/Radial radiate from a "
+                    "centre — pair with Color Ramp for masks or gradients",
         items=[
             ('LINEAR',     "Linear",     "Straight linear gradient",             0),
             ('QUADRATIC',  "Quadratic",  "Quadratic falloff gradient",           1),
@@ -2741,6 +2777,9 @@ class TLM_MaterialProperties(PropertyGroup):
     # Resolution for new layers
     resolution: EnumProperty(
         name="New Layer Resolution",
+        description="Default image size used when adding a new Paint layer "
+                    "or generating a Smart Mask. Existing layers are NOT "
+                    "resized — change this BEFORE adding the layer",
         items=[
             ("512",  "512 × 512",   "Low resolution, fast performance"),
             ("1024", "1024 × 1024", "Standard resolution for most use cases"),
