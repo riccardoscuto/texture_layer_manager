@@ -798,12 +798,17 @@ class TLM_LayerItem(PropertyGroup):
     # silently fall back to 'BASE_COLOR' on load (see _layer_contributes_to).
     output_channel: EnumProperty(
         name="Output Channel",
-        description="Which Principled BSDF input this layer contributes to",
+        description="Which Principled BSDF input this layer's PRIMARY output drives. "
+                    "Additional channels can be enabled via the use_* toggles in "
+                    "PBR Channels — but the dropdown sets where the layer's "
+                    "procedural pattern / fill colour goes first",
         items=[
-            ('BASE_COLOR',    "Base Color",    "Send this layer to Base Color"),
-            ('ROUGHNESS',     "Roughness",     "Send this layer to Roughness"),
-            ('METALLIC',      "Metallic",      "Send this layer to Metallic"),
-            ('ALPHA',         "Alpha",         "Send this layer to Alpha (surface opacity)"),
+            ('BASE_COLOR',   "Base Color",   "Send this layer to Base Color (default)"),
+            ('ROUGHNESS',    "Roughness",    "Send this layer to Roughness — pattern drives surface shininess"),
+            ('METALLIC',     "Metallic",     "Send this layer to Metallic — pattern drives metallic mask"),
+            ('EMISSION',     "Emission",     "Send this layer to Emission Color — pattern drives glow colour (use Emission Strength for intensity)"),
+            ('TRANSMISSION', "Transmission", "Send this layer to Transmission Weight — pattern drives glass/clear-coat amount"),
+            ('ALPHA',        "Alpha",        "Send this layer to Alpha (surface opacity / cutout)"),
         ],
         default='BASE_COLOR',
         update=_on_layer_update,

@@ -1376,9 +1376,17 @@ def rebuild_node_tree(material):
                     )
                 # Use max emission strength weighted by opacity (skipped in
                 # emission_output mode — base_color stack drives Emission at
-                # strength 1.0 fixed for true flat cel-shading)
+                # strength 1.0 fixed for true flat cel-shading).
+                # Include layers routed directly via output_channel='EMISSION'
+                # too: their primary output IS the emission color, and they
+                # otherwise wouldn't have use_emission=True flagged.
                 if not getattr(material.tlm, 'use_emission_output', False):
-                    strengths = [(l.emission_strength * l.opacity) for l in expanded if l.use_emission]
+                    strengths = [
+                        (l.emission_strength * l.opacity)
+                        for l in expanded
+                        if (l.use_emission
+                            or getattr(l, 'output_channel', '') == 'EMISSION')
+                    ]
                     if strengths:
                         val = node_tree.nodes.new("ShaderNodeValue")
                         val.name = f"{TLM_PREFIX}emission_strength"

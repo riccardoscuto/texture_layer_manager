@@ -597,87 +597,109 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
                 layer_out   = p_color
                 layer_alpha = p_alpha
             elif is_emission:
-                # _layer_contributes_to (checked above) already gates this:
-                # AUTO requires use_emission, output_channel routing bypasses it.
-                # Build Fac mask from procedural pattern, then use emission_color
-                # as the glow color. The Fac controls WHERE it glows, not what color.
-                fac_out = _build_proc_fac_node(
-                    node_tree, layer, f"emis_{i}", x, y, uv_map
-                )
-                if fac_out is None:
-                    continue
+                # Two paths to emission for a PROCEDURAL layer:
+                #
+                # 1) output_channel == 'EMISSION' (primary routing target):
+                #    The proc's COLOUR output (post-ColorRamp) goes directly to
+                #    BSDF.Emission Color, identical to how it drives Base Color.
+                #    Cleaner path for cel-shading bands, neon patterns, burn
+                #    effect emission, iridescent emission, etc. Skips the
+                #    Fac-mask threshold pipeline entirely.
+                #
+                # 2) use_emission=True with output_channel ≠ 'EMISSION':
+                #    Legacy "Fac mask + emission_color" path below — the proc's
+                #    pattern selects WHERE to emit (threshold/falloff) and
+                #    emission_color picks the colour. Required for the
+                #    selective-emission workflows (RANDOM_CELLS / NOISE / IMAGE
+                #    selectors) and for backward compatibility with presets
+                #    saved before the EMISSION enum existed.
+                if getattr(layer, 'output_channel', 'BASE_COLOR') == 'EMISSION':
+                    p_color, p_alpha = _build_procedural_node(
+                        node_tree, layer, uv_map, x, y
+                    )
+                    if p_color is None:
+                        continue
+                    layer_out = p_color
+                    layer_alpha = p_alpha
+                else:
+                    fac_out = _build_proc_fac_node(
+                        node_tree, layer, f"emis_{i}", x, y, uv_map
+                    )
+                    if fac_out is None:
+                        continue
 
-                # Unified smooth emission mask: Invert → Power → SmoothStep
-                # No more binary LESS_THAN vs soft Power split — one continuous pipeline.
-                threshold = getattr(layer, 'proc_emission_threshold', 0.0)
-                falloff   = getattr(layer, 'proc_emission_falloff', 0.08)
-                contrast  = getattr(layer, 'proc_contrast', 0.5)
-                exponent  = 1.0 + contrast * 8.0   # range 1.0 → 9.0
+                    # Unified smooth emission mask: Invert → Power → SmoothStep
+                    # No more binary LESS_THAN vs soft Power split — one
+                    # continuous pipeline.
+                    threshold = getattr(layer, 'proc_emission_threshold', 0.0)
+                    falloff   = getattr(layer, 'proc_emission_falloff', 0.08)
+                    contrast  = getattr(layer, 'proc_contrast', 0.5)
+                    exponent  = 1.0 + contrast * 8.0   # range 1.0 → 9.0
 
-                # Step 1: edge = 1 - fac  (invert so mask=1 at cell edges)
-                invert = node_tree.nodes.new("ShaderNodeMath")
-                invert.operation = 'SUBTRACT'
-                invert.name = f"{TLM_PREFIX}emis_inv_{i}"
-                invert.location = (x + 80, y - 120)
-                invert.inputs[0].default_value = 1.0
-                node_tree.links.new(fac_out, invert.inputs[1])
-                invert.use_clamp = True
+                    # Step 1: edge = 1 - fac (invert so mask=1 at cell edges)
+                    invert = node_tree.nodes.new("ShaderNodeMath")
+                    invert.operation = 'SUBTRACT'
+                    invert.name = f"{TLM_PREFIX}emis_inv_{i}"
+                    invert.location = (x + 80, y - 120)
+                    invert.inputs[0].default_value = 1.0
+                    node_tree.links.new(fac_out, invert.inputs[1])
+                    invert.use_clamp = True
 
-                # Step 2: shaped = edge ^ exponent  (contrast sharpening)
-                power = node_tree.nodes.new("ShaderNodeMath")
-                power.operation = 'POWER'
-                power.name = f"{TLM_PREFIX}emis_pow_{i}"
-                power.location = (x + 240, y - 120)
-                node_tree.links.new(invert.outputs["Value"], power.inputs[0])
-                power.inputs[1].default_value = exponent
-                power.use_clamp = True
+                    # Step 2: shaped = edge ^ exponent (contrast sharpening)
+                    power = node_tree.nodes.new("ShaderNodeMath")
+                    power.operation = 'POWER'
+                    power.name = f"{TLM_PREFIX}emis_pow_{i}"
+                    power.location = (x + 240, y - 120)
+                    node_tree.links.new(invert.outputs["Value"], power.inputs[0])
+                    power.inputs[1].default_value = exponent
+                    power.use_clamp = True
 
-                # Step 3: mask = smoothstep(threshold, threshold + falloff, shaped)
-                mr = node_tree.nodes.new("ShaderNodeMapRange")
-                mr.name = f"{TLM_PREFIX}emis_smooth_{i}"
-                mr.location = (x + 420, y - 120)
-                mr.clamp = True
-                if hasattr(mr, 'data_type'):
-                    mr.data_type = 'FLOAT'
-                if hasattr(mr, 'interpolation_type'):
-                    mr.interpolation_type = 'SMOOTHSTEP'
-                node_tree.links.new(power.outputs["Value"], mr.inputs["Value"])
-                mr.inputs["From Min"].default_value = threshold
-                mr.inputs["From Max"].default_value = min(1.0, threshold + max(0.001, falloff))
-                mr.inputs["To Min"].default_value   = 0.0
-                mr.inputs["To Max"].default_value   = 1.0
-                mask_out = mr.outputs.get("Result") or mr.outputs[0]
+                    # Step 3: smoothstep(threshold, threshold + falloff, shaped)
+                    mr = node_tree.nodes.new("ShaderNodeMapRange")
+                    mr.name = f"{TLM_PREFIX}emis_smooth_{i}"
+                    mr.location = (x + 420, y - 120)
+                    mr.clamp = True
+                    if hasattr(mr, 'data_type'):
+                        mr.data_type = 'FLOAT'
+                    if hasattr(mr, 'interpolation_type'):
+                        mr.interpolation_type = 'SMOOTHSTEP'
+                    node_tree.links.new(power.outputs["Value"], mr.inputs["Value"])
+                    mr.inputs["From Min"].default_value = threshold
+                    mr.inputs["From Max"].default_value = min(1.0, threshold + max(0.001, falloff))
+                    mr.inputs["To Min"].default_value   = 0.0
+                    mr.inputs["To Max"].default_value   = 1.0
+                    mask_out = mr.outputs.get("Result") or mr.outputs[0]
 
-                # ── Selective emission ───────────────────────────────────
-                # An optional second mask gates WHERE the procedural
-                # emission is allowed to light up — multiplied in here so
-                # the smoothstep above still shapes each lit region's
-                # falloff. Disabled by default (selector_type=NONE).
-                selector_out = _build_emission_selector(
-                    node_tree, layer, uv_map, x, y, name_tag=f"emis_{i}"
-                )
-                if selector_out is not None:
-                    sel_mul = node_tree.nodes.new("ShaderNodeMath")
-                    sel_mul.operation = 'MULTIPLY'
-                    sel_mul.use_clamp = True
-                    sel_mul.name = f"{TLM_PREFIX}emis_sel_mul_{i}"
-                    sel_mul.location = (x + 580, y - 120)
-                    node_tree.links.new(mask_out, sel_mul.inputs[0])
-                    node_tree.links.new(selector_out, sel_mul.inputs[1])
-                    mask_out = sel_mul.outputs["Value"]
+                    # ── Selective emission ───────────────────────────────
+                    # An optional second mask gates WHERE the procedural
+                    # emission is allowed to light up — multiplied in here
+                    # so the smoothstep above still shapes each lit
+                    # region's falloff. Disabled by default (NONE).
+                    selector_out = _build_emission_selector(
+                        node_tree, layer, uv_map, x, y, name_tag=f"emis_{i}"
+                    )
+                    if selector_out is not None:
+                        sel_mul = node_tree.nodes.new("ShaderNodeMath")
+                        sel_mul.operation = 'MULTIPLY'
+                        sel_mul.use_clamp = True
+                        sel_mul.name = f"{TLM_PREFIX}emis_sel_mul_{i}"
+                        sel_mul.location = (x + 580, y - 120)
+                        node_tree.links.new(mask_out, sel_mul.inputs[0])
+                        node_tree.links.new(selector_out, sel_mul.inputs[1])
+                        mask_out = sel_mul.outputs["Value"]
 
-                # Mix: lerp(black, emission_color, mask) = emission_color * mask
-                emis_fill = _new_fill(node_tree, layer.emission_color, x + 160, y - 200)
-                emis_fill.name = f"{TLM_PREFIX}emis_color_{i}"
-                emis_black = _new_fill(node_tree, (0, 0, 0, 1), x + 160, y - 280)
-                emis_black.name = f"{TLM_PREFIX}emis_black2_{i}"
-                emis_mix = _new_mix(node_tree, 'MIX', 1.0, x + 340, y - 150)
-                emis_mix.name = f"{TLM_PREFIX}emis_mask_{i}"
-                node_tree.links.new(emis_black.outputs["Color"], _a_socket(emis_mix))
-                node_tree.links.new(emis_fill.outputs["Color"], _b_socket(emis_mix))
-                node_tree.links.new(mask_out, _factor_socket(emis_mix))
-                layer_out = _result_socket(emis_mix)
-                layer_alpha = None
+                    # Mix: lerp(black, emission_color, mask)
+                    emis_fill = _new_fill(node_tree, layer.emission_color, x + 160, y - 200)
+                    emis_fill.name = f"{TLM_PREFIX}emis_color_{i}"
+                    emis_black = _new_fill(node_tree, (0, 0, 0, 1), x + 160, y - 280)
+                    emis_black.name = f"{TLM_PREFIX}emis_black2_{i}"
+                    emis_mix = _new_mix(node_tree, 'MIX', 1.0, x + 340, y - 150)
+                    emis_mix.name = f"{TLM_PREFIX}emis_mask_{i}"
+                    node_tree.links.new(emis_black.outputs["Color"], _a_socket(emis_mix))
+                    node_tree.links.new(emis_fill.outputs["Color"], _b_socket(emis_mix))
+                    node_tree.links.new(mask_out, _factor_socket(emis_mix))
+                    layer_out = _result_socket(emis_mix)
+                    layer_alpha = None
             elif is_scalar:
                 # Drive roughness/metallic/transmission/alpha from the
                 # same procedural colour graph used by Base Color, then
@@ -706,10 +728,9 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
                 node_tree.links.new(proc_color, to_scalar.inputs["Color"])
                 scalar_out = to_scalar.outputs["Val"]
 
-                _routing_target = {
-                    'BASE_COLOR': 'base_color', 'ROUGHNESS': 'roughness',
-                    'METALLIC': 'metallic', 'ALPHA': 'alpha',
-                }.get(getattr(layer, 'output_channel', 'BASE_COLOR'), 'base_color')
+                _routing_target = _OUTPUT_CHANNEL_TO_TARGET.get(
+                    getattr(layer, 'output_channel', 'BASE_COLOR'), 'base_color'
+                )
 
                 if _routing_target == channel_id:
                     # Primary target: pass the procedural value through directly.
@@ -1409,10 +1430,16 @@ def _build_bump_channel(node_tree, layers, uv_map, start_x, y_base, x_step,
 
 
 _OUTPUT_CHANNEL_TO_TARGET = {
-    'BASE_COLOR': 'base_color',
-    'ROUGHNESS':  'roughness',
-    'METALLIC':   'metallic',
-    'ALPHA':      'alpha',
+    'BASE_COLOR':   'base_color',
+    'ROUGHNESS':    'roughness',
+    'METALLIC':     'metallic',
+    'ALPHA':        'alpha',
+    # Added 2026-05-28 — direct routing to emission / transmission without
+    # the use_emission+threshold workaround. The layer's primary output
+    # (procedural color, paint color, fill color) drives BSDF.Emission Color
+    # or BSDF.Transmission Weight respectively.
+    'EMISSION':     'emission',
+    'TRANSMISSION': 'transmission',
 }
 
 # Per-channel "use_<channel>" property name. Used by both routable
