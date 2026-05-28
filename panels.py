@@ -944,6 +944,7 @@ def _draw_reference(col, active, tlm):
     # Validation hints — user-facing feedback that matches the compositing
     # guard rails so they can't accidentally build an invalid graph.
     ref_name = active.reference_layer_name
+    ref = None
     if not ref_name:
         col.label(text="Pick a source layer above", icon='INFO')
     elif ref_name == active.name:
@@ -960,6 +961,49 @@ def _draw_reference(col, active, tlm):
         else:
             col.label(text=f"→ {ref.layer_type.title()} pattern reused",
                       icon='CHECKMARK')
+
+    # ── Reference mode (Composed vs Raw Pattern) ─────────────────────
+    # RAW_PATTERN only meaningful when the source is PROCEDURAL — show
+    # the dropdown contextually, and surface this layer's own ColorRamp
+    # controls so the user can remap the source's raw FAC to a
+    # different colour pattern + channel.
+    src_is_proc = ref is not None and ref.layer_type == "PROCEDURAL"
+    if src_is_proc:
+        col.separator(factor=0.4)
+        col.prop(active, "reference_mode", text="Mode")
+        if active.reference_mode == 'RAW_PATTERN':
+            box = col.box().column(align=True)
+            box.label(text="Own ColorRamp (applied to source FAC):",
+                      icon='IPO_LINEAR')
+            mi = box.row(align=True)
+            mi.prop(active, "proc_color_ramp_mode", text="")
+            mi.prop(active, "proc_color_ramp_interpolation", text="")
+            ms = box.row(align=True)
+            ms.prop(active, "proc_use_manual_stops", text="Manual Stops",
+                    toggle=True,
+                    icon='IPO_LINEAR' if not active.proc_use_manual_stops
+                         else 'IPO_CONSTANT')
+            box.separator(factor=0.3)
+            cr = box.row(align=True)
+            cr.prop(active, "proc_color1", text="")
+            cr.prop(active, "proc_color2", text="")
+            if active.proc_use_manual_stops:
+                ps = box.row(align=True)
+                ps.prop(active, "proc_color1_position",
+                        text="Pos 1", slider=True)
+                ps.prop(active, "proc_color2_position",
+                        text="Pos 2", slider=True)
+            # Extra stops
+            for idx, stop in enumerate(active.proc_extra_color_stops):
+                sr = box.row(align=True)
+                sr.prop(stop, "color", text="")
+                sr.prop(stop, "position",
+                        text=f"Pos {idx + 3}", slider=True)
+                del_op = sr.operator("tlm.remove_proc_color_stop",
+                                      text="", icon='X')
+                del_op.index = idx
+            box.operator("tlm.add_proc_color_stop",
+                         text="Add Color Stop", icon='ADD')
 
     col.separator(factor=0.6)
     _draw_mask_block(col, active)

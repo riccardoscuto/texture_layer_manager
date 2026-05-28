@@ -41,6 +41,7 @@ from . import (
     _assign_layer_frames,
     # From procedurals.py (loaded BEFORE channels in __init__.py order)
     _build_procedural_node, _build_proc_fac_node,
+    _build_proc_color_ramp,
     _build_fresnel_mask, _build_emission_selector, _voronoi_fac,
     _inject_coord_normalization, _inject_coord_transform,
     _inject_vector_distortion,
@@ -258,11 +259,28 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
             # instead of merging them with the source's frame.
             # try/finally ensures retag happens even when a branch `continue`s.
             _pre_ref_names = {n.name for n in node_tree.nodes}
+            _ref_mode = getattr(layer, 'reference_mode', 'COMPOSED')
             try:
                 if ref_layer.layer_type == "PROCEDURAL":
-                    ref_color_out, ref_alpha_out = _build_procedural_node(
-                        node_tree, ref_layer, uv_map, x, y
-                    )
+                    if _ref_mode == 'RAW_PATTERN':
+                        # Tap the source procedural's raw FAC (pre-ColorRamp
+                        # value) and apply THIS Reference layer's own
+                        # ColorRamp. Lets a single source procedural drive
+                        # multiple channels with different colour remappings.
+                        fac_out = _build_proc_fac_node(
+                            node_tree, ref_layer, f"ref_raw_{_next_id()}",
+                            x, y, uv_map,
+                        )
+                        if fac_out is None:
+                            continue
+                        ref_color_out = _build_proc_color_ramp(
+                            node_tree, layer, x + 120, y, fac_out
+                        )
+                        ref_alpha_out = None
+                    else:
+                        ref_color_out, ref_alpha_out = _build_procedural_node(
+                            node_tree, ref_layer, uv_map, x, y
+                        )
                 elif ref_layer.layer_type == "PAINT" and ref_layer.image:
                     tex = _new_img_tex(node_tree, ref_layer.image, uv_map, x, y, layer=ref_layer)
                     # _new_img_tex doesn't tag — stamp the tex node so it's
@@ -1109,11 +1127,26 @@ def _build_base_color(node_tree, root_layers, group_children, uv_map, start_x, y
             # try/finally ensures retag happens even when a branch `continue`s
             # (e.g. `ref_color is None` for an unknown procedural type).
             _pre_ref_names = {n.name for n in node_tree.nodes}
+            _ref_mode = getattr(layer, 'reference_mode', 'COMPOSED')
             try:
                 if ref_layer.layer_type == "PROCEDURAL":
-                    ref_color, ref_alpha = _build_procedural_node(
-                        node_tree, ref_layer, uv_map, x, y
-                    )
+                    if _ref_mode == 'RAW_PATTERN':
+                        # Tap source's raw FAC, apply own ColorRamp.
+                        # See _build_channel's REFERENCE branch for rationale.
+                        fac_out = _build_proc_fac_node(
+                            node_tree, ref_layer, f"ref_bc_raw_{_next_id()}",
+                            x, y, uv_map,
+                        )
+                        if fac_out is None:
+                            continue
+                        ref_color = _build_proc_color_ramp(
+                            node_tree, layer, x + 120, y, fac_out
+                        )
+                        ref_alpha = None
+                    else:
+                        ref_color, ref_alpha = _build_procedural_node(
+                            node_tree, ref_layer, uv_map, x, y
+                        )
                     if ref_color is None:
                         continue
                     layer_color_out = ref_color

@@ -1325,6 +1325,35 @@ class TLM_LayerItem(PropertyGroup):
         update=_on_layer_update,
     )
 
+    reference_mode: EnumProperty(
+        name="Reference Mode",
+        description=(
+            "How this Reference layer reuses the source's pattern.\n\n"
+            "COMPOSED (default) — reuses the source's COMPLETE post-ColorRamp "
+            "output. The Reference applies its own blend/opacity/mask/channels "
+            "on top of the finished pattern. Use for: pattern duplication "
+            "across channels, alpha-cutout reuse, simple re-routing.\n\n"
+            "RAW_PATTERN — taps the source procedural's UNDERLYING value "
+            "BEFORE its ColorRamp is applied (raw gradient FAC, voronoi "
+            "distance, fresnel angle, noise FAC). The Reference then applies "
+            "its OWN ColorRamp and routing. Lets a SINGLE source procedural "
+            "drive MULTIPLE channels with DIFFERENT colour remappings — burn "
+            "dissolve (alpha + emission band), cel-shading (shadow bands + "
+            "specular), iridescent (hue ramp + roughness), worn metal "
+            "(edge colour + edge roughness). Only meaningful when the source "
+            "is a PROCEDURAL."
+        ),
+        items=[
+            ('COMPOSED',    "Composed Output",
+             "Reuse the source's finished pattern (post-ColorRamp)"),
+            ('RAW_PATTERN', "Raw Pattern",
+             "Reuse the source's underlying value pre-ColorRamp; apply own "
+             "remapping (procedural sources only)"),
+        ],
+        default='COMPOSED',
+        update=_on_layer_update,
+    )
+
     # ── PBR Channels ─────────────────────────────────────────────────────────
     # Each layer can independently paint/fill additional PBR channels.
     # All channels are opt-in: disabling them leaves the channel untouched.
