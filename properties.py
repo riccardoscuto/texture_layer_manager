@@ -637,7 +637,16 @@ def _on_proc_color_stop_change(stop, context):
 
     target_ptr = stop.as_pointer()
     for layer in mat.tlm.layers:
-        if getattr(layer, 'layer_type', '') != 'PROCEDURAL':
+        # Extra colour stops drive a ColorRamp on two layer kinds:
+        #   - PROCEDURAL: its own pattern ColorRamp.
+        #   - REFERENCE in RAW_PATTERN mode: a ColorRamp this layer applies
+        #     to the source procedural's raw FAC (see _build_channel's
+        #     REFERENCE branch). Both tag the ColorRamp with the LAYER's own
+        #     name, so _hot_proc_color(nt, layer, ...) finds it either way.
+        # Skipping REFERENCE here was the bug: editing an extra stop on a
+        # RAW_PATTERN reference never reached the hot path, so neither colour
+        # nor position updated live.
+        if getattr(layer, 'layer_type', '') not in ('PROCEDURAL', 'REFERENCE'):
             continue
         for s in getattr(layer, 'proc_extra_color_stops', []):
             if s.as_pointer() == target_ptr:

@@ -499,9 +499,12 @@ def _hot_proc_color(node_tree, layer, prop_name):
         pairs = []  # list of (pos, color) tuples
 
         # Stop positions for color1 + color2 — manual or computed.
-        # Same special-case as the build path: GRADIENT and FRESNEL bypass
-        # contrast/center to give a full 0..1 sweep.
-        if getattr(layer, 'proc_use_manual_stops', False) and layer.proc_type not in ('GRADIENT', 'FRESNEL'):
+        # MUST stay in sync with _build_proc_color_ramp (procedurals.py).
+        # Only FRESNEL bypasses manual stops (its Schlick distribution
+        # needs the neutral 0..1 sweep). GRADIENT now honours manual stops
+        # too — important for burn-dissolve style ALPHA cutoffs where the
+        # user sets the transparent band at specific FAC positions.
+        if getattr(layer, 'proc_use_manual_stops', False) and layer.proc_type != 'FRESNEL':
             pos1 = max(0.0, min(1.0, getattr(layer, 'proc_color1_position', 0.0)))
             pos2 = max(0.0, min(1.0, getattr(layer, 'proc_color2_position', 1.0)))
             if abs(pos1 - pos2) < 1e-4:
