@@ -84,13 +84,21 @@ def _build_proc_color_ramp(node_tree, layer, x, y, fac_out):
     _tag(cr, layer.name, "proc_cr")
 
     # Stop positions: two modes — Manual or computed-from-contrast.
-    # GRADIENT + FRESNEL force contrast=0, center=0.5 so the ColorRamp
-    # stops sit at the full 0..1 range. Without this, Fresnel.Fac (which
-    # follows Schlick's non-linear distribution — most pixels concentrate
-    # below 0.255 except at grazing angles) maps almost entirely to
-    # color1 and color2 is never visible. Treating Fresnel like a real
-    # gradient gives the expected face-to-edge sweep with user-set IOR.
-    if getattr(layer, 'proc_use_manual_stops', False) and layer.proc_type not in ('GRADIENT', 'FRESNEL'):
+    #
+    # FRESNEL forces contrast=0, center=0.5 (default 0..1 range) because
+    # Fresnel.Fac follows Schlick's non-linear distribution — most pixels
+    # concentrate below 0.255 except at grazing angles. Manual stops are
+    # accepted on FRESNEL but the auto path uses neutral defaults so the
+    # full angular sweep maps cleanly.
+    #
+    # GRADIENT used to be excluded from manual stops because the auto-path
+    # gives a clean 0..1 linear ramp, which works for most procedural-as-
+    # color uses. But this prevented users from tuning where the cutoff
+    # sits when routing the gradient to a single output channel — e.g.
+    # output_channel='ALPHA' for burn-dissolve effects, where you want the
+    # transparent band at a specific FAC range. Now GRADIENT honours
+    # manual stops too. Fix 2026-05-28.
+    if getattr(layer, 'proc_use_manual_stops', False) and layer.proc_type != 'FRESNEL':
         pos1 = max(0.0, min(1.0, getattr(layer, 'proc_color1_position', 0.0)))
         pos2 = max(0.0, min(1.0, getattr(layer, 'proc_color2_position', 1.0)))
         if abs(pos1 - pos2) < 1e-4:

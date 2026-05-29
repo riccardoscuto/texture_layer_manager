@@ -245,8 +245,17 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
         # fill values, and branching overrides — only the raw PATTERN
         # is borrowed from the referenced layer.
         if layer.layer_type == "REFERENCE":
-            # contribution gate (use_<channel> vs output_channel routing) is
-            # already enforced by _layer_contributes_to at the top of the loop.
+            # CRITICAL: gate the reference's contribution to THIS channel
+            # by its own output_channel + use_<channel> flags. Without
+            # this guard, a REFERENCE routed to EMISSION (or any non-current
+            # channel) would still inject its pattern into the alpha /
+            # roughness / etc. mix chain — silently breaking downstream
+            # channels. This was the root cause of the burn-dissolve TLM
+            # replica being invisible (the EMISSION-routed Reference was
+            # multiplying the alpha by its emission-band red value).
+            # Bug fix 2026-05-28.
+            if not _layer_contributes_to(layer, channel_id):
+                continue
             ref_name = getattr(layer, 'reference_layer_name', '')
             ref_layer = next((l for l in layers if l.name == ref_name and l != layer), None)
             if ref_layer is None or ref_layer.layer_type == "REFERENCE":
@@ -1101,6 +1110,11 @@ def _build_base_color(node_tree, root_layers, group_children, uv_map, start_x, y
             # kept in sync with it — the generic _build_channel handles Reference for
             # roughness/metallic/etc., but base_color has its own dedicated builder
             # (_build_base_color) to preserve group alpha for Clipping Mask.
+            # Gate the reference contribution: a REFERENCE routed to
+            # EMISSION/ROUGHNESS/etc. must NOT inject into base_color.
+            # Same fix as the generic _build_channel — see bug fix 2026-05-28.
+            if not _layer_contributes_to(layer, 'base_color'):
+                continue
             ref_name = getattr(layer, 'reference_layer_name', '')
             # Search root layers first, then inside groups (Reference can point
             # at a layer nested in a group).
