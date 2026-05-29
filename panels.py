@@ -582,6 +582,10 @@ def _draw_procedural_advanced_tail(col, active, tlm):
         map_box.prop(active, "proc_coord_type", text="Coords")
         if active.proc_coord_type == 'OBJECT':
             map_box.prop(active, "proc_normalize_coords", text="Normalize Scale")
+        # View-driven UV parallax — the pattern slides with the camera
+        # when this is > 0. Try 0.2–0.3 for holographic-foil parallax.
+        map_box.prop(active, "proc_uv_view_shift", slider=True,
+                     text="View Parallax")
         # Coordinate transform (polar/spherical/swirl/cylindrical)
         map_box.prop(active, "proc_coord_transform", text="Transform")
         if active.proc_coord_transform == 'SWIRL':

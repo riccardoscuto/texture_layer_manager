@@ -2380,6 +2380,28 @@ class TLM_LayerItem(PropertyGroup):
         update=_on_layer_update,
     )
 
+    # View-driven UV parallax — additive offset of the coord stream by
+    # the per-pixel view vector (Geometry.Incoming) BEFORE the Mapping
+    # node. Lets the pattern *slide* across the surface as the camera
+    # moves, like the diffraction pattern of a real holographic foil.
+    # Pair with proc_type='FRESNEL' for hue shift + this for spatial
+    # shift = the full "pattern that responds to view angle" look.
+    # Default 0 → zero graph change for existing materials.
+    proc_uv_view_shift: FloatProperty(
+        name="View Parallax",
+        description="Offset the coords by the view vector before sampling — "
+                    "the procedural pattern appears to slide across the "
+                    "surface as the camera moves. Use 0.1–0.4 for subtle "
+                    "holographic-foil parallax; higher for stylised effects. "
+                    "0 = off (no extra nodes inserted)",
+        default=0.0, min=0.0, max=2.0, soft_max=1.0,
+        # Toggling between 0 ↔ >0 changes graph topology (adds/removes
+        # Geom→Scale→Add nodes), so we rebuild rather than hot-update.
+        # Fine-tuning between two positive values still triggers rebuild
+        # for now; a future optimisation could keep this hot for >0 deltas.
+        update=_on_layer_update,
+    )
+
     proc_coord_preset: EnumProperty(
         name="Coord Preset",
         description="Quick coordinate setup for common use cases",

@@ -499,6 +499,52 @@ def _inject_coord_transform(node_tree, layer, coord_out, x, y, name_tag=""):
     return comb.outputs["Vector"]
 
 
+# ── View-driven UV parallax helper ────────────────────────────────────────────
+
+def _inject_view_uv_shift(node_tree, layer, coord_out, x, y, name_tag=""):
+    """Optionally add a view-vector offset to the coords for parallax foils.
+
+    A real holographic foil's diffraction pattern *slides* across the
+    surface when the viewer moves — the bands appear to scroll relative
+    to the printed art. Static UVs can't reproduce this because the
+    pattern is locked to the geometry. Adding a fraction of the per-
+    pixel view vector (Geometry.Incoming) to the coords BEFORE the
+    Mapping node makes the offset view-dependent: rotate the surface or
+    move the camera, the bands scroll. Pair with proc_type='FRESNEL' for
+    hue shift + this for spatial shift = the full holographic foil look.
+
+    Chain inserted (when proc_uv_view_shift > 0):
+        Geometry.Incoming → VectorMath(SCALE, k) ─┐
+                                                    ├→ VectorMath(ADD) → out
+                                       coord_out ──┘
+
+    Returns the (possibly offset) coord socket. Passthrough when amount
+    is 0 → zero cost / no graph change for materials that don't use it.
+    """
+    amt = float(getattr(layer, 'proc_uv_view_shift', 0.0))
+    if amt <= 0.0:
+        return coord_out
+    geom = node_tree.nodes.new("ShaderNodeNewGeometry")
+    geom.name = f"{TLM_PREFIX}view_geom_{name_tag}_{_next_id()}"
+    geom.location = (x - 700, y - 220)
+    _tag(geom, layer.name, f"view_geom_{name_tag}")
+    sc = node_tree.nodes.new("ShaderNodeVectorMath")
+    sc.operation = 'SCALE'
+    sc.name = f"{TLM_PREFIX}view_scale_{name_tag}_{_next_id()}"
+    sc.location = (x - 500, y - 220)
+    sc.inputs["Scale"].default_value = amt
+    _tag(sc, layer.name, f"view_scale_{name_tag}")
+    add = node_tree.nodes.new("ShaderNodeVectorMath")
+    add.operation = 'ADD'
+    add.name = f"{TLM_PREFIX}view_add_{name_tag}_{_next_id()}"
+    add.location = (x - 320, y - 120)
+    _tag(add, layer.name, f"view_add_{name_tag}")
+    node_tree.links.new(geom.outputs["Incoming"], sc.inputs[0])
+    node_tree.links.new(coord_out, add.inputs[0])
+    node_tree.links.new(sc.outputs["Vector"], add.inputs[1])
+    return add.outputs["Vector"]
+
+
 # ── Vector distortion helper ──────────────────────────────────────────────────
 
 def _inject_vector_distortion(node_tree, layer, mapping_out, x, y, name_tag=""):
@@ -844,6 +890,11 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
         coord_out = tc.outputs["Generated"]
     # Apply polar/spherical/swirl/cylindrical coordinate transform
     coord_out = _inject_coord_transform(
+        node_tree, layer, coord_out, x, y, name_tag="proc"
+    )
+    # View-vector UV offset (parallax) — enabled per-layer via
+    # proc_uv_view_shift > 0. Lets bands scroll as the camera moves.
+    coord_out = _inject_view_uv_shift(
         node_tree, layer, coord_out, x, y, name_tag="proc"
     )
     node_tree.links.new(coord_out, mapping.inputs["Vector"])
@@ -1534,6 +1585,11 @@ def _build_proc_fac_node(node_tree, layer, name_suffix, x, y, uv_map="UVMap"):
         coord_out = tc.outputs["Generated"]
     # Apply polar/spherical/swirl/cylindrical coordinate transform
     coord_out = _inject_coord_transform(
+        node_tree, layer, coord_out, x, y, name_tag=f"pfac_{name_suffix}"
+    )
+    # View-vector UV offset (parallax) — keep the Fac chain in sync with
+    # the main pattern so both shift together when the camera moves.
+    coord_out = _inject_view_uv_shift(
         node_tree, layer, coord_out, x, y, name_tag=f"pfac_{name_suffix}"
     )
     node_tree.links.new(coord_out, mapping.inputs["Vector"])

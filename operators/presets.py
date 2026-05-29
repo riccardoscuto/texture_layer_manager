@@ -260,6 +260,7 @@ class TLM_OT_ApplyPreset(Operator):
                 layer.proc_ramp_center      = ld.get("proc_ramp_center", 0.5)
                 layer.proc_vector_distortion= ld.get("proc_vector_distortion", 0.0)
                 layer.proc_coord_type       = ld.get("proc_coord_type", "GENERATED")
+                layer.proc_uv_view_shift    = ld.get("proc_uv_view_shift", 0.0)
                 layer.proc_emission_threshold = ld.get("proc_emission_threshold", 0.0)
                 layer.use_proc_color3       = ld.get("use_proc_color3", False)
                 if layer.use_proc_color3:
@@ -597,6 +598,7 @@ class TLM_OT_SavePreset(Operator):
                     "proc_ramp_center": getattr(layer, 'proc_ramp_center', 0.5),
                     "proc_vector_distortion": layer.proc_vector_distortion,
                     "proc_coord_type": layer.proc_coord_type,
+                    "proc_uv_view_shift": getattr(layer, 'proc_uv_view_shift', 0.0),
                     "proc_emission_threshold": getattr(layer, 'proc_emission_threshold', 0.0),
                     "use_proc_color3": getattr(layer, 'use_proc_color3', False),
                     # Feature A — Advanced coordinate transforms

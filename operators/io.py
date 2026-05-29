@@ -186,6 +186,7 @@ def _layer_to_dict(layer):
         d["proc_ramp_center"]      = round(getattr(layer, 'proc_ramp_center', 0.5), 4)
         d["proc_vector_distortion"]= round(layer.proc_vector_distortion, 4)
         d["proc_coord_type"]       = layer.proc_coord_type
+        d["proc_uv_view_shift"]    = round(getattr(layer, 'proc_uv_view_shift', 0.0), 4)
         d["proc_marble_distortion"]= round(layer.proc_marble_distortion, 4)
         d["proc_marble_wave_type"] = layer.proc_marble_wave_type
         d["proc_marble_wave_profile"] = getattr(layer, 'proc_marble_wave_profile', 'SIN')
@@ -475,6 +476,7 @@ def _dict_to_layer(d, tlm):
         layer.proc_ramp_center      = d.get("proc_ramp_center", 0.5)
         layer.proc_vector_distortion= d.get("proc_vector_distortion", 0.0)
         layer.proc_coord_type       = d.get("proc_coord_type", "GENERATED")
+        layer.proc_uv_view_shift    = d.get("proc_uv_view_shift", 0.0)
         layer.proc_marble_distortion= d.get("proc_marble_distortion", 5.0)
         layer.proc_marble_wave_type = d.get("proc_marble_wave_type", "BANDS")
         layer.proc_marble_wave_profile = d.get("proc_marble_wave_profile", "SIN")
