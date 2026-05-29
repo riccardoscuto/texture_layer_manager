@@ -1600,6 +1600,8 @@ def _draw_presets_section(layout, tlm):
             urow = ugrid.row(align=True)
             op = urow.operator("tlm.apply_preset", text=pname, icon='PRESET')
             op.preset_name = pname
+            rop = urow.operator("tlm.rename_preset", text="", icon='GREASEPENCIL')
+            rop.preset_name = pname
             dop = urow.operator("tlm.delete_preset", text="", icon='TRASH')
             dop.preset_name = pname
     layout.operator("tlm.save_preset",

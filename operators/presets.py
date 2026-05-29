@@ -1193,8 +1193,93 @@ class TLM_OT_DeletePreset(Operator):
         return context.window_manager.invoke_confirm(self, event)
 
 
+# Characters Windows/macOS/Linux filesystems reject (or that break the
+# "{name}.tlm" → preset-name round trip). Stripped from any user-typed name.
+_INVALID_PRESET_CHARS = set('\\/:*?"<>|')
+
+
+def _sanitize_preset_name(name):
+    """Trim + strip filesystem-illegal characters from a preset name."""
+    cleaned = "".join(c for c in (name or "") if c not in _INVALID_PRESET_CHARS)
+    return cleaned.strip()
+
+
+class TLM_OT_RenamePreset(Operator):
+    """Rename a user-saved preset (renames the .tlm file on disk)."""
+    bl_idname = "tlm.rename_preset"
+    bl_label = "Rename Preset"
+    bl_options = {'REGISTER'}
+
+    preset_name: bpy.props.StringProperty(default="")  # current name (set by the button)
+    new_name: bpy.props.StringProperty(
+        name="New Name",
+        description="New name for the preset",
+        default="",
+    )
+
+    def invoke(self, context, event):
+        # Pre-fill the dialog field with the current name so the user edits
+        # in place rather than retyping from scratch.
+        self.new_name = self.preset_name
+        return context.window_manager.invoke_props_dialog(self)
+
+    def draw(self, context):
+        self.layout.prop(self, "new_name", text="Name")
+
+    def execute(self, context):
+        preset_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "presets")
+
+        old_name = self.preset_name
+        new_name = _sanitize_preset_name(self.new_name)
+
+        if not new_name:
+            self.report({'ERROR'}, "Preset name cannot be empty")
+            return {'CANCELLED'}
+        if new_name == old_name:
+            return {'CANCELLED'}  # no-op, silent
+
+        # Built-in presets are code constants, not files — can't be renamed.
+        if old_name in BUILTIN_PRESETS:
+            self.report({'ERROR'}, "Built-in presets cannot be renamed")
+            return {'CANCELLED'}
+
+        src = os.path.join(preset_dir, f"{old_name}.tlm")
+        dst = os.path.join(preset_dir, f"{new_name}.tlm")
+
+        if not os.path.exists(src):
+            self.report({'WARNING'}, f"Preset file not found: {old_name}")
+            return {'CANCELLED'}
+        if new_name in BUILTIN_PRESETS or os.path.exists(dst):
+            self.report({'ERROR'}, f"A preset named '{new_name}' already exists")
+            return {'CANCELLED'}
+
+        # Rewrite the in-file "preset_name" field so the file's contents stay
+        # consistent with its filename (the Apply path reads the filename, but
+        # keeping the field in sync avoids confusion on re-export / inspection).
+        try:
+            with open(src, 'r') as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                data["preset_name"] = new_name
+            with open(src, 'w') as f:
+                json.dump(data, f, indent=2)
+        except (ValueError, OSError, TypeError):
+            # Non-fatal: a malformed/legacy file can still be renamed on disk.
+            pass
+
+        try:
+            os.rename(src, dst)
+        except OSError as e:
+            self.report({'ERROR'}, f"Failed to rename preset: {e}")
+            return {'CANCELLED'}
+
+        self.report({'INFO'}, f"Renamed '{old_name}' → '{new_name}'")
+        return {'FINISHED'}
+
+
 classes = [
     TLM_OT_ApplyPreset,
     TLM_OT_SavePreset,
     TLM_OT_DeletePreset,
+    TLM_OT_RenamePreset,
 ]
