@@ -480,48 +480,45 @@ class TLM_OT_ApplyPreset(Operator):
         if not self.merge:
             tlm.layers.clear()
 
-        # Apply material-level properties (IOR, Volume Abs/Scatter, etc).
-        # Built-in presets and pre-material-block .tlm files have no
-        # 'material' key — defaults make those continue to load fine.
-        if isinstance(preset_material, dict) and preset_material:
-            if 'bsdf_ior' in preset_material:
-                tlm.bsdf_ior = preset_material['bsdf_ior']
-            if 'use_volume_absorption' in preset_material:
-                tlm.use_volume_absorption = preset_material['use_volume_absorption']
-            if 'volume_absorption_color' in preset_material:
-                tlm.volume_absorption_color = preset_material['volume_absorption_color']
-            if 'volume_absorption_density' in preset_material:
-                tlm.volume_absorption_density = preset_material['volume_absorption_density']
-            if 'use_volume_scatter' in preset_material:
-                tlm.use_volume_scatter = preset_material['use_volume_scatter']
-            if 'volume_scatter_color' in preset_material:
-                tlm.volume_scatter_color = preset_material['volume_scatter_color']
-            if 'volume_scatter_density' in preset_material:
-                tlm.volume_scatter_density = preset_material['volume_scatter_density']
-            if 'volume_scatter_anisotropy' in preset_material:
-                tlm.volume_scatter_anisotropy = preset_material['volume_scatter_anisotropy']
-            if 'use_emission_output' in preset_material:
-                tlm.use_emission_output = preset_material['use_emission_output']
-            if 'use_base_color_alpha' in preset_material:
-                tlm.use_base_color_alpha = preset_material['use_base_color_alpha']
-            if 'alpha_blend_method' in preset_material:
-                try:
-                    tlm.alpha_blend_method = preset_material['alpha_blend_method']
-                except (TypeError, ValueError):
-                    pass  # unknown enum value — keep default
-            if 'use_displacement' in preset_material:
-                tlm.use_displacement = preset_material['use_displacement']
-            if 'displacement_method' in preset_material:
-                try:
-                    tlm.displacement_method = preset_material['displacement_method']
-                except (TypeError, ValueError):
-                    pass
-            if 'displacement_strength' in preset_material:
-                tlm.displacement_strength = preset_material['displacement_strength']
-            if 'displacement_midlevel' in preset_material:
-                tlm.displacement_midlevel = preset_material['displacement_midlevel']
-            if 'displacement_adaptive' in preset_material:
-                tlm.displacement_adaptive = preset_material['displacement_adaptive']
+        # Apply material-level properties (IOR, Volume Abs/Scatter, Emission
+        # output, Displacement, etc).
+        #
+        # CRITICAL: always RESET to defaults first, then overlay whatever the
+        # preset specifies. The old code only wrote keys present in the
+        # preset's 'material' block, so a preset with an empty/partial block
+        # (built-in presets, pre-material-block .tlm files, or a metal preset
+        # like Bronze that carries no volume/emission data) LEFT STALE material
+        # flags from the previously-applied material. Symptom: applying Bronze
+        # over a material that had been an Anime/Watercolor preset
+        # (use_emission_output=True) inherited the flat-emission flag → the
+        # bronze rendered as a washed-out white surface. Using `.get(key,
+        # default)` unconditionally guarantees a clean material-level state on
+        # every Apply.
+        if not isinstance(preset_material, dict):
+            preset_material = {}
+        pm = preset_material
+        tlm.bsdf_ior                 = pm.get('bsdf_ior', 1.45)
+        tlm.use_volume_absorption    = pm.get('use_volume_absorption', False)
+        tlm.volume_absorption_color  = pm.get('volume_absorption_color', (0.55, 0.75, 0.95, 1.0))
+        tlm.volume_absorption_density = pm.get('volume_absorption_density', 1.0)
+        tlm.use_volume_scatter       = pm.get('use_volume_scatter', False)
+        tlm.volume_scatter_color     = pm.get('volume_scatter_color', (0.92, 0.96, 1.0, 1.0))
+        tlm.volume_scatter_density   = pm.get('volume_scatter_density', 0.5)
+        tlm.volume_scatter_anisotropy = pm.get('volume_scatter_anisotropy', 0.0)
+        tlm.use_emission_output      = pm.get('use_emission_output', False)
+        tlm.use_base_color_alpha     = pm.get('use_base_color_alpha', False)
+        try:
+            tlm.alpha_blend_method = pm.get('alpha_blend_method', 'AUTO')
+        except (TypeError, ValueError):
+            tlm.alpha_blend_method = 'AUTO'
+        tlm.use_displacement         = pm.get('use_displacement', False)
+        try:
+            tlm.displacement_method = pm.get('displacement_method', 'DISPLACEMENT')
+        except (TypeError, ValueError):
+            pass
+        tlm.displacement_strength    = pm.get('displacement_strength', 0.1)
+        tlm.displacement_midlevel    = pm.get('displacement_midlevel', 0.5)
+        tlm.displacement_adaptive    = pm.get('displacement_adaptive', True)
 
         # Per-layer apply isolated in a closure so a single malformed entry
         # can be rolled back without aborting the whole preset import.

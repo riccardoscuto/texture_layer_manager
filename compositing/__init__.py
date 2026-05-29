@@ -1354,13 +1354,34 @@ def rebuild_node_tree(material):
             )
 
         # ── Emission ──────────────────────────────────────────────────────────────
-        if _channel_used(expanded, 'use_emission'):
+        _emission_used = _channel_used(expanded, 'use_emission')
+        _emission_output_mode = getattr(material.tlm, 'use_emission_output', False)
+
+        # Reset stray emission when NOTHING is going to drive it. Critical
+        # because emission_output mode (anime/toon flat look) leaves
+        # BSDF.Emission Color at white + Emission Strength 1.0; when the user
+        # then applies a non-emissive preset (e.g. metal) over the same
+        # material, _clear_tlm_nodes removes the old link but the BSDF socket
+        # keeps its white default → the whole surface glows white and washes
+        # out the real material. Force the socket back to black here.
+        # (Skipped when emission IS used or emission_output is on, because
+        # those paths drive Emission Color themselves further below / in the
+        # base-color section.)
+        if not _emission_used and not _emission_output_mode:
+            try:
+                _ec = bsdf.inputs.get("Emission Color") or bsdf.inputs.get("Emission")
+                if _ec is not None and not _ec.is_linked:
+                    _ec.default_value = (0.0, 0.0, 0.0, 1.0)
+            except (AttributeError, TypeError):
+                pass
+
+        if _emission_used:
             # If anime/toon emission_output mode is on, the base_color stack
             # already drives BSDF.Emission Color. Building the emission
             # channel here would just produce orphan node groups (built but
             # never connected to anything because we skip the link). Skip
             # the whole emission build entirely in that case.
-            if getattr(material.tlm, 'use_emission_output', False):
+            if _emission_output_mode:
                 pass  # emission channel build skipped — base_color drives Emission
             else:
                 e_out = _build_channel(node_tree, expanded, 'emission', uv_map, start_x, ch_y['emission'], x_step)
