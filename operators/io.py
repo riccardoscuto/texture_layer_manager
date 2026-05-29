@@ -217,9 +217,26 @@ def _layer_to_dict(layer):
         d["proc_voronoi_random_seed"]  = round(getattr(layer, 'proc_voronoi_random_seed', 0.0), 4)
 
     elif layer.layer_type == "REFERENCE":
-        # Reference layers reuse another layer's pattern — only the source name
-        # is distinctive; everything else is in the common mask/PBR sections.
+        # Reference layers reuse another layer's pattern. COMPOSED mode needs
+        # only the source name; RAW_PATTERN mode also carries its OWN ColorRamp
+        # (applied to the source's raw FAC), so serialize that too — otherwise
+        # reload reverts to COMPOSED + default colours.
         d["reference_layer_name"] = getattr(layer, 'reference_layer_name', "")
+        d["reference_mode"] = getattr(layer, 'reference_mode', 'COMPOSED')
+        d["proc_color1"] = [round(c, 4) for c in layer.proc_color1]
+        d["proc_color2"] = [round(c, 4) for c in layer.proc_color2]
+        d["proc_use_manual_stops"] = getattr(layer, 'proc_use_manual_stops', False)
+        d["proc_color1_position"] = round(getattr(layer, 'proc_color1_position', 0.0), 4)
+        d["proc_color2_position"] = round(getattr(layer, 'proc_color2_position', 1.0), 4)
+        d["proc_contrast"] = round(getattr(layer, 'proc_contrast', 0.5), 4)
+        d["proc_ramp_center"] = round(getattr(layer, 'proc_ramp_center', 0.5), 4)
+        d["proc_color_ramp_mode"] = getattr(layer, 'proc_color_ramp_mode', 'RGB')
+        d["proc_color_ramp_interpolation"] = getattr(
+            layer, 'proc_color_ramp_interpolation', 'LINEAR')
+        d["proc_extra_color_stops"] = [
+            {"color": [round(c, 4) for c in s.color], "position": round(s.position, 4)}
+            for s in getattr(layer, 'proc_extra_color_stops', [])
+        ]
 
     elif layer.layer_type == "ADJUSTMENT":
         d["adj_type"]        = layer.adj_type
@@ -498,6 +515,26 @@ def _dict_to_layer(d, tlm):
 
     elif layer.layer_type == "REFERENCE":
         layer.reference_layer_name = d.get("reference_layer_name", "")
+        try:
+            layer.reference_mode = d.get("reference_mode", "COMPOSED")
+        except (TypeError, ValueError):
+            layer.reference_mode = "COMPOSED"
+        # RAW_PATTERN ColorRamp data (harmless no-op for COMPOSED references).
+        layer.proc_color1 = d.get("proc_color1", [0, 0, 0, 1])
+        layer.proc_color2 = d.get("proc_color2", [1, 1, 1, 1])
+        layer.proc_use_manual_stops = d.get("proc_use_manual_stops", False)
+        layer.proc_color1_position = d.get("proc_color1_position", 0.0)
+        layer.proc_color2_position = d.get("proc_color2_position", 1.0)
+        layer.proc_contrast = d.get("proc_contrast", 0.5)
+        layer.proc_ramp_center = d.get("proc_ramp_center", 0.5)
+        layer.proc_color_ramp_mode = d.get("proc_color_ramp_mode", "RGB")
+        layer.proc_color_ramp_interpolation = d.get(
+            "proc_color_ramp_interpolation", "LINEAR")
+        layer.proc_extra_color_stops.clear()
+        for s in d.get("proc_extra_color_stops", []):
+            item = layer.proc_extra_color_stops.add()
+            item.color = s.get("color", [0.5, 0.5, 0.5, 1.0])
+            item.position = s.get("position", 0.5)
 
     elif layer.layer_type == "ADJUSTMENT":
         # CURVES was removed in favour of LEVELS+BRIGHT_CONTRAST — remap

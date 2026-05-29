@@ -705,6 +705,27 @@ class TLM_OT_ApplyPreset(Operator):
                 layer.proc_voronoi_random_seed  = ld.get("proc_voronoi_random_seed", 0.0)
             elif layer.layer_type == "REFERENCE":
                 layer.reference_layer_name = ld.get("reference_layer_name", "")
+                try:
+                    layer.reference_mode = ld.get("reference_mode", "COMPOSED")
+                except (TypeError, ValueError):
+                    layer.reference_mode = "COMPOSED"
+                # RAW_PATTERN ColorRamp data (harmless no-op for COMPOSED
+                # references, which ignore their own ColorRamp).
+                layer.proc_color1 = ld.get("proc_color1", [0, 0, 0, 1])
+                layer.proc_color2 = ld.get("proc_color2", [1, 1, 1, 1])
+                layer.proc_use_manual_stops = ld.get("proc_use_manual_stops", False)
+                layer.proc_color1_position = ld.get("proc_color1_position", 0.0)
+                layer.proc_color2_position = ld.get("proc_color2_position", 1.0)
+                layer.proc_contrast = ld.get("proc_contrast", 0.5)
+                layer.proc_ramp_center = ld.get("proc_ramp_center", 0.5)
+                layer.proc_color_ramp_mode = ld.get("proc_color_ramp_mode", "RGB")
+                layer.proc_color_ramp_interpolation = ld.get(
+                    "proc_color_ramp_interpolation", "LINEAR")
+                layer.proc_extra_color_stops.clear()
+                for s in ld.get("proc_extra_color_stops", []):
+                    item = layer.proc_extra_color_stops.add()
+                    item.color = s.get("color", [0.5, 0.5, 0.5, 1.0])
+                    item.position = s.get("position", 0.5)
             elif layer.layer_type == "ADJUSTMENT":
                 # CURVES was removed in favour of LEVELS+BRIGHT_CONTRAST —
                 # remap legacy presets so they still load without error.
@@ -900,6 +921,27 @@ class TLM_OT_SavePreset(Operator):
                 d["fill_color"] = list(layer.fill_color)
             elif layer.layer_type == "REFERENCE":
                 d["reference_layer_name"] = getattr(layer, 'reference_layer_name', "")
+                d["reference_mode"] = getattr(layer, 'reference_mode', 'COMPOSED')
+                # RAW_PATTERN references build their OWN ColorRamp from the
+                # source procedural's raw FAC, so they need the same
+                # ColorRamp data a PROCEDURAL layer serializes. Without this,
+                # reloading a preset reverted the reference to COMPOSED with
+                # default black→white colours (symptom: the whole burn/
+                # iridescent effect went white on Apply).
+                d["proc_color1"] = list(layer.proc_color1)
+                d["proc_color2"] = list(layer.proc_color2)
+                d["proc_use_manual_stops"] = getattr(layer, 'proc_use_manual_stops', False)
+                d["proc_color1_position"] = getattr(layer, 'proc_color1_position', 0.0)
+                d["proc_color2_position"] = getattr(layer, 'proc_color2_position', 1.0)
+                d["proc_contrast"] = getattr(layer, 'proc_contrast', 0.5)
+                d["proc_ramp_center"] = getattr(layer, 'proc_ramp_center', 0.5)
+                d["proc_color_ramp_mode"] = getattr(layer, 'proc_color_ramp_mode', 'RGB')
+                d["proc_color_ramp_interpolation"] = getattr(
+                    layer, 'proc_color_ramp_interpolation', 'LINEAR')
+                d["proc_extra_color_stops"] = [
+                    {"color": list(s.color), "position": s.position}
+                    for s in getattr(layer, 'proc_extra_color_stops', [])
+                ]
             elif layer.layer_type == "PROCEDURAL":
                 d.update({
                     "proc_type": layer.proc_type, "proc_scale": layer.proc_scale,
