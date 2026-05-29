@@ -9,24 +9,35 @@ STAR is the user's imported image; the procedural layers add the foil.
 This is the bread-and-butter TLM pitch: drop in an image, then layer
 procedural effects on top to turn it into a finished, sellable material.
 
-Showcases:
-  1. **PAINT layer = imported image** (`image_name`) → BASE_COLOR, the art.
-  2. **proc_type='FRESNEL' rainbow** — the foil's Fac is the Fresnel
-     view·normal, NOT a UV coordinate, so the rainbow shifts hue when
-     the card is rotated — exactly like a real holographic foil. The
-     7-stop ramp (red→violet) paints the full spectrum from face to
-     silhouette.
-  3. **Strong microbump** breaks the flat card normal into thousands of
-     micro-facets — each reads a DIFFERENT Fresnel slot → rainbow turns
-     into scintillating glitter that updates LIVE with camera & light.
-  4. **Sparkle NOISE** (SCREEN) adds an extra fine "cosmos holo" speckle.
-  5. **Glossy lamination** — low roughness so the card mirrors the sky.
+★ FOIL PATTERN MENU ★
+Five interchangeable foil patterns ship as separate layers. All but the
+first are HIDDEN by default (eye toggle off) — the user just clicks the
+eye on whichever they like:
 
-Layer stack (4):
-  01. Card Art PAINT (image)        — BASE_COLOR, glossy laminate
-  02. Holo Foil FRESNEL  ADD        — VIEW-DEPENDENT rainbow
-  03. Holo Sparkle NOISE  SCREEN    — fine glitter
-  04. Foil Microbump → BUMP         — breaks Fresnel into scintillating specks
+    Foil A · Diagonal       ← ON by default (classic linear holo)
+    Foil B · Counter-Diag   ← enable WITH A → cross-hatch / diamond foil
+    Foil C · Vertical       ← tight vertical "lenticular" lines
+    Foil D · Rings (CD)      ← concentric "compact-disc / cosmos" holo
+    Foil E · Spiral          ← swirled rings → spiral-vortex foil
+
+Every pattern shares:
+  • the SAME 7-stop spectral rainbow ramp,
+  • proc_uv_view_shift (camera-space-normal parallax) so the bands SLIDE
+    as the card is reoriented — a real, view-dependent foil, not a print.
+On top sits a FRESNEL hue-shift layer (the whole card's tint marches
+through the spectrum with the viewing angle) + a microbump that breaks
+the Fresnel into scintillating specks.
+
+Layer stack (9):
+  01. Card Art PAINT (image)         — BASE_COLOR, glossy laminate
+  02. Foil A · Diagonal  ADD  (ON)   — view-shift rainbow stripes
+  03. Foil B · Counter-Diag  (hidden)
+  04. Foil C · Vertical      (hidden)
+  05. Foil D · Rings (CD)     (hidden)
+  06. Foil E · Radial Sweep   (hidden)
+  07. Foil Hue Shift FRESNEL OVERLAY — view-dependent hue march
+  08. Holo Sparkle NOISE SCREEN      — fine glitter
+  09. Foil Microbump → BUMP          — scintillation
 """
 
 import bpy
@@ -44,38 +55,32 @@ TARGET_MESH = "TLM_HoloCard"
 CARD_IMAGE = "led_screen_demo_01312025"     # imported art — swap freely
 CARD_LOC = (0.0, 0.0, 1.2)
 CARD_SCALE = (1.05, 1.42, 1.05)             # 5:7 card aspect (X=width, Y=height post-90°X-rot)
-CARD_ROT_DEG = (90.0, 0.0, 28.0)            # face camera + 28° yaw — exposes grazing area
-                                            # where the FRESNEL-masked foil blooms
+CARD_ROT_DEG = (90.0, 0.0, 28.0)            # face camera + 28° yaw
 
 # ── Card art (L01) ──
 CARD_ROUGHNESS    = 0.09        # glossy lamination
 CARD_METALLIC     = 0.0
 
-# ── Holo foil — TWO-LAYER DYNAMIC stack ──
-#
-# A real holo foil has two ingredients:
-#   (A) A static DIFFRACTION PATTERN — diagonal stripes etched into the
-#       laminate. This is the WAVE layer.
-#   (B) A view-dependent HUE SHIFT — what hue each stripe shows depends
-#       on the viewing angle. This is the FRESNEL layer driving the
-#       SAME 7-stop spectral ramp.
-# Stacked, you see the diagonal foil pattern AND the colours scroll
-# through the spectrum as you tilt the card. Pair with the strong
-# microbump (L05) and every micro-facet catches a different Fresnel
-# slot → the rainbow ALSO scintillates on a tiny scale → real foil.
-#
-# Layer A — diffraction stripes (now WITH parallax so they scroll)
-FOIL_STRIPES_SCALE   = 3.5
-FOIL_STRIPES_OPACITY = 0.22     # more presence so the parallax is readable
-FOIL_STRIPES_BLEND   = "ADD"
-FOIL_STRIPES_VIEW_SHIFT = 0.50  # parallax — bands slide as the card rotates
-# Layer B — Fresnel hue shift
+# ── Foil pattern variants (shared params) ──
+FOIL_OPACITY      = 0.22        # per-pattern; ADD blend (stack a couple → brighter)
+FOIL_VIEW_SHIFT   = 0.50        # camera-space-normal parallax → bands slide on rotate
+# (name, kind, visible-by-default)
+FOIL_VARIANTS = [
+    ("02 Foil A - Diagonal",     'DIAG',     True),
+    ("03 Foil B - Counter-Diag", 'DIAG_REV', False),
+    ("04 Foil C - Vertical",     'VERT',     False),
+    ("05 Foil D - Rings (CD)",   'RINGS',    False),
+    ("06 Foil E - Spiral",       'SPIRAL',   False),
+]
+
+# ── Fresnel hue shift (global view-dependent tint) ──
 FOIL_FRES_IOR        = 1.45
 FOIL_FRES_OPACITY    = 0.32
 FOIL_FRES_BLEND      = "OVERLAY"   # shifts hue, doesn't blow out values
 FOIL_FRES_CONTRAST   = 0.50
 FOIL_FRES_RAMP_CENT  = 0.50
-# bright spectral rainbow (cleaner / brighter than the oil-slick palette)
+
+# bright spectral rainbow (shared by every foil layer)
 HOLO_RED          = (1.00, 0.10, 0.20, 1.0)   # 0.00 (color1)
 HOLO_ORANGE       = (1.00, 0.55, 0.05, 1.0)   # 0.17
 HOLO_YELLOW       = (0.95, 0.95, 0.10, 1.0)   # 0.34 (color3)
@@ -84,7 +89,7 @@ HOLO_CYAN         = (0.05, 0.85, 1.00, 1.0)   # 0.66
 HOLO_BLUE         = (0.20, 0.30, 1.00, 1.0)   # 0.83
 HOLO_VIOLET       = (0.75, 0.15, 1.00, 1.0)   # 1.00 (color2)
 
-# ── Sparkle (L03 — NOISE SCREEN) ──
+# ── Sparkle (NOISE SCREEN) ──
 SPARK_SCALE       = 60.0
 SPARK_OPACITY     = 0.06
 SPARK_CONTRAST    = 0.92
@@ -167,6 +172,58 @@ def _add_stop(layer, color, position):
     return s
 
 
+def _apply_holo_ramp(l):
+    """7-stop spectral rainbow + view-driven parallax — shared by all foils."""
+    l.proc_use_manual_stops = True
+    l.proc_color1 = HOLO_RED
+    l.proc_color2 = HOLO_VIOLET
+    l.use_proc_color3 = True
+    l.proc_color3 = HOLO_YELLOW
+    l.proc_color3_position = 0.34
+    _add_stop(l, HOLO_ORANGE, 0.17)
+    _add_stop(l, HOLO_GREEN,  0.50)
+    _add_stop(l, HOLO_CYAN,   0.66)
+    _add_stop(l, HOLO_BLUE,   0.83)
+    l.proc_uv_view_shift = FOIL_VIEW_SHIFT
+
+
+def _add_foil_variant(mat, name, kind, visible):
+    """One interchangeable foil pattern. Hidden ones are skipped by the
+    compositor (visible=False) until the user toggles the eye on."""
+    l = _add_proc(mat, name, "WAVE", opacity=FOIL_OPACITY,
+                  blend_mode="ADD", output_channel="BASE_COLOR", coord="UV")
+    l.proc_wave_profile = "SAW"          # each cycle = one full spectrum sweep
+    if kind == 'DIAG':
+        l.proc_wave_type = "BANDS"
+        l.proc_wave_bands_direction = "DIAGONAL"
+        l.proc_scale = 3.5
+    elif kind == 'DIAG_REV':
+        l.proc_wave_type = "BANDS"
+        l.proc_wave_bands_direction = "DIAGONAL"
+        l.proc_scale = 3.5
+        l.proc_mapping_scale_x = -1.0    # mirror X → the OTHER diagonal
+    elif kind == 'VERT':
+        l.proc_wave_type = "BANDS"
+        l.proc_wave_bands_direction = "X"
+        l.proc_scale = 6.0
+    elif kind == 'RINGS':
+        l.proc_wave_type = "RINGS"
+        l.proc_wave_rings_direction = "Z"
+        l.proc_scale = 5.0
+    elif kind == 'SPIRAL':
+        # straight BANDS twisted by a SWIRL coord transform → spiral arms.
+        # (SWIRL rotates XY by amount*radius; it only bends a pattern that
+        #  has ANGULAR variation — bands, not radially-symmetric rings.)
+        l.proc_wave_type = "BANDS"
+        l.proc_wave_bands_direction = "X"
+        l.proc_scale = 4.0
+        l.proc_coord_transform = "SWIRL"
+        l.proc_swirl_amount = 12.0
+    _apply_holo_ramp(l)
+    l.visible = visible
+    return l
+
+
 def _ensure_cycles():
     scene = bpy.context.scene
     if scene.render.engine != 'CYCLES':
@@ -197,56 +254,25 @@ def build_holo_card():
     l_art.use_metallic = True
     l_art.metallic_fill = CARD_METALLIC
 
-    # ─── 02A. Foil Stripes (WAVE bands → static diffraction pattern) ───
-    l_stripes = _add_proc(mat, "02A Foil Stripes", "WAVE",
-                          opacity=FOIL_STRIPES_OPACITY,
-                          blend_mode=FOIL_STRIPES_BLEND,
-                          output_channel="BASE_COLOR", coord="UV")
-    l_stripes.proc_scale = FOIL_STRIPES_SCALE
-    l_stripes.proc_wave_type = "BANDS"
-    l_stripes.proc_wave_profile = "SAW"
-    l_stripes.proc_wave_bands_direction = "DIAGONAL"
-    # NEW feature: view-driven UV parallax — bands SLIDE across the card
-    # as the camera moves (real holo foil look). 0.5 = clearly readable
-    # scroll per ~30° of yaw.
-    l_stripes.proc_uv_view_shift = FOIL_STRIPES_VIEW_SHIFT
-    l_stripes.proc_use_manual_stops = True
-    l_stripes.proc_color1 = HOLO_RED
-    l_stripes.proc_color2 = HOLO_VIOLET
-    l_stripes.use_proc_color3 = True
-    l_stripes.proc_color3 = HOLO_YELLOW
-    l_stripes.proc_color3_position = 0.34
-    _add_stop(l_stripes, HOLO_ORANGE, 0.17)
-    _add_stop(l_stripes, HOLO_GREEN,  0.50)
-    _add_stop(l_stripes, HOLO_CYAN,   0.66)
-    _add_stop(l_stripes, HOLO_BLUE,   0.83)
+    # ─── 02-06. Foil pattern menu (one visible, rest toggled off) ───
+    for name, kind, vis in FOIL_VARIANTS:
+        _add_foil_variant(mat, name, kind, vis)
 
-    # ─── 02B. Foil Hue Shift (FRESNEL → view-dependent hue) ───
-    # SAME 7-stop spectral ramp, but the Fac comes from a Fresnel node
-    # instead of UV. Tilt the card → the Fresnel readout slides → the
-    # OVERLAY tint shifts through the spectrum. Combined with 02A's
-    # stripe structure, you see the foil pattern AND its colour live-
-    # updates with the viewing angle — like a real holo card in hand.
-    l_hue = _add_proc(mat, "02B Foil Hue Shift", "FRESNEL",
+    # ─── 07. Foil Hue Shift (FRESNEL → view-dependent global hue march) ───
+    # SAME spectral ramp, Fac from a Fresnel node. Tilt the card → the
+    # whole foil's hue marches through the spectrum. Works on top of
+    # whichever pattern(s) are visible.
+    l_hue = _add_proc(mat, "07 Foil Hue Shift", "FRESNEL",
                       opacity=FOIL_FRES_OPACITY,
                       blend_mode=FOIL_FRES_BLEND,
                       output_channel="BASE_COLOR")
     l_hue.proc_fresnel_ior = FOIL_FRES_IOR
     l_hue.proc_contrast = FOIL_FRES_CONTRAST
     l_hue.proc_ramp_center = FOIL_FRES_RAMP_CENT
-    l_hue.proc_use_manual_stops = True
-    l_hue.proc_color1 = HOLO_RED
-    l_hue.proc_color2 = HOLO_VIOLET
-    l_hue.use_proc_color3 = True
-    l_hue.proc_color3 = HOLO_YELLOW
-    l_hue.proc_color3_position = 0.34
-    _add_stop(l_hue, HOLO_ORANGE, 0.17)
-    _add_stop(l_hue, HOLO_GREEN,  0.50)
-    _add_stop(l_hue, HOLO_CYAN,   0.66)
-    _add_stop(l_hue, HOLO_BLUE,   0.83)
+    _apply_holo_ramp(l_hue)          # ramp; view_shift harmless on a Fresnel fac
 
-    # ─── 03. Holo Sparkle (NOISE SCREEN) ───
-    l_spk = _add_proc(mat, "03 Holo Sparkle", "NOISE",
+    # ─── 08. Holo Sparkle (NOISE SCREEN) ───
+    l_spk = _add_proc(mat, "08 Holo Sparkle", "NOISE",
                       opacity=SPARK_OPACITY, blend_mode="SCREEN",
                       output_channel="BASE_COLOR")
     l_spk.proc_scale = SPARK_SCALE
@@ -255,14 +281,8 @@ def build_holo_card():
     l_spk.proc_color2 = (1.0, 1.0, 1.0, 1.0)
     l_spk.proc_contrast = SPARK_CONTRAST
 
-    # ─── 04. Foil Microbump (→ BUMP, breaks the Fresnel into glitter) ───
-    # The Fresnel above is uniform across the flat card → without bump
-    # it'd just be a smooth gradient from centre to edge. A fine, strong
-    # microbump perturbs the per-pixel normal so each tiny micro-facet
-    # reads a DIFFERENT Fresnel value → the rainbow ramp lights up as
-    # thousands of glittering coloured specks, and they shift with every
-    # camera/light move. This is the real-foil scintillation.
-    l_bump = _add_proc(mat, "04 Foil Microbump", "NOISE",
+    # ─── 09. Foil Microbump (→ BUMP, breaks the Fresnel into glitter) ───
+    l_bump = _add_proc(mat, "09 Foil Microbump", "NOISE",
                        opacity=0.0, blend_mode="MIX",
                        output_channel="BASE_COLOR")
     l_bump.proc_scale = 180.0
@@ -271,13 +291,15 @@ def build_holo_card():
     l_bump.proc_color1 = (0.0, 0.0, 0.0, 1.0)
     l_bump.proc_color2 = (0.0, 0.0, 0.0, 1.0)
     l_bump.use_bump = True
-    l_bump.bump_strength = 0.45        # strong: needed to split the Fresnel into specks
+    l_bump.bump_strength = 0.45
     l_bump.bump_distance = 0.0012
 
     tlm.auto_composite = True
     compositing.rebuild_node_tree(mat)
 
-    print(f"[TLM] Holo Card built — {len(tlm.layers)} layers  (art: {CARD_IMAGE})")
+    n_vis = sum(1 for l in tlm.layers if l.visible)
+    print(f"[TLM] Holo Card built — {len(tlm.layers)} layers "
+          f"({n_vis} visible)  (art: {CARD_IMAGE})")
     return mat
 
 
