@@ -727,6 +727,21 @@ def _voronoi_fac(node_tree, layer, tex_node, x, y, name_tag=""):
     if not getattr(layer, 'proc_voronoi_random_color', False):
         return tex_node.outputs.get("Distance") or tex_node.outputs[0]
 
+    # Random-per-cell needs a DISCRETE per-cell Position to hash. The
+    # smoothed features (SMOOTH_F1) and N_SPHERE_RADIUS produce a
+    # continuous/blended Position that the White Noise hashes to a
+    # near-constant value → the whole surface renders one uniform colour.
+    # Since random mode discards the Distance output entirely (we only use
+    # Position), coercing the node to F1 here changes nothing visible
+    # except making the per-cell hash work. F1 / F2 / DISTANCE_TO_EDGE
+    # already have a valid discrete Position and are left untouched, so no
+    # existing F1-random preset (e.g. Crystal Geode) changes appearance.
+    if getattr(tex_node, 'feature', 'F1') in ('SMOOTH_F1', 'N_SPHERE_RADIUS'):
+        try:
+            tex_node.feature = 'F1'
+        except Exception:
+            pass
+
     position_out = tex_node.outputs.get("Position")
     if position_out is None:
         # Position not available — fall back gracefully
