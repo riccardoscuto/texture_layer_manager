@@ -626,6 +626,34 @@ def _new_img_tex(node_tree, image, uv_map, x, y, colorspace="sRGB", layer=None, 
             node_tree.links.new(uv.outputs["UV"], mapping.inputs["Vector"])
             vec_out = mapping.outputs["Vector"]
 
+    # ── Pixelate (LED-screen / pixel-art / mosaic) ──────────────────────
+    # Snap the sampling coordinate to a regular grid BEFORE the image is
+    # read, so every cell shows a single quantised colour (true pixelation)
+    # instead of the continuous image. Math: snapped = floor(uv*N)/N, then
+    # + half a cell so we sample the cell CENTRE. Implemented with one
+    # Vector SNAP (floor(A/B)*B, B = 1/N) + one Vector ADD (0.5/N).
+    # This is the missing ingredient for a real LED-matrix look: each LED
+    # dot then carries one flat colour from the image.
+    if layer is not None and getattr(layer, 'paint_pixelate', False):
+        n_cells = max(1.0, float(getattr(layer, 'paint_pixelate_size', 32.0)))
+        inv = 1.0 / n_cells
+        snap = node_tree.nodes.new("ShaderNodeVectorMath")
+        snap.operation = 'SNAP'
+        snap.name = f"{TLM_PREFIX}paint_pixsnap_{_next_id()}"
+        snap.location = (x - 40, y - 80)
+        snap.inputs[1].default_value = (inv, inv, inv)
+        _tag(snap, layer.name, "paint_pixsnap")
+        node_tree.links.new(vec_out, snap.inputs[0])
+
+        centre = node_tree.nodes.new("ShaderNodeVectorMath")
+        centre.operation = 'ADD'
+        centre.name = f"{TLM_PREFIX}paint_pixcentre_{_next_id()}"
+        centre.location = (x + 10, y - 80)
+        centre.inputs[1].default_value = (inv * 0.5, inv * 0.5, inv * 0.5)
+        _tag(centre, layer.name, "paint_pixcentre")
+        node_tree.links.new(snap.outputs["Vector"], centre.inputs[0])
+        vec_out = centre.outputs["Vector"]
+
     node_tree.links.new(vec_out, node.inputs["Vector"])
     if tag_role and layer is not None:
         _tag(node, layer.name, tag_role)

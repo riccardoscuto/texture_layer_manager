@@ -305,6 +305,8 @@ def _layer_to_dict(layer):
         d["paint_projection"]       = getattr(layer, 'paint_projection', 'FLAT')
         d["paint_projection_blend"] = round(getattr(layer, 'paint_projection_blend', 0.3), 4)
         d["paint_source"]           = getattr(layer, 'paint_source', 'FILE')
+        d["paint_pixelate"]         = getattr(layer, 'paint_pixelate', False)
+        d["paint_pixelate_size"]    = getattr(layer, 'paint_pixelate_size', 32)
         # PBR channels
         d["use_roughness"]     = layer.use_roughness
         d["roughness_fill"]    = round(layer.roughness_fill, 4)
@@ -617,6 +619,8 @@ def _dict_to_layer(d, tlm):
         )
         layer.paint_projection_blend = d.get("paint_projection_blend", 0.3)
         layer.paint_source           = d.get("paint_source", "FILE")
+        layer.paint_pixelate         = d.get("paint_pixelate", False)
+        layer.paint_pixelate_size    = d.get("paint_pixelate_size", 32)
         # PBR channels
         layer.use_roughness        = d.get("use_roughness", False)
         layer.roughness_fill       = d.get("roughness_fill", 0.5)

@@ -398,6 +398,8 @@ class TLM_OT_ApplyPreset(Operator):
                 )
                 layer.paint_projection_blend = ld.get("paint_projection_blend", 0.3)
                 layer.paint_source           = ld.get("paint_source", "FILE")
+                layer.paint_pixelate         = ld.get("paint_pixelate", False)
+                layer.paint_pixelate_size    = ld.get("paint_pixelate_size", 32)
                 # PBR channels
                 layer.use_roughness        = ld.get("use_roughness", False)
                 layer.roughness_fill       = ld.get("roughness_fill", 0.5)
@@ -685,6 +687,9 @@ class TLM_OT_SavePreset(Operator):
                 d["paint_projection"]       = getattr(layer, 'paint_projection', 'FLAT')
                 d["paint_projection_blend"] = getattr(layer, 'paint_projection_blend', 0.3)
                 d["paint_source"]           = getattr(layer, 'paint_source', 'FILE')
+                # Pixelate (LED screen / pixel-art / mosaic)
+                d["paint_pixelate"]         = getattr(layer, 'paint_pixelate', False)
+                d["paint_pixelate_size"]    = getattr(layer, 'paint_pixelate_size', 32)
                 # PBR channels
                 d["use_roughness"]        = layer.use_roughness
                 d["roughness_fill"]       = layer.roughness_fill

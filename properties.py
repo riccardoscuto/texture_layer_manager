@@ -1322,6 +1322,29 @@ class TLM_LayerItem(PropertyGroup):
         update=_make_hot_callback("paint_scale_z"),
     )
 
+    # ── Pixelate (LED screen / pixel-art / mosaic) ──────────────────────────
+    # Snaps the image sampling coordinate to a regular grid before reading,
+    # so each cell shows one flat colour (true pixelation) instead of the
+    # continuous image. The defining ingredient of an LED-matrix look:
+    # pair with a DOTS procedural (output Alpha) + use_emission_output and
+    # each LED dot carries one quantised colour from the image.
+    paint_pixelate: BoolProperty(
+        name="Pixelate",
+        description="Quantise the image into a grid of flat-colour cells "
+                    "(pixel-art / LED-screen / mosaic). Snaps the sampling "
+                    "UV to a grid and samples each cell's centre",
+        default=False,
+        update=_on_layer_update,
+    )
+    paint_pixelate_size: IntProperty(
+        name="Pixelate Cells",
+        description="Number of pixel cells across the 0..1 UV range. "
+                    "Higher = finer pixels / more LEDs. Match this to a "
+                    "DOTS procedural's scale to align dots with colour cells",
+        default=32, min=1, soft_max=256,
+        update=_on_layer_update,
+    )
+
     # ── Reference Layer: reuses another layer's pattern output ──────────────
     # When layer_type == 'REFERENCE', this layer doesn't generate its own
     # pattern — it fetches the color/alpha outputs of the referenced layer

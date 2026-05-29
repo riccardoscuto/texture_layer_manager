@@ -1153,6 +1153,14 @@ def _draw_paint_fill(col, active, tlm):
         sr.prop(active, "paint_scale_x", text="X")
         sr.prop(active, "paint_scale_y", text="Y")
         sr.prop(active, "paint_scale_z", text="Z")
+        # Pixelate — quantise the image into a grid of flat cells
+        # (pixel-art / LED-screen / mosaic).
+        mbox.separator(factor=0.4)
+        pxr = mbox.row(align=True)
+        pxr.prop(active, "paint_pixelate", text="Pixelate",
+                 icon='TEXTURE_DATA', toggle=True)
+        if active.paint_pixelate:
+            pxr.prop(active, "paint_pixelate_size", text="Cells")
 
     col.separator(factor=0.6)
     _draw_pbr_channels(col, active, tlm)
