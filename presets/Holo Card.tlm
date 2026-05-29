@@ -601,7 +601,7 @@
     {
       "name": "02A Foil Stripes",
       "type": "PROCEDURAL",
-      "opacity": 0.13,
+      "opacity": 0.22,
       "blend_mode": "ADD",
       "visible": true,
       "group_name": "",
@@ -687,7 +687,7 @@
       "proc_ramp_center": 0.5,
       "proc_vector_distortion": 0.0,
       "proc_coord_type": "UV",
-      "proc_uv_view_shift": 0.25,
+      "proc_uv_view_shift": 0.5,
       "proc_emission_threshold": 0.0,
       "use_proc_color3": true,
       "proc_coord_transform": "NONE",

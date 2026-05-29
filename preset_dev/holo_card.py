@@ -64,10 +64,11 @@ CARD_METALLIC     = 0.0
 # microbump (L05) and every micro-facet catches a different Fresnel
 # slot → the rainbow ALSO scintillates on a tiny scale → real foil.
 #
-# Layer A — static stripes
+# Layer A — diffraction stripes (now WITH parallax so they scroll)
 FOIL_STRIPES_SCALE   = 3.5
-FOIL_STRIPES_OPACITY = 0.13
+FOIL_STRIPES_OPACITY = 0.22     # more presence so the parallax is readable
 FOIL_STRIPES_BLEND   = "ADD"
+FOIL_STRIPES_VIEW_SHIFT = 0.50  # parallax — bands slide as the card rotates
 # Layer B — Fresnel hue shift
 FOIL_FRES_IOR        = 1.45
 FOIL_FRES_OPACITY    = 0.32
@@ -206,8 +207,9 @@ def build_holo_card():
     l_stripes.proc_wave_profile = "SAW"
     l_stripes.proc_wave_bands_direction = "DIAGONAL"
     # NEW feature: view-driven UV parallax — bands SLIDE across the card
-    # as the camera moves (real holo foil look). 0.25 = gentle scroll.
-    l_stripes.proc_uv_view_shift = 0.25
+    # as the camera moves (real holo foil look). 0.5 = clearly readable
+    # scroll per ~30° of yaw.
+    l_stripes.proc_uv_view_shift = FOIL_STRIPES_VIEW_SHIFT
     l_stripes.proc_use_manual_stops = True
     l_stripes.proc_color1 = HOLO_RED
     l_stripes.proc_color2 = HOLO_VIOLET
