@@ -1,0 +1,1 @@
+{"preset_name": "__codex_paint_legacy", "layers": [{"name": "LegacyPaint", "type": "PAINT", "opacity": 1.0, "blend_mode": "MIX", "visible": true, "output_channel": "BASE_COLOR"}, {"name": "Base", "type": "FILL", "fill_color": [0.2, 0.4, 0.8, 1.0]}]}

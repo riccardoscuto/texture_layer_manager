@@ -1,0 +1,22 @@
+{
+  "preset_name": "ZZ Renamed OK",
+  "material": {},
+  "layers": [
+    {
+      "name": "Base",
+      "type": "FILL",
+      "fill_color": [
+        0.5,
+        0.5,
+        0.5,
+        1
+      ],
+      "opacity": 1.0,
+      "blend_mode": "MIX",
+      "visible": true,
+      "group_name": "",
+      "collapsed": false,
+      "use_clipping_mask": false
+    }
+  ]
+}
