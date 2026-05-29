@@ -2380,19 +2380,20 @@ class TLM_LayerItem(PropertyGroup):
         update=_on_layer_update,
     )
 
-    # View-driven UV parallax — additive offset of the coord stream by
-    # the per-pixel view vector (Geometry.Incoming) BEFORE the Mapping
-    # node. Lets the pattern *slide* across the surface as the camera
-    # moves, like the diffraction pattern of a real holographic foil.
-    # Pair with proc_type='FRESNEL' for hue shift + this for spatial
-    # shift = the full "pattern that responds to view angle" look.
+    # View-driven UV shift — additive offset of the coord stream by the
+    # CAMERA-SPACE surface normal BEFORE the Mapping node. Because the
+    # camera-space normal rotates WITH the surface, the pattern's phase
+    # slides as the object is reoriented (or viewed through the render
+    # camera) → the bands physically scroll across the surface, the way
+    # a real holographic foil's diffraction pattern moves with the light.
+    # Pair with proc_type='FRESNEL' (hue shift) for the full foil look.
     # Default 0 → zero graph change for existing materials.
     proc_uv_view_shift: FloatProperty(
-        name="View Parallax",
-        description="Offset the coords by the view vector before sampling — "
-                    "the procedural pattern appears to slide across the "
-                    "surface as the camera moves. Use 0.1–0.4 for subtle "
-                    "holographic-foil parallax; higher for stylised effects. "
+        name="View Shift",
+        description="Slide the pattern across the surface as it's reoriented, "
+                    "driven by the camera-space normal — the bands scroll "
+                    "like a real holographic foil catching the light. Use "
+                    "0.2–0.5 for foil parallax; higher for stylised sweeps. "
                     "0 = off (no extra nodes inserted)",
         default=0.0, min=0.0, max=2.0, soft_max=1.0,
         # Toggling between 0 ↔ >0 changes graph topology (adds/removes

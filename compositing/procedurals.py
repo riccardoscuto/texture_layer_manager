@@ -502,22 +502,30 @@ def _inject_coord_transform(node_tree, layer, coord_out, x, y, name_tag=""):
 # ── View-driven UV parallax helper ────────────────────────────────────────────
 
 def _inject_view_uv_shift(node_tree, layer, coord_out, x, y, name_tag=""):
-    """Optionally add a view-vector offset to the coords for parallax foils.
+    """Optionally offset the coords by the CAMERA-SPACE surface normal so a
+    procedural pattern *slides* across the surface as it is reoriented —
+    the defining behaviour of a real holographic / diffractive foil.
 
-    A real holographic foil's diffraction pattern *slides* across the
-    surface when the viewer moves — the bands appear to scroll relative
-    to the printed art. Static UVs can't reproduce this because the
-    pattern is locked to the geometry. Adding a fraction of the per-
-    pixel view vector (Geometry.Incoming) to the coords BEFORE the
-    Mapping node makes the offset view-dependent: rotate the surface or
-    move the camera, the bands scroll. Pair with proc_type='FRESNEL' for
-    hue shift + this for spatial shift = the full holographic foil look.
+    WHY camera-space normal and NOT the view vector:
+    A flat card has a uniform normal, and the world-space view vector
+    (Geometry.Incoming) barely changes when you rotate the card in front
+    of a fixed camera — so offsetting by Incoming produced a constant
+    shift and the bands never moved (they only changed hue via the
+    separate FRESNEL layer). The orientation-dependent quantity is the
+    surface normal expressed in CAMERA space: it rotates *with* the card,
+    so as you tilt/spin the card its X/Y components sweep, and adding them
+    to the coords translates the band phase → the stripes physically
+    scroll across the surface. That IS the foil "the light moves the
+    pattern" effect.
 
     Chain inserted (when proc_uv_view_shift > 0):
-        Geometry.Incoming → VectorMath(SCALE, k) ─┐
-                                                    ├→ VectorMath(ADD) → out
-                                       coord_out ──┘
+        Geometry.Normal → VectorTransform(NORMAL, World→Camera)
+                        → VectorMath(SCALE, k) ─┐
+                                                 ├→ VectorMath(ADD) → out
+                                    coord_out ──┘
 
+    The spatial band structure still comes from the pattern's own
+    UV/scale; this only adds a uniform, orientation-driven phase offset.
     Returns the (possibly offset) coord socket. Passthrough when amount
     is 0 → zero cost / no graph change for materials that don't use it.
     """
@@ -526,12 +534,21 @@ def _inject_view_uv_shift(node_tree, layer, coord_out, x, y, name_tag=""):
         return coord_out
     geom = node_tree.nodes.new("ShaderNodeNewGeometry")
     geom.name = f"{TLM_PREFIX}view_geom_{name_tag}_{_next_id()}"
-    geom.location = (x - 700, y - 220)
+    geom.location = (x - 760, y - 220)
     _tag(geom, layer.name, f"view_geom_{name_tag}")
+    # Normal → camera space: rotates with the surface, so it responds to
+    # the object being reoriented (or viewed through the render camera).
+    vt = node_tree.nodes.new("ShaderNodeVectorTransform")
+    vt.vector_type = 'NORMAL'
+    vt.convert_from = 'WORLD'
+    vt.convert_to = 'CAMERA'
+    vt.name = f"{TLM_PREFIX}view_xform_{name_tag}_{_next_id()}"
+    vt.location = (x - 580, y - 220)
+    _tag(vt, layer.name, f"view_xform_{name_tag}")
     sc = node_tree.nodes.new("ShaderNodeVectorMath")
     sc.operation = 'SCALE'
     sc.name = f"{TLM_PREFIX}view_scale_{name_tag}_{_next_id()}"
-    sc.location = (x - 500, y - 220)
+    sc.location = (x - 400, y - 220)
     sc.inputs["Scale"].default_value = amt
     _tag(sc, layer.name, f"view_scale_{name_tag}")
     add = node_tree.nodes.new("ShaderNodeVectorMath")
@@ -539,7 +556,8 @@ def _inject_view_uv_shift(node_tree, layer, coord_out, x, y, name_tag=""):
     add.name = f"{TLM_PREFIX}view_add_{name_tag}_{_next_id()}"
     add.location = (x - 320, y - 120)
     _tag(add, layer.name, f"view_add_{name_tag}")
-    node_tree.links.new(geom.outputs["Incoming"], sc.inputs[0])
+    node_tree.links.new(geom.outputs["Normal"], vt.inputs[0])
+    node_tree.links.new(vt.outputs["Vector"], sc.inputs[0])
     node_tree.links.new(coord_out, add.inputs[0])
     node_tree.links.new(sc.outputs["Vector"], add.inputs[1])
     return add.outputs["Vector"]
