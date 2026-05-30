@@ -8,419 +8,14 @@ from ._common import _get_material, _can_edit_tlm_stack, _ensure_nodes, composit
 from .io import _image_to_png_b64, _png_b64_to_image
 
 
-# Built-in presets shipped with the addon
-BUILTIN_PRESETS = {
-    "Metal Base": [
-        # Fill base: dark steel, metallic, low roughness
-        {"name": "Metal Base", "type": "FILL",
-         "fill_color": [0.08, 0.08, 0.09, 1.0],
-         "opacity": 1.0, "blend_mode": "MIX",
-         "use_roughness": True, "roughness_fill": 0.25,
-         "use_metallic": True,  "metallic_fill":  1.0},
-        # Proc: surface variation in roughness + subtle bump
-        {"name": "Metal Surface", "type": "PROCEDURAL", "proc_type": "NOISE",
-         "proc_scale": 1.5, "proc_detail": 3.0, "proc_roughness_proc": 0.5,
-         "proc_distortion": 0.2,
-         "proc_color1": [0.06, 0.06, 0.07, 1.0],
-         "proc_color2": [0.18, 0.18, 0.20, 1.0],
-         "opacity": 0.4, "blend_mode": "Screen",
-         "use_roughness": True, "roughness_fill": 0.45,
-         "use_bump": True, "bump_strength": 0.3, "bump_distance": 0.02},
-    ],
-    "Rock Base": [
-        # Fill base: dark volcanic rock
-        {"name": "Rock Dark", "type": "FILL",
-         "fill_color": [0.08, 0.06, 0.04, 1.0],
-         "opacity": 1.0, "blend_mode": "MIX",
-         "use_roughness": True, "roughness_fill": 0.95,
-         "use_metallic": True,  "metallic_fill":  0.0},
-        # Proc: large-scale color variation with strong bump
-        {"name": "Rock Variation", "type": "PROCEDURAL", "proc_type": "MUSGRAVE",
-         "proc_scale": 0.5, "proc_detail": 6.0,
-         "proc_roughness_proc": 0.6, "proc_lacunarity": 2.2,
-         "proc_color1": [0.05, 0.04, 0.02, 1.0],
-         "proc_color2": [0.42, 0.32, 0.20, 1.0],
-         "opacity": 1.0, "blend_mode": "MIX",
-         "use_roughness": True, "roughness_fill": 0.9,
-         "use_bump": True, "bump_strength": 1.2, "bump_distance": 0.08},
-        # Proc: microdetail noise with fine bump
-        {"name": "Rock Microdetail", "type": "PROCEDURAL", "proc_type": "NOISE",
-         "proc_scale": 2.5, "proc_detail": 8.0,
-         "proc_roughness_proc": 0.7, "proc_distortion": 0.8,
-         "proc_color1": [0.0, 0.0, 0.0, 0.0],
-         "proc_color2": [0.35, 0.28, 0.18, 1.0],
-         "opacity": 0.5, "blend_mode": "Overlay",
-         "use_bump": True, "bump_strength": 0.6, "bump_distance": 0.02},
-    ],
-    "Skin Base": [
-        # Fill base: mid skin tone
-        {"name": "Skin Base", "type": "FILL",
-         "fill_color": [0.72, 0.48, 0.36, 1.0],
-         "opacity": 1.0, "blend_mode": "MIX",
-         "use_roughness": True, "roughness_fill": 0.65,
-         "use_metallic": True,  "metallic_fill":  0.0},
-        # Darker undertone
-        {"name": "Skin Undertone", "type": "FILL",
-         "fill_color": [0.55, 0.30, 0.20, 1.0],
-         "opacity": 0.4, "blend_mode": "Multiply"},
-        # Proc: pore microdetail with subtle bump
-        {"name": "Skin Pores", "type": "PROCEDURAL", "proc_type": "VORONOI",
-         "proc_scale": 4.0, "proc_randomness": 0.8,
-         "proc_color1": [0.60, 0.38, 0.28, 1.0],
-         "proc_color2": [0.80, 0.58, 0.44, 1.0],
-         "opacity": 0.15, "blend_mode": "Overlay",
-         "use_roughness": True, "roughness_fill": 0.55,
-         "use_bump": True, "bump_strength": 0.2, "bump_distance": 0.005},
-    ],
-    "Rusted Metal": [
-        # Fill base: dark steel
-        {"name": "Steel Base", "type": "FILL",
-         "fill_color": [0.12, 0.11, 0.10, 1.0],
-         "opacity": 1.0, "blend_mode": "MIX",
-         "use_roughness": True, "roughness_fill": 0.35,
-         "use_metallic": True,  "metallic_fill":  0.9},
-        # Rust patches: orange/brown noise
-        {"name": "Rust Patches", "type": "PROCEDURAL", "proc_type": "NOISE",
-         "proc_scale": 0.7, "proc_detail": 8.0,
-         "proc_roughness_proc": 0.6, "proc_distortion": 2.0,
-         "proc_color1": [0.0, 0.0, 0.0, 0.0],
-         "proc_color2": [0.55, 0.18, 0.03, 1.0],
-         "opacity": 0.85, "blend_mode": "MIX",
-         "use_roughness": True, "roughness_fill": 0.9,
-         "use_bump": True, "bump_strength": 0.8, "bump_distance": 0.04},
-        # Surface corrosion: fine detail bump
-        {"name": "Corrosion Detail", "type": "PROCEDURAL", "proc_type": "NOISE",
-         "proc_scale": 3.0, "proc_detail": 6.0,
-         "proc_roughness_proc": 0.8, "proc_distortion": 1.0,
-         "proc_color1": [0.0, 0.0, 0.0, 0.0],
-         "proc_color2": [0.30, 0.12, 0.04, 0.8],
-         "opacity": 0.45, "blend_mode": "Multiply",
-         "use_bump": True, "bump_strength": 0.4, "bump_distance": 0.015},
-    ],
-    "Wood Grain": [
-        # Fill base: dark wood
-        {"name": "Wood Dark", "type": "FILL",
-         "fill_color": [0.25, 0.12, 0.04, 1.0],
-         "opacity": 1.0, "blend_mode": "MIX",
-         "use_roughness": True, "roughness_fill": 0.75},
-        # Wave: wood grain rings with bump
-        {"name": "Wood Grain", "type": "PROCEDURAL", "proc_type": "WAVE",
-         "proc_scale": 0.8, "proc_wave_type": "BANDS",
-         "proc_distortion": 2.5, "proc_detail": 4.0,
-         "proc_wave_detail_scale": 1.5,
-         "proc_color1": [0.18, 0.08, 0.02, 1.0],
-         "proc_color2": [0.55, 0.32, 0.12, 1.0],
-         "opacity": 1.0, "blend_mode": "MIX",
-         "use_roughness": True, "roughness_fill": 0.65,
-         "use_bump": True, "bump_strength": 0.5, "bump_distance": 0.03},
-        # Fine grain noise
-        {"name": "Wood Fiber", "type": "PROCEDURAL", "proc_type": "NOISE",
-         "proc_scale": 3.5, "proc_detail": 5.0, "proc_roughness_proc": 0.6,
-         "proc_color1": [0.0, 0.0, 0.0, 0.0],
-         "proc_color2": [0.15, 0.08, 0.02, 0.6],
-         "opacity": 0.35, "blend_mode": "Multiply",
-         "use_bump": True, "bump_strength": 0.2, "bump_distance": 0.008},
-    ],
-
-    # â”€â”€ Reference material recreations â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    # Ten materials from a common PBR reference grid: candy, rock, planet, etc.
-    # All use only TLM procedural layers â€” no external textures needed.
-    # Blend mode rules used throughout:
-    #   Screen  â†’ color1=black(passthrough), color2=bright â†’ adds highlights
-    #   Multiply â†’ color1=white(passthrough), color2=dark â†’ adds shadows/dirt
-    #   MIX     â†’ full pattern replacement (color1 at fac=0, color2 at fac=1)
-    #   Overlay â†’ contrast enhancement (darks darker, lights lighter)
-
-    "Blue Marble": [
-        # Polished deep-blue stone base
-        {"name": "Marble Base", "type": "FILL",
-         "fill_color": [0.04, 0.08, 0.32, 1.0],
-         "opacity": 1.0, "blend_mode": "MIX",
-         "use_roughness": True, "roughness_fill": 0.12,
-         "use_metallic": True, "metallic_fill": 0.0},
-        # Large-scale depth variation: dark to lighter blue
-        {"name": "Marble Depth", "type": "PROCEDURAL", "proc_type": "NOISE",
-         "proc_scale": 2.0, "proc_detail": 3.0,
-         "proc_roughness_proc": 0.5, "proc_distortion": 1.0,
-         "proc_color1": [0.02, 0.04, 0.18, 1.0],
-         "proc_color2": [0.08, 0.14, 0.48, 1.0],
-         "opacity": 0.60, "blend_mode": "MIX"},
-        # White veins â€” Screen: black areas pass through (keep blue), bright=white veins
-        {"name": "Marble White Veins", "type": "PROCEDURAL", "proc_type": "NOISE",
-         "proc_scale": 1.5, "proc_detail": 14.0,
-         "proc_roughness_proc": 0.8, "proc_distortion": 2.5,
-         "proc_color1": [0.0, 0.0, 0.0, 0.0],
-         "proc_color2": [0.88, 0.88, 0.90, 1.0],
-         "opacity": 0.80, "blend_mode": "Screen"},
-        # Secondary grey-blue veins (finer, lighter)
-        {"name": "Marble Grey Veins", "type": "PROCEDURAL", "proc_type": "NOISE",
-         "proc_scale": 3.5, "proc_detail": 8.0,
-         "proc_roughness_proc": 0.6, "proc_distortion": 1.5,
-         "proc_color1": [0.0, 0.0, 0.0, 0.0],
-         "proc_color2": [0.52, 0.58, 0.72, 1.0],
-         "opacity": 0.35, "blend_mode": "Screen"},
-    ],
-
-    "Mars Rock": [
-        # Iron-oxide dust base
-        {"name": "Mars Base", "type": "FILL",
-         "fill_color": [0.48, 0.12, 0.04, 1.0],
-         "opacity": 1.0, "blend_mode": "MIX",
-         "use_roughness": True, "roughness_fill": 0.90,
-         "use_metallic": True, "metallic_fill": 0.0},
-        # Large-scale color variation: cooler red to warm orange-red
-        {"name": "Mars Variation", "type": "PROCEDURAL", "proc_type": "NOISE",
-         "proc_scale": 3.5, "proc_detail": 6.0,
-         "proc_roughness_proc": 0.6, "proc_distortion": 0.8,
-         "proc_color1": [0.32, 0.08, 0.02, 1.0],
-         "proc_color2": [0.65, 0.22, 0.08, 1.0],
-         "opacity": 0.80, "blend_mode": "Overlay",
-         "use_roughness": True, "roughness_fill": 0.88},
-        # Rock crevices â€” Multiply: white=passthrough, dark shadow at noise peaks
-        {"name": "Mars Crevice", "type": "PROCEDURAL", "proc_type": "NOISE",
-         "proc_scale": 7.0, "proc_detail": 4.0,
-         "proc_roughness_proc": 0.5, "proc_distortion": 1.2,
-         "proc_color1": [1.0, 1.0, 1.0, 1.0],
-         "proc_color2": [0.18, 0.04, 0.01, 1.0],
-         "opacity": 0.55, "blend_mode": "Multiply",
-         "use_bump": True, "bump_strength": 0.9, "bump_distance": 0.06},
-        # Fine dust â€” Screen: adds lighter dust highlights on surfaces
-        {"name": "Mars Dust", "type": "PROCEDURAL", "proc_type": "NOISE",
-         "proc_scale": 14.0, "proc_detail": 2.0,
-         "proc_roughness_proc": 0.4, "proc_distortion": 0.3,
-         "proc_color1": [0.0, 0.0, 0.0, 0.0],
-         "proc_color2": [0.68, 0.38, 0.18, 1.0],
-         "opacity": 0.30, "blend_mode": "Screen"},
-    ],
-
-    "Saturn Planet": [
-        # Warm tan atmospheric base
-        {"name": "Saturn Base", "type": "FILL",
-         "fill_color": [0.62, 0.48, 0.22, 1.0],
-         "opacity": 1.0, "blend_mode": "MIX",
-         "use_roughness": True, "roughness_fill": 0.92,
-         "use_metallic": True, "metallic_fill": 0.0},
-        # Light bands â€” Screen adds bright band highlights
-        # Note: BANDS direction is X in TLM. Rotate object 90Â° for horizontal bands.
-        {"name": "Saturn Light Bands", "type": "PROCEDURAL", "proc_type": "WAVE",
-         "proc_wave_type": "BANDS", "proc_scale": 6.0,
-         "proc_distortion": 0.8, "proc_detail": 4.0, "proc_wave_detail_scale": 1.5,
-         "proc_color1": [0.0, 0.0, 0.0, 0.0],
-         "proc_color2": [0.82, 0.70, 0.38, 1.0],
-         "opacity": 0.65, "blend_mode": "Screen"},
-        # Dark bands â€” Multiply darkens periodic zones
-        {"name": "Saturn Dark Bands", "type": "PROCEDURAL", "proc_type": "WAVE",
-         "proc_wave_type": "BANDS", "proc_scale": 11.0,
-         "proc_distortion": 1.2, "proc_detail": 3.0, "proc_wave_detail_scale": 2.0,
-         "proc_color1": [1.0, 1.0, 1.0, 1.0],
-         "proc_color2": [0.28, 0.18, 0.06, 1.0],
-         "opacity": 0.55, "blend_mode": "Multiply"},
-        # Atmospheric micro-turbulence overlay
-        {"name": "Saturn Turbulence", "type": "PROCEDURAL", "proc_type": "NOISE",
-         "proc_scale": 8.0, "proc_detail": 10.0,
-         "proc_roughness_proc": 0.6, "proc_distortion": 1.5,
-         "proc_color1": [0.52, 0.38, 0.15, 1.0],
-         "proc_color2": [0.78, 0.62, 0.32, 1.0],
-         "opacity": 0.30, "blend_mode": "Overlay"},
-    ],
-
-    "Jawbreaker Candy": [
-        # Very glossy white candy base
-        {"name": "Jawbreaker Base", "type": "FILL",
-         "fill_color": [0.92, 0.92, 0.92, 1.0],
-         "opacity": 1.0, "blend_mode": "MIX",
-         "use_roughness": True, "roughness_fill": 0.08,
-         "use_metallic": True, "metallic_fill": 0.0},
-        # 3-color Voronoi: red at cell centers, blue mid-distance, yellow at edges
-        # Creates a gradient spectrum across each Voronoi cell
-        {"name": "Jawbreaker Colors", "type": "PROCEDURAL", "proc_type": "VORONOI",
-         "proc_scale": 3.5, "proc_voronoi_feature": "F1", "proc_randomness": 0.9,
-         "proc_contrast": 0.0,
-         "proc_color1": [0.88, 0.08, 0.08, 1.0],
-         "use_proc_color3": True,
-         "proc_color3": [0.05, 0.18, 0.90, 1.0],
-         "proc_color3_position": 0.45,
-         "proc_color2": [0.92, 0.78, 0.05, 1.0],
-         "opacity": 1.0, "blend_mode": "MIX",
-         "use_roughness": True, "roughness_fill": 0.08},
-        # Glaze highlights â€” Screen adds white glint at Voronoi cell boundaries
-        {"name": "Jawbreaker Glaze", "type": "PROCEDURAL", "proc_type": "VORONOI",
-         "proc_scale": 8.0, "proc_voronoi_feature": "F1", "proc_randomness": 0.6,
-         "proc_color1": [0.0, 0.0, 0.0, 0.0],
-         "proc_color2": [0.95, 0.95, 0.95, 1.0],
-         "opacity": 0.22, "blend_mode": "Screen"},
-    ],
-
-    "Quartz Rock": [
-        # Semi-translucent grey-white mineral base
-        {"name": "Quartz Base", "type": "FILL",
-         "fill_color": [0.78, 0.76, 0.72, 1.0],
-         "opacity": 1.0, "blend_mode": "MIX",
-         "use_roughness": True, "roughness_fill": 0.72,
-         "use_metallic": True, "metallic_fill": 0.0,
-         "use_transmission": True, "transmission_fill": 0.08},
-        # Internal mineral inclusions â€” Multiply: white=passthrough, grey=darker veins
-        {"name": "Quartz Inclusions", "type": "PROCEDURAL", "proc_type": "NOISE",
-         "proc_scale": 5.5, "proc_detail": 10.0,
-         "proc_roughness_proc": 0.7, "proc_distortion": 0.8,
-         "proc_color1": [1.0, 1.0, 1.0, 1.0],
-         "proc_color2": [0.35, 0.33, 0.30, 1.0],
-         "opacity": 0.55, "blend_mode": "Multiply"},
-        # Crystal facet glints â€” Screen adds bright spots at Voronoi cell centers
-        {"name": "Quartz Glints", "type": "PROCEDURAL", "proc_type": "VORONOI",
-         "proc_scale": 12.0, "proc_randomness": 0.7, "proc_voronoi_feature": "F1",
-         "proc_color1": [0.0, 0.0, 0.0, 0.0],
-         "proc_color2": [0.92, 0.90, 0.88, 1.0],
-         "opacity": 0.28, "blend_mode": "Screen",
-         "use_roughness": True, "roughness_fill": 0.15},
-    ],
-
-    "Snowy Mountain": [
-        # Dark grey rock base
-        {"name": "Mountain Rock", "type": "FILL",
-         "fill_color": [0.20, 0.18, 0.16, 1.0],
-         "opacity": 1.0, "blend_mode": "MIX",
-         "use_roughness": True, "roughness_fill": 0.88,
-         "use_metallic": True, "metallic_fill": 0.0},
-        # Rock surface texture + bump
-        {"name": "Mountain Rock Texture", "type": "PROCEDURAL", "proc_type": "NOISE",
-         "proc_scale": 5.0, "proc_detail": 8.0,
-         "proc_roughness_proc": 0.7, "proc_distortion": 0.5,
-         "proc_color1": [0.12, 0.10, 0.08, 1.0],
-         "proc_color2": [0.38, 0.34, 0.28, 1.0],
-         "opacity": 0.85, "blend_mode": "Overlay",
-         "use_roughness": True, "roughness_fill": 0.85,
-         "use_bump": True, "bump_strength": 1.0, "bump_distance": 0.06},
-        # Snow coverage â€” MIX: rock-color areas = no snow, white = snow patches
-        # Increase proc_scale for denser snow, decrease for larger snow fields
-        {"name": "Snow Coverage", "type": "PROCEDURAL", "proc_type": "NOISE",
-         "proc_scale": 1.8, "proc_detail": 3.0,
-         "proc_roughness_proc": 0.4, "proc_distortion": 0.2,
-         "proc_color1": [0.20, 0.18, 0.16, 1.0],
-         "proc_color2": [0.88, 0.90, 0.92, 1.0],
-         "opacity": 0.90, "blend_mode": "MIX",
-         "use_roughness": True, "roughness_fill": 0.82},
-    ],
-
-    "SciFi Greeble": [
-        # Dark metallic hull base
-        {"name": "Greeble Hull", "type": "FILL",
-         "fill_color": [0.28, 0.28, 0.30, 1.0],
-         "opacity": 1.0, "blend_mode": "MIX",
-         "use_roughness": True, "roughness_fill": 0.50,
-         "use_metallic": True, "metallic_fill": 1.0},
-        # Panel variation â€” Voronoi F1 creates panel-like cell regions + bump seams
-        {"name": "Greeble Panels", "type": "PROCEDURAL", "proc_type": "VORONOI",
-         "proc_scale": 2.5, "proc_voronoi_feature": "F1", "proc_randomness": 0.5,
-         "proc_color1": [0.20, 0.20, 0.22, 1.0],
-         "proc_color2": [0.38, 0.38, 0.42, 1.0],
-         "opacity": 0.60, "blend_mode": "MIX",
-         "use_roughness": True, "roughness_fill": 0.30,
-         "use_bump": True, "bump_strength": 0.7, "bump_distance": 0.025},
-        # Grime and wear â€” Multiply darkens random surface areas
-        {"name": "Greeble Grime", "type": "PROCEDURAL", "proc_type": "NOISE",
-         "proc_scale": 3.0, "proc_detail": 5.0,
-         "proc_roughness_proc": 0.8, "proc_distortion": 1.0,
-         "proc_color1": [1.0, 1.0, 1.0, 1.0],
-         "proc_color2": [0.10, 0.10, 0.12, 1.0],
-         "opacity": 0.45, "blend_mode": "Multiply",
-         "use_roughness": True, "roughness_fill": 0.75},
-        # Tech-light accents â€” Voronoi emission dots at cell centers
-        {"name": "Greeble Lights", "type": "PROCEDURAL", "proc_type": "VORONOI",
-         "proc_scale": 8.0, "proc_voronoi_feature": "F1", "proc_randomness": 0.3,
-         "proc_color1": [0.0, 0.0, 0.0, 0.0],
-         "proc_color2": [0.08, 0.90, 0.50, 1.0],
-         "opacity": 0.12, "blend_mode": "Screen",
-         "use_emission": True,
-         "emission_color": [0.08, 0.90, 0.50, 1.0], "emission_strength": 3.0},
-    ],
-
-    "Candy Corn": [
-        # Waxy yellow base â€” the main body color
-        {"name": "Candy Yellow", "type": "FILL",
-         "fill_color": [0.95, 0.72, 0.08, 1.0],
-         "opacity": 1.0, "blend_mode": "MIX",
-         "use_roughness": True, "roughness_fill": 0.28,
-         "use_metallic": True, "metallic_fill": 0.0},
-        # Orange band â€” Wave BANDS create periodic stripes along X axis
-        # Note: use OBJECT coords + rotate mesh 90Â° to align bands with candy corn height
-        {"name": "Candy Orange Band", "type": "PROCEDURAL", "proc_type": "WAVE",
-         "proc_wave_type": "BANDS", "proc_scale": 2.2,
-         "proc_distortion": 0.0, "proc_detail": 0.0, "proc_wave_detail_scale": 0.0,
-         "proc_contrast": 0.85,
-         "proc_color1": [0.90, 0.38, 0.04, 1.0],
-         "proc_color2": [0.95, 0.72, 0.08, 1.0],
-         "opacity": 1.0, "blend_mode": "MIX"},
-        # White tip â€” finer wave creates the narrow white section at the point
-        {"name": "Candy White Tip", "type": "PROCEDURAL", "proc_type": "WAVE",
-         "proc_wave_type": "BANDS", "proc_scale": 4.8,
-         "proc_distortion": 0.0, "proc_detail": 0.0, "proc_wave_detail_scale": 0.0,
-         "proc_contrast": 0.88,
-         "proc_color1": [0.93, 0.93, 0.92, 1.0],
-         "proc_color2": [0.90, 0.38, 0.04, 1.0],
-         "opacity": 1.0, "blend_mode": "MIX"},
-    ],
-
-    "White Bricks": [
-        # Mortar/grout base
-        {"name": "Brick Mortar", "type": "FILL",
-         "fill_color": [0.68, 0.66, 0.63, 1.0],
-         "opacity": 1.0, "blend_mode": "MIX",
-         "use_roughness": True, "roughness_fill": 0.92,
-         "use_metallic": True, "metallic_fill": 0.0},
-        # Brick faces â€” Checker alternates between brick-white and mortar-grey
-        # Note: Checker is square (1:1). Real bricks are 2:1 offset â€” use UV scale for ratio.
-        {"name": "Brick Faces", "type": "PROCEDURAL", "proc_type": "CHECKER",
-         "proc_scale": 8.0,
-         "proc_color1": [0.85, 0.84, 0.82, 1.0],
-         "proc_color2": [0.68, 0.66, 0.63, 1.0],
-         "opacity": 1.0, "blend_mode": "MIX",
-         "use_roughness": True, "roughness_fill": 0.85,
-         "use_bump": True, "bump_strength": 0.5, "bump_distance": 0.015},
-        # Micro surface variation on brick faces
-        {"name": "Brick Surface Detail", "type": "PROCEDURAL", "proc_type": "NOISE",
-         "proc_scale": 15.0, "proc_detail": 3.0, "proc_roughness_proc": 0.5,
-         "proc_color1": [0.65, 0.63, 0.60, 1.0],
-         "proc_color2": [0.82, 0.81, 0.78, 1.0],
-         "opacity": 0.25, "blend_mode": "Overlay"},
-    ],
-
-    "Lolly Pop": [
-        # Very glossy white candy base
-        {"name": "Lolly Base", "type": "FILL",
-         "fill_color": [0.95, 0.95, 0.95, 1.0],
-         "opacity": 1.0, "blend_mode": "MIX",
-         "use_roughness": True, "roughness_fill": 0.05,
-         "use_metallic": True, "metallic_fill": 0.0},
-        # Main swirl: Marble (Wave + Noise turbulence) creates the swirled pattern
-        # Red-to-blue spiral arm. High marble_distortion = more turbulence/swirling.
-        {"name": "Lolly Red-Blue Swirl", "type": "PROCEDURAL", "proc_type": "MARBLE",
-         "proc_scale": 4.0, "proc_detail": 3.0,
-         "proc_roughness_proc": 0.5, "proc_distortion": 2.0,
-         "proc_marble_distortion": 8.0, "proc_marble_wave_type": "BANDS",
-         "proc_color1": [0.92, 0.10, 0.10, 1.0],
-         "proc_color2": [0.08, 0.18, 0.92, 1.0],
-         "opacity": 1.0, "blend_mode": "MIX"},
-        # Green swirl arm â€” Screen: dark areas pass through, bright=adds green
-        {"name": "Lolly Green Swirl", "type": "PROCEDURAL", "proc_type": "MARBLE",
-         "proc_scale": 3.0, "proc_detail": 2.0,
-         "proc_roughness_proc": 0.3, "proc_distortion": 1.8,
-         "proc_marble_distortion": 6.0, "proc_marble_wave_type": "BANDS",
-         "proc_color1": [0.0, 0.0, 0.0, 0.0],
-         "proc_color2": [0.10, 0.88, 0.22, 1.0],
-         "proc_offset_x": 0.3, "proc_offset_y": 0.5,
-         "opacity": 0.55, "blend_mode": "Screen"},
-        # Yellow accent swirl
-        {"name": "Lolly Yellow Swirl", "type": "PROCEDURAL", "proc_type": "MARBLE",
-         "proc_scale": 5.0, "proc_detail": 2.0,
-         "proc_roughness_proc": 0.4, "proc_distortion": 1.5,
-         "proc_marble_distortion": 5.0, "proc_marble_wave_type": "BANDS",
-         "proc_color1": [0.0, 0.0, 0.0, 0.0],
-         "proc_color2": [0.96, 0.85, 0.10, 1.0],
-         "proc_offset_z": 0.4,
-         "opacity": 0.45, "blend_mode": "Screen"},
-    ],
-}
+# Built-in presets shipped with the addon.
+# Emptied 2026-05-29 for the commercial launch: the product ships a
+# curated set of .tlm preset files in presets/ (shown under "Saved
+# Presets"), not these code-defined dev placeholders. Kept as an empty
+# dict so the panel grid + rename/apply operators that reference it
+# stay valid (iteration yields nothing, `name in BUILTIN_PRESETS` is
+# False). Re-populate here only if you want hard-coded starter presets.
+BUILTIN_PRESETS = {}
 
 
 class TLM_OT_ApplyPreset(Operator):
@@ -480,35 +75,45 @@ class TLM_OT_ApplyPreset(Operator):
         if not self.merge:
             tlm.layers.clear()
 
-        # Apply material-level properties (IOR, Volume Abs/Scatter, etc).
-        # Built-in presets and pre-material-block .tlm files have no
-        # 'material' key — defaults make those continue to load fine.
-        if isinstance(preset_material, dict) and preset_material:
-            if 'bsdf_ior' in preset_material:
-                tlm.bsdf_ior = preset_material['bsdf_ior']
-            if 'use_volume_absorption' in preset_material:
-                tlm.use_volume_absorption = preset_material['use_volume_absorption']
-            if 'volume_absorption_color' in preset_material:
-                tlm.volume_absorption_color = preset_material['volume_absorption_color']
-            if 'volume_absorption_density' in preset_material:
-                tlm.volume_absorption_density = preset_material['volume_absorption_density']
-            if 'use_volume_scatter' in preset_material:
-                tlm.use_volume_scatter = preset_material['use_volume_scatter']
-            if 'volume_scatter_color' in preset_material:
-                tlm.volume_scatter_color = preset_material['volume_scatter_color']
-            if 'volume_scatter_density' in preset_material:
-                tlm.volume_scatter_density = preset_material['volume_scatter_density']
-            if 'volume_scatter_anisotropy' in preset_material:
-                tlm.volume_scatter_anisotropy = preset_material['volume_scatter_anisotropy']
-            if 'use_emission_output' in preset_material:
-                tlm.use_emission_output = preset_material['use_emission_output']
-            if 'use_base_color_alpha' in preset_material:
-                tlm.use_base_color_alpha = preset_material['use_base_color_alpha']
-            if 'alpha_blend_method' in preset_material:
-                try:
-                    tlm.alpha_blend_method = preset_material['alpha_blend_method']
-                except (TypeError, ValueError):
-                    pass  # unknown enum value — keep default
+        # Apply material-level properties (IOR, Volume Abs/Scatter, Emission
+        # output, Displacement, etc).
+        #
+        # CRITICAL: always RESET to defaults first, then overlay whatever the
+        # preset specifies. The old code only wrote keys present in the
+        # preset's 'material' block, so a preset with an empty/partial block
+        # (built-in presets, pre-material-block .tlm files, or a metal preset
+        # like Bronze that carries no volume/emission data) LEFT STALE material
+        # flags from the previously-applied material. Symptom: applying Bronze
+        # over a material that had been an Anime/Watercolor preset
+        # (use_emission_output=True) inherited the flat-emission flag → the
+        # bronze rendered as a washed-out white surface. Using `.get(key,
+        # default)` unconditionally guarantees a clean material-level state on
+        # every Apply.
+        if not isinstance(preset_material, dict):
+            preset_material = {}
+        pm = preset_material
+        tlm.bsdf_ior                 = pm.get('bsdf_ior', 1.45)
+        tlm.use_volume_absorption    = pm.get('use_volume_absorption', False)
+        tlm.volume_absorption_color  = pm.get('volume_absorption_color', (0.55, 0.75, 0.95, 1.0))
+        tlm.volume_absorption_density = pm.get('volume_absorption_density', 1.0)
+        tlm.use_volume_scatter       = pm.get('use_volume_scatter', False)
+        tlm.volume_scatter_color     = pm.get('volume_scatter_color', (0.92, 0.96, 1.0, 1.0))
+        tlm.volume_scatter_density   = pm.get('volume_scatter_density', 0.5)
+        tlm.volume_scatter_anisotropy = pm.get('volume_scatter_anisotropy', 0.0)
+        tlm.use_emission_output      = pm.get('use_emission_output', False)
+        tlm.use_base_color_alpha     = pm.get('use_base_color_alpha', False)
+        try:
+            tlm.alpha_blend_method = pm.get('alpha_blend_method', 'AUTO')
+        except (TypeError, ValueError):
+            tlm.alpha_blend_method = 'AUTO'
+        tlm.use_displacement         = pm.get('use_displacement', False)
+        try:
+            tlm.displacement_method = pm.get('displacement_method', 'DISPLACEMENT')
+        except (TypeError, ValueError):
+            pass
+        tlm.displacement_strength    = pm.get('displacement_strength', 0.1)
+        tlm.displacement_midlevel    = pm.get('displacement_midlevel', 0.5)
+        tlm.displacement_adaptive    = pm.get('displacement_adaptive', True)
 
         # Per-layer apply isolated in a closure so a single malformed entry
         # can be rolled back without aborting the whole preset import.
@@ -518,13 +123,13 @@ class TLM_OT_ApplyPreset(Operator):
             layer.layer_type = ld.get("type", "FILL")
             layer.opacity    = ld.get("opacity", 1.0)
             layer.visible    = ld.get("visible", True)
-            # GROUP layers are always root-level â€” discard any stray parent
+            # GROUP layers are always root-level — discard any stray parent
             # so a hand-edited preset can't produce a nested-group state.
             _raw_group = ld.get("group_name", "")
             layer.group_name = "" if layer.layer_type == "GROUP" else _raw_group
             layer.collapsed  = ld.get("collapsed", False)
             layer.use_clipping_mask = ld.get("use_clipping_mask", False)
-            # Routing â€” restore output_channel; legacy 'AUTO' maps to 'BASE_COLOR'
+            # Routing — restore output_channel; legacy 'AUTO' maps to 'BASE_COLOR'
             _out_ch = ld.get("output_channel", "BASE_COLOR")
             if _out_ch == "AUTO":
                 _out_ch = "BASE_COLOR"
@@ -532,7 +137,7 @@ class TLM_OT_ApplyPreset(Operator):
                 layer.output_channel = _out_ch
             except (TypeError, ValueError):
                 layer.output_channel = "BASE_COLOR"
-            # Branching â€” per-channel blend mode overrides
+            # Branching — per-channel blend mode overrides
             layer.blend_mode_base_color   = ld.get("blend_mode_base_color",   "INHERIT")
             layer.blend_mode_roughness    = ld.get("blend_mode_roughness",    "INHERIT")
             layer.blend_mode_metallic     = ld.get("blend_mode_metallic",     "INHERIT")
@@ -619,6 +224,19 @@ class TLM_OT_ApplyPreset(Operator):
                 layer.proc_dots_softness   = ld.get("proc_dots_softness", 0.15)
                 layer.proc_cracks_width    = ld.get("proc_cracks_width", 0.05)
                 layer.proc_cracks_sharpness = ld.get("proc_cracks_sharpness", 0.7)
+                layer.proc_wood_distortion = ld.get("proc_wood_distortion", 1.5)
+                layer.proc_wood_grain      = ld.get("proc_wood_grain", 0.12)
+                layer.proc_scratches_angle = ld.get("proc_scratches_angle", 25.0)
+                layer.proc_scratches_aniso = ld.get("proc_scratches_aniso", 8.0)
+                layer.proc_scratches_width = ld.get("proc_scratches_width", 0.12)
+                layer.proc_caustics_freq   = ld.get("proc_caustics_freq", 12.0)
+                layer.proc_weave_width     = ld.get("proc_weave_width", 0.5)
+                layer.proc_tiles_layout    = ld.get("proc_tiles_layout", 'RUNNING_BOND')
+                layer.proc_tiles_aspect    = ld.get("proc_tiles_aspect", 2.0)
+                layer.proc_tiles_mortar    = ld.get("proc_tiles_mortar", 0.06)
+                layer.proc_tiles_random    = ld.get("proc_tiles_random", 0.5)
+                layer.proc_scatter_density = ld.get("proc_scatter_density", 0.5)
+                layer.proc_scatter_size    = ld.get("proc_scatter_size", 0.4)
                 layer.proc_ridged_offset   = ld.get("proc_ridged_offset", 1.0)
                 layer.proc_ridged_gain     = ld.get("proc_ridged_gain", 2.0)
                 layer.proc_gabor_anisotropy = ld.get("proc_gabor_anisotropy", 1.0)
@@ -655,6 +273,7 @@ class TLM_OT_ApplyPreset(Operator):
                 layer.proc_ramp_center      = ld.get("proc_ramp_center", 0.5)
                 layer.proc_vector_distortion= ld.get("proc_vector_distortion", 0.0)
                 layer.proc_coord_type       = ld.get("proc_coord_type", "GENERATED")
+                layer.proc_uv_view_shift    = ld.get("proc_uv_view_shift", 0.0)
                 layer.proc_emission_threshold = ld.get("proc_emission_threshold", 0.0)
                 layer.use_proc_color3       = ld.get("use_proc_color3", False)
                 if layer.use_proc_color3:
@@ -684,16 +303,37 @@ class TLM_OT_ApplyPreset(Operator):
                     item.color = list(layer.proc_color3)
                     item.position = layer.proc_color3_position
                     layer.use_proc_color3 = False
-                # Feature A â€” Advanced coordinates
+                # Feature A — Advanced coordinates
                 layer.proc_coord_transform  = ld.get("proc_coord_transform", "NONE")
                 layer.proc_swirl_amount     = ld.get("proc_swirl_amount", 2.0)
-                # Feature B â€” Voronoi random per cell
+                # Feature B — Voronoi random per cell
                 layer.proc_voronoi_random_color = ld.get("proc_voronoi_random_color", False)
                 layer.proc_voronoi_random_seed  = ld.get("proc_voronoi_random_seed", 0.0)
             elif layer.layer_type == "REFERENCE":
                 layer.reference_layer_name = ld.get("reference_layer_name", "")
+                try:
+                    layer.reference_mode = ld.get("reference_mode", "COMPOSED")
+                except (TypeError, ValueError):
+                    layer.reference_mode = "COMPOSED"
+                # RAW_PATTERN ColorRamp data (harmless no-op for COMPOSED
+                # references, which ignore their own ColorRamp).
+                layer.proc_color1 = ld.get("proc_color1", [0, 0, 0, 1])
+                layer.proc_color2 = ld.get("proc_color2", [1, 1, 1, 1])
+                layer.proc_use_manual_stops = ld.get("proc_use_manual_stops", False)
+                layer.proc_color1_position = ld.get("proc_color1_position", 0.0)
+                layer.proc_color2_position = ld.get("proc_color2_position", 1.0)
+                layer.proc_contrast = ld.get("proc_contrast", 0.5)
+                layer.proc_ramp_center = ld.get("proc_ramp_center", 0.5)
+                layer.proc_color_ramp_mode = ld.get("proc_color_ramp_mode", "RGB")
+                layer.proc_color_ramp_interpolation = ld.get(
+                    "proc_color_ramp_interpolation", "LINEAR")
+                layer.proc_extra_color_stops.clear()
+                for s in ld.get("proc_extra_color_stops", []):
+                    item = layer.proc_extra_color_stops.add()
+                    item.color = s.get("color", [0.5, 0.5, 0.5, 1.0])
+                    item.position = s.get("position", 0.5)
             elif layer.layer_type == "ADJUSTMENT":
-                # CURVES was removed in favour of LEVELS+BRIGHT_CONTRAST â€”
+                # CURVES was removed in favour of LEVELS+BRIGHT_CONTRAST —
                 # remap legacy presets so they still load without error.
                 adj_t = ld.get("adj_type", "HUE_SAT")
                 if adj_t == "CURVES":
@@ -720,27 +360,41 @@ class TLM_OT_ApplyPreset(Operator):
                 layer.fresnel_strength  = ld.get("fresnel_strength", 1.0)
                 layer.use_mask          = ld.get("use_mask", False)
                 layer.mask_image_name   = ld.get("mask_image_name", "")
-                # Feature C â€” Advanced combinable masks
+                # Feature C — Advanced combinable masks
                 layer.mask_source        = ld.get("mask_source", "IMAGE")
                 layer.mask_invert        = ld.get("mask_invert", False)
                 layer.mask_ao_distance   = ld.get("mask_ao_distance", 0.5)
                 layer.mask_wireframe_size = ld.get("mask_wireframe_size", 0.01)
                 layer.mask_wireframe_use_pixel_size = ld.get("mask_wireframe_use_pixel_size", True)
+                try:
+                    layer.mask_voronoi_feature    = ld.get("mask_voronoi_feature", 'DISTANCE_TO_EDGE')
+                except (TypeError, ValueError):
+                    pass
+                layer.mask_voronoi_scale      = ld.get("mask_voronoi_scale", 10.0)
+                layer.mask_voronoi_randomness = ld.get("mask_voronoi_randomness", 1.0)
+                layer.mask_voronoi_edge_width = ld.get("mask_voronoi_edge_width", 1.0)
                 layer.use_mask_b         = ld.get("use_mask_b", False)
                 layer.mask_source_b      = ld.get("mask_source_b", "POINTINESS")
                 layer.mask_image_name_b  = ld.get("mask_image_name_b", "")
                 layer.mask_invert_b      = ld.get("mask_invert_b", False)
                 layer.mask_ao_distance_b = ld.get("mask_ao_distance_b", 0.5)
+                try:
+                    layer.mask_voronoi_feature_b    = ld.get("mask_voronoi_feature_b", 'DISTANCE_TO_EDGE')
+                except (TypeError, ValueError):
+                    pass
+                layer.mask_voronoi_scale_b      = ld.get("mask_voronoi_scale_b", 10.0)
+                layer.mask_voronoi_randomness_b = ld.get("mask_voronoi_randomness_b", 1.0)
+                layer.mask_voronoi_edge_width_b = ld.get("mask_voronoi_edge_width_b", 1.0)
                 layer.mask_combine       = ld.get("mask_combine", "MULTIPLY")
                 layer.mask_contrast      = ld.get("mask_contrast", 0.5)
-                # Mask refinement â€” Levels
+                # Mask refinement — Levels
                 layer.use_mask_levels     = ld.get("use_mask_levels", False)
                 layer.mask_levels_in_min  = ld.get("mask_levels_in_min", 0.0)
                 layer.mask_levels_in_max  = ld.get("mask_levels_in_max", 1.0)
                 layer.mask_levels_gamma   = ld.get("mask_levels_gamma", 1.0)
                 layer.mask_levels_out_min = ld.get("mask_levels_out_min", 0.0)
                 layer.mask_levels_out_max = ld.get("mask_levels_out_max", 1.0)
-                # Mask refinement â€” Softness + Blur
+                # Mask refinement — Softness + Blur
                 layer.mask_softness       = ld.get("mask_softness", 0.0)
                 layer.mask_blur           = ld.get("mask_blur", 0.0)
                 # Smart generator parameters
@@ -748,7 +402,7 @@ class TLM_OT_ApplyPreset(Operator):
                 layer.mask_gen_breakup       = ld.get("mask_gen_breakup", 0.3)
                 layer.mask_gen_breakup_scale = ld.get("mask_gen_breakup_scale", 15.0)
                 layer.mask_gen_sharpness     = ld.get("mask_gen_sharpness", 0.5)
-                # Image texture mapping config â€” Triplanar removed in
+                # Image texture mapping config — Triplanar removed in
                 # favour of paint_projection='BOX'. Legacy presets carry
                 # use_triplanar, auto-migrate them.
                 layer.paint_interpolation    = ld.get("paint_interpolation", "Linear")
@@ -758,6 +412,8 @@ class TLM_OT_ApplyPreset(Operator):
                 )
                 layer.paint_projection_blend = ld.get("paint_projection_blend", 0.3)
                 layer.paint_source           = ld.get("paint_source", "FILE")
+                layer.paint_pixelate         = ld.get("paint_pixelate", False)
+                layer.paint_pixelate_size    = ld.get("paint_pixelate_size", 32)
                 # PBR channels
                 layer.use_roughness        = ld.get("use_roughness", False)
                 layer.roughness_fill       = ld.get("roughness_fill", 0.5)
@@ -768,6 +424,8 @@ class TLM_OT_ApplyPreset(Operator):
                 layer.use_bump             = ld.get("use_bump", False)
                 layer.bump_strength        = ld.get("bump_strength", 0.5)
                 layer.bump_distance        = ld.get("bump_distance", 0.05)
+                layer.use_displacement     = ld.get("use_displacement", False)
+                layer.displacement_scale   = ld.get("displacement_scale", 1.0)
                 layer.use_normal           = ld.get("use_normal", False)
                 layer.normal_image_name    = ld.get("normal_image_name", "")
                 layer.normal_strength      = ld.get("normal_strength", 1.0)
@@ -853,9 +511,9 @@ class TLM_OT_SavePreset(Operator):
                 "collapsed": layer.collapsed,
                 "use_clipping_mask": layer.use_clipping_mask,
             }
-            # Routing â€” which BSDF input the layer drives
+            # Routing — which BSDF input the layer drives
             d["output_channel"]          = getattr(layer, 'output_channel',          'BASE_COLOR')
-            # Branching â€” per-channel blend mode overrides
+            # Branching — per-channel blend mode overrides
             d["blend_mode_base_color"]   = getattr(layer, 'blend_mode_base_color',   'INHERIT')
             d["blend_mode_roughness"]    = getattr(layer, 'blend_mode_roughness',    'INHERIT')
             d["blend_mode_metallic"]     = getattr(layer, 'blend_mode_metallic',     'INHERIT')
@@ -871,6 +529,27 @@ class TLM_OT_SavePreset(Operator):
                 d["fill_color"] = list(layer.fill_color)
             elif layer.layer_type == "REFERENCE":
                 d["reference_layer_name"] = getattr(layer, 'reference_layer_name', "")
+                d["reference_mode"] = getattr(layer, 'reference_mode', 'COMPOSED')
+                # RAW_PATTERN references build their OWN ColorRamp from the
+                # source procedural's raw FAC, so they need the same
+                # ColorRamp data a PROCEDURAL layer serializes. Without this,
+                # reloading a preset reverted the reference to COMPOSED with
+                # default black→white colours (symptom: the whole burn/
+                # iridescent effect went white on Apply).
+                d["proc_color1"] = list(layer.proc_color1)
+                d["proc_color2"] = list(layer.proc_color2)
+                d["proc_use_manual_stops"] = getattr(layer, 'proc_use_manual_stops', False)
+                d["proc_color1_position"] = getattr(layer, 'proc_color1_position', 0.0)
+                d["proc_color2_position"] = getattr(layer, 'proc_color2_position', 1.0)
+                d["proc_contrast"] = getattr(layer, 'proc_contrast', 0.5)
+                d["proc_ramp_center"] = getattr(layer, 'proc_ramp_center', 0.5)
+                d["proc_color_ramp_mode"] = getattr(layer, 'proc_color_ramp_mode', 'RGB')
+                d["proc_color_ramp_interpolation"] = getattr(
+                    layer, 'proc_color_ramp_interpolation', 'LINEAR')
+                d["proc_extra_color_stops"] = [
+                    {"color": list(s.color), "position": s.position}
+                    for s in getattr(layer, 'proc_extra_color_stops', [])
+                ]
             elif layer.layer_type == "PROCEDURAL":
                 d.update({
                     "proc_type": layer.proc_type, "proc_scale": layer.proc_scale,
@@ -895,6 +574,19 @@ class TLM_OT_SavePreset(Operator):
                     "proc_dots_softness": getattr(layer, 'proc_dots_softness', 0.15),
                     "proc_cracks_width": getattr(layer, 'proc_cracks_width', 0.05),
                     "proc_cracks_sharpness": getattr(layer, 'proc_cracks_sharpness', 0.7),
+                    "proc_wood_distortion": getattr(layer, 'proc_wood_distortion', 1.5),
+                    "proc_wood_grain": getattr(layer, 'proc_wood_grain', 0.12),
+                    "proc_scratches_angle": getattr(layer, 'proc_scratches_angle', 25.0),
+                    "proc_scratches_aniso": getattr(layer, 'proc_scratches_aniso', 8.0),
+                    "proc_scratches_width": getattr(layer, 'proc_scratches_width', 0.12),
+                    "proc_caustics_freq": getattr(layer, 'proc_caustics_freq', 12.0),
+                    "proc_weave_width": getattr(layer, 'proc_weave_width', 0.5),
+                    "proc_tiles_layout": getattr(layer, 'proc_tiles_layout', 'RUNNING_BOND'),
+                    "proc_tiles_aspect": getattr(layer, 'proc_tiles_aspect', 2.0),
+                    "proc_tiles_mortar": getattr(layer, 'proc_tiles_mortar', 0.06),
+                    "proc_tiles_random": getattr(layer, 'proc_tiles_random', 0.5),
+                    "proc_scatter_density": getattr(layer, 'proc_scatter_density', 0.5),
+                    "proc_scatter_size": getattr(layer, 'proc_scatter_size', 0.4),
                     "proc_ridged_offset": getattr(layer, 'proc_ridged_offset', 1.0),
                     "proc_ridged_gain": getattr(layer, 'proc_ridged_gain', 2.0),
                     "proc_gabor_anisotropy": getattr(layer, 'proc_gabor_anisotropy', 1.0),
@@ -932,12 +624,13 @@ class TLM_OT_SavePreset(Operator):
                     "proc_ramp_center": getattr(layer, 'proc_ramp_center', 0.5),
                     "proc_vector_distortion": layer.proc_vector_distortion,
                     "proc_coord_type": layer.proc_coord_type,
+                    "proc_uv_view_shift": getattr(layer, 'proc_uv_view_shift', 0.0),
                     "proc_emission_threshold": getattr(layer, 'proc_emission_threshold', 0.0),
                     "use_proc_color3": getattr(layer, 'use_proc_color3', False),
-                    # Feature A â€” Advanced coordinate transforms
+                    # Feature A — Advanced coordinate transforms
                     "proc_coord_transform": getattr(layer, 'proc_coord_transform', 'NONE'),
                     "proc_swirl_amount":    getattr(layer, 'proc_swirl_amount',    2.0),
-                    # Feature B â€” Voronoi random per cell
+                    # Feature B — Voronoi random per cell
                     "proc_voronoi_random_color": getattr(layer, 'proc_voronoi_random_color', False),
                     "proc_voronoi_random_seed":  getattr(layer, 'proc_voronoi_random_seed',  0.0),
                 })
@@ -981,27 +674,35 @@ class TLM_OT_SavePreset(Operator):
                 d["fresnel_strength"]  = getattr(layer, 'fresnel_strength', 1.0)
                 d["use_mask"]          = layer.use_mask
                 d["mask_image_name"]   = layer.mask_image_name
-                # Feature C â€” Advanced combinable masks
+                # Feature C — Advanced combinable masks
                 d["mask_source"]        = getattr(layer, 'mask_source', 'IMAGE')
                 d["mask_invert"]        = getattr(layer, 'mask_invert', False)
                 d["mask_ao_distance"]   = getattr(layer, 'mask_ao_distance', 0.5)
                 d["mask_wireframe_size"] = getattr(layer, 'mask_wireframe_size', 0.01)
                 d["mask_wireframe_use_pixel_size"] = getattr(layer, 'mask_wireframe_use_pixel_size', True)
+                d["mask_voronoi_feature"]    = getattr(layer, 'mask_voronoi_feature', 'DISTANCE_TO_EDGE')
+                d["mask_voronoi_scale"]      = getattr(layer, 'mask_voronoi_scale', 10.0)
+                d["mask_voronoi_randomness"] = getattr(layer, 'mask_voronoi_randomness', 1.0)
+                d["mask_voronoi_edge_width"] = getattr(layer, 'mask_voronoi_edge_width', 1.0)
                 d["use_mask_b"]         = getattr(layer, 'use_mask_b', False)
                 d["mask_source_b"]      = getattr(layer, 'mask_source_b', 'POINTINESS')
                 d["mask_image_name_b"]  = getattr(layer, 'mask_image_name_b', "")
                 d["mask_invert_b"]      = getattr(layer, 'mask_invert_b', False)
                 d["mask_ao_distance_b"] = getattr(layer, 'mask_ao_distance_b', 0.5)
+                d["mask_voronoi_feature_b"]    = getattr(layer, 'mask_voronoi_feature_b', 'DISTANCE_TO_EDGE')
+                d["mask_voronoi_scale_b"]      = getattr(layer, 'mask_voronoi_scale_b', 10.0)
+                d["mask_voronoi_randomness_b"] = getattr(layer, 'mask_voronoi_randomness_b', 1.0)
+                d["mask_voronoi_edge_width_b"] = getattr(layer, 'mask_voronoi_edge_width_b', 1.0)
                 d["mask_combine"]       = getattr(layer, 'mask_combine', 'MULTIPLY')
                 d["mask_contrast"]      = getattr(layer, 'mask_contrast', 0.5)
-                # Mask refinement â€” Levels
+                # Mask refinement — Levels
                 d["use_mask_levels"]     = getattr(layer, 'use_mask_levels', False)
                 d["mask_levels_in_min"]  = getattr(layer, 'mask_levels_in_min', 0.0)
                 d["mask_levels_in_max"]  = getattr(layer, 'mask_levels_in_max', 1.0)
                 d["mask_levels_gamma"]   = getattr(layer, 'mask_levels_gamma', 1.0)
                 d["mask_levels_out_min"] = getattr(layer, 'mask_levels_out_min', 0.0)
                 d["mask_levels_out_max"] = getattr(layer, 'mask_levels_out_max', 1.0)
-                # Mask refinement â€” Softness + Blur
+                # Mask refinement — Softness + Blur
                 d["mask_softness"]       = getattr(layer, 'mask_softness', 0.0)
                 d["mask_blur"]           = getattr(layer, 'mask_blur', 0.0)
                 # Smart generator parameters
@@ -1014,6 +715,9 @@ class TLM_OT_SavePreset(Operator):
                 d["paint_projection"]       = getattr(layer, 'paint_projection', 'FLAT')
                 d["paint_projection_blend"] = getattr(layer, 'paint_projection_blend', 0.3)
                 d["paint_source"]           = getattr(layer, 'paint_source', 'FILE')
+                # Pixelate (LED screen / pixel-art / mosaic)
+                d["paint_pixelate"]         = getattr(layer, 'paint_pixelate', False)
+                d["paint_pixelate_size"]    = getattr(layer, 'paint_pixelate_size', 32)
                 # PBR channels
                 d["use_roughness"]        = layer.use_roughness
                 d["roughness_fill"]       = layer.roughness_fill
@@ -1024,6 +728,8 @@ class TLM_OT_SavePreset(Operator):
                 d["use_bump"]             = layer.use_bump
                 d["bump_strength"]        = layer.bump_strength
                 d["bump_distance"]        = layer.bump_distance
+                d["use_displacement"]     = getattr(layer, 'use_displacement', False)
+                d["displacement_scale"]   = getattr(layer, 'displacement_scale', 1.0)
                 d["use_normal"]           = getattr(layer, 'use_normal', False)
                 d["normal_image_name"]    = getattr(layer, 'normal_image_name', "")
                 d["normal_strength"]      = getattr(layer, 'normal_strength', 1.0)
@@ -1067,6 +773,11 @@ class TLM_OT_SavePreset(Operator):
             "use_emission_output":            getattr(tlm, 'use_emission_output', False),
             "use_base_color_alpha":           getattr(tlm, 'use_base_color_alpha', False),
             "alpha_blend_method":             getattr(tlm, 'alpha_blend_method', 'AUTO'),
+            "use_displacement":               getattr(tlm, 'use_displacement', False),
+            "displacement_method":            getattr(tlm, 'displacement_method', 'DISPLACEMENT'),
+            "displacement_strength":          getattr(tlm, 'displacement_strength', 0.1),
+            "displacement_midlevel":          getattr(tlm, 'displacement_midlevel', 0.5),
+            "displacement_adaptive":          getattr(tlm, 'displacement_adaptive', True),
         }
         data = {
             "preset_name": self.preset_name,
@@ -1107,8 +818,93 @@ class TLM_OT_DeletePreset(Operator):
         return context.window_manager.invoke_confirm(self, event)
 
 
+# Characters Windows/macOS/Linux filesystems reject (or that break the
+# "{name}.tlm" → preset-name round trip). Stripped from any user-typed name.
+_INVALID_PRESET_CHARS = set('\\/:*?"<>|')
+
+
+def _sanitize_preset_name(name):
+    """Trim + strip filesystem-illegal characters from a preset name."""
+    cleaned = "".join(c for c in (name or "") if c not in _INVALID_PRESET_CHARS)
+    return cleaned.strip()
+
+
+class TLM_OT_RenamePreset(Operator):
+    """Rename a user-saved preset (renames the .tlm file on disk)."""
+    bl_idname = "tlm.rename_preset"
+    bl_label = "Rename Preset"
+    bl_options = {'REGISTER'}
+
+    preset_name: bpy.props.StringProperty(default="")  # current name (set by the button)
+    new_name: bpy.props.StringProperty(
+        name="New Name",
+        description="New name for the preset",
+        default="",
+    )
+
+    def invoke(self, context, event):
+        # Pre-fill the dialog field with the current name so the user edits
+        # in place rather than retyping from scratch.
+        self.new_name = self.preset_name
+        return context.window_manager.invoke_props_dialog(self)
+
+    def draw(self, context):
+        self.layout.prop(self, "new_name", text="Name")
+
+    def execute(self, context):
+        preset_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "presets")
+
+        old_name = self.preset_name
+        new_name = _sanitize_preset_name(self.new_name)
+
+        if not new_name:
+            self.report({'ERROR'}, "Preset name cannot be empty")
+            return {'CANCELLED'}
+        if new_name == old_name:
+            return {'CANCELLED'}  # no-op, silent
+
+        # Built-in presets are code constants, not files — can't be renamed.
+        if old_name in BUILTIN_PRESETS:
+            self.report({'ERROR'}, "Built-in presets cannot be renamed")
+            return {'CANCELLED'}
+
+        src = os.path.join(preset_dir, f"{old_name}.tlm")
+        dst = os.path.join(preset_dir, f"{new_name}.tlm")
+
+        if not os.path.exists(src):
+            self.report({'WARNING'}, f"Preset file not found: {old_name}")
+            return {'CANCELLED'}
+        if new_name in BUILTIN_PRESETS or os.path.exists(dst):
+            self.report({'ERROR'}, f"A preset named '{new_name}' already exists")
+            return {'CANCELLED'}
+
+        # Rewrite the in-file "preset_name" field so the file's contents stay
+        # consistent with its filename (the Apply path reads the filename, but
+        # keeping the field in sync avoids confusion on re-export / inspection).
+        try:
+            with open(src, 'r') as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                data["preset_name"] = new_name
+            with open(src, 'w') as f:
+                json.dump(data, f, indent=2)
+        except (ValueError, OSError, TypeError):
+            # Non-fatal: a malformed/legacy file can still be renamed on disk.
+            pass
+
+        try:
+            os.rename(src, dst)
+        except OSError as e:
+            self.report({'ERROR'}, f"Failed to rename preset: {e}")
+            return {'CANCELLED'}
+
+        self.report({'INFO'}, f"Renamed '{old_name}' → '{new_name}'")
+        return {'FINISHED'}
+
+
 classes = [
     TLM_OT_ApplyPreset,
     TLM_OT_SavePreset,
     TLM_OT_DeletePreset,
+    TLM_OT_RenamePreset,
 ]

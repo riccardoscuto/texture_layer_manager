@@ -2,7 +2,7 @@
 properties.py
 Defines the data model for Texture Layer Manager.
 Each layer stores its image reference, blend mode, opacity, etc.
-All data lives as Blender PropertyGroups â€” saved with the .blend file.
+All data lives as Blender PropertyGroups — saved with the .blend file.
 """
 
 import bpy
@@ -13,22 +13,22 @@ from bpy.props import (
 from bpy.types import PropertyGroup
 from . import compositing
 
-# â”€â”€ Rebuild debounce â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Rebuild debounce ──────────────────────────────────────────────────────────
 # Prevents a full node-tree rebuild on every individual slider tick.
 # Multiple rapid changes within the debounce window are batched into a single rebuild.
-# 250ms balances responsiveness with absorbing a slider drag â€” ~4 rebuilds
+# 250ms balances responsiveness with absorbing a slider drag — ~4 rebuilds
 # per 1-second drag instead of one per 60Hz tick. Larger values feel laggy
 # on hover-edit; smaller values stutter on slider drags with many layers.
 
 _REBUILD_DEBOUNCE_S = 0.25
 _suppress_layer_updates = False
 
-# Set of material names that need rebuilding â€” accumulates across rapid changes.
+# Set of material names that need rebuilding — accumulates across rapid changes.
 _pending_materials: set = set()
 
 
 def _do_deferred_rebuild():
-    """Timer callback â€” runs once after the debounce interval."""
+    """Timer callback — runs once after the debounce interval."""
     global _pending_materials
     if not _pending_materials:
         return None
@@ -41,7 +41,7 @@ def _do_deferred_rebuild():
             mat = bpy.data.materials.get(mat_name)
             if mat and mat.tlm.auto_composite and not mat.tlm.shader_editable:
                 compositing.rebuild_node_tree(mat)
-        # Force shader editor redraw â€” timer callbacks don't
+        # Force shader editor redraw — timer callbacks don't
         # automatically trigger UI updates like operators do.
         ctx = bpy.context
         if ctx:
@@ -84,7 +84,7 @@ def cancel_pending_rebuild(material_name=None):
             bpy.app.timers.unregister(_do_deferred_rebuild)
     except (RuntimeError, AttributeError):
         # Timers API can be unavailable during register/unregister of the
-        # addon itself, or right after a .blend reload â€” fail silent.
+        # addon itself, or right after a .blend reload — fail silent.
         pass
 
 
@@ -118,7 +118,7 @@ def _on_mask_source_change(self, context):
     everywhere and the source choice has no visible effect.
 
     The check on the previous value path-prefix ('mask_source' vs
-    'mask_source_b') lets the same callback serve both slots â€” Blender's
+    'mask_source_b') lets the same callback serve both slots — Blender's
     update mechanism passes the PropertyGroup instance (``self``) so we
     can inspect both fields directly.
     """
@@ -130,7 +130,7 @@ def _on_mask_source_change(self, context):
     if getattr(self, 'mask_source_b', 'IMAGE') != 'IMAGE' and not self.use_mask_b:
         self.use_mask_b = True
         return
-    # Normal source change (or change back to IMAGE) â€” just rebuild
+    # Normal source change (or change back to IMAGE) — just rebuild
     _on_layer_update(self, context)
 
 
@@ -138,12 +138,12 @@ def _on_name_change(self, context):
     """Called when a layer's `name` is edited.
 
     Two responsibilities beyond a regular rebuild:
-    1. Repoint cross-references that used the OLD name â€” group children
+    1. Repoint cross-references that used the OLD name — group children
        (``group_name``) and REFERENCE layers (``reference_layer_name``).
        Without this, renaming a group orphans every child and renaming
        a referenced layer breaks every reference into it.
     2. Trigger the standard debounced rebuild so node tags
-       (``tlm_layer = layer.name``) catch up â€” the hot-update lookups
+       (``tlm_layer = layer.name``) catch up — the hot-update lookups
        use the current name, so leftover nodes tagged with the old
        name become unreachable until a rebuild runs.
 
@@ -171,7 +171,7 @@ def _on_name_change(self, context):
                         sib.group_name = new_name
                     if getattr(sib, "reference_layer_name", "") == old_name:
                         sib.reference_layer_name = new_name
-        # Always rebuild â€” the rebuild re-tags all nodes with current
+        # Always rebuild — the rebuild re-tags all nodes with current
         # layer names, fixing any stale `tlm_layer` custom props that
         # would otherwise break the hot-update path.
         _on_layer_update(self, context)
@@ -180,7 +180,7 @@ def _on_name_change(self, context):
 
 
 def _on_preset_change(self, context):
-    """Apply coordinate preset â€” sets coord_type, normalize, and distortion in one click."""
+    """Apply coordinate preset — sets coord_type, normalize, and distortion in one click."""
     preset = self.proc_coord_preset
     if preset == 'SPHERICAL':
         self.proc_coord_type = 'OBJECT'
@@ -215,10 +215,10 @@ def _make_hot_callback(prop_name):
     return _cb
 
 
-# â”€â”€â”€ Blend mode enum â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─── Blend mode enum ─────────────────────────────────────────────────────────
 
 BLEND_MODES = [
-    # UI label "Mix" (not "Normal") â€” matches the Blender ShaderNodeMix
+    # UI label "Mix" (not "Normal") — matches the Blender ShaderNodeMix
     # node's blend_type label so users can scan node graph and addon UI
     # without translating between names.
     ("MIX",        "Mix",        "Standard alpha/mix composite over layer below", 0),
@@ -234,7 +234,7 @@ BLEND_MODES = [
     ("COLOR_DODGE","Color Dodge","Brighten based on layer",           10),
     ("COLOR_BURN", "Color Burn", "Darken based on layer",            11),
     ("SOFT_LIGHT", "Soft Light", "Subtle contrast blend",             12),
-    # HARD_LIGHT removed â€” it produces inconsistent results across
+    # HARD_LIGHT removed — it produces inconsistent results across
     # Blender versions (different formulas in 3.x vs 4.x), and the
     # use cases are covered by Overlay + opacity. Re-enable here if
     # asked, but the index numbering is no longer contiguous.
@@ -353,6 +353,159 @@ def _on_volume_absorption_change(material_props, context):
         compositing = importlib.import_module(__package__ + ".compositing")
     if getattr(mat.tlm, 'auto_composite', True):
         compositing.rebuild_node_tree(mat)
+
+
+def _on_layer_use_displacement_change(layer, context):
+    """Per-layer ``use_displacement`` toggle handler.
+
+    Two responsibilities:
+
+    1. **Auto-enable the material-level master** (`tlm.use_displacement`)
+       when the per-layer toggle flips False → True. Without this, users
+       hit a confusing UX gotcha: clicking "Add to Displace" on a layer
+       does nothing if they haven't separately enabled the master in the
+       Composite section.
+
+    2. **Trigger the standard deferred rebuild** via ``_on_layer_update``
+       so the displacement node graph gets re-wired.
+
+    Flipping the master OFF here when ALL layers are off would be
+    symmetric — but a power user might want the master on with no
+    layers (e.g. about to add a layer next), so leave that case alone.
+    """
+    if layer.use_displacement:
+        try:
+            mat = layer.id_data
+            if (mat is not None and isinstance(mat, bpy.types.Material)
+                    and not mat.tlm.use_displacement):
+                mat.tlm.use_displacement = True
+        except (AttributeError, ReferenceError):
+            pass
+    _on_layer_update(layer, context)
+
+
+def _on_displacement_change(material_props, context):
+    """Structural — full rebuild so the Displacement node and Material
+    Output wiring is created or torn down. Also triggers the adaptive
+    subdivision auto-setup (cycles experimental + mesh subsurf adaptive)
+    when `displacement_adaptive` is True.
+    """
+    mat = _resolve_owning_material(material_props, context)
+    if mat is None:
+        return
+    try:
+        from . import compositing
+    except ImportError:
+        import importlib
+        compositing = importlib.import_module(__package__ + ".compositing")
+    # Auto-setup Cycles + mesh adaptive subdivision when displacement is on
+    if material_props.use_displacement and material_props.displacement_adaptive:
+        _ensure_displacement_setup(mat)
+    if getattr(mat.tlm, 'auto_composite', True):
+        compositing.rebuild_node_tree(mat)
+
+
+def _on_displacement_param_change(material_props, context):
+    """Hot-update for strength + midlevel — pokes the ShaderNodeDisplacement
+    inputs directly. If the node doesn't exist (displacement off), no-op."""
+    mat = _resolve_owning_material(material_props, context)
+    if mat is None or not mat.use_nodes or not mat.node_tree:
+        return
+    nt = mat.node_tree
+    disp = next((n for n in nt.nodes if n.bl_idname == 'ShaderNodeDisplacement'), None)
+    if disp is None:
+        return
+    try:
+        s = disp.inputs.get("Scale")
+        if s is not None and not s.is_linked:
+            s.default_value = material_props.displacement_strength
+        m = disp.inputs.get("Midlevel")
+        if m is not None and not m.is_linked:
+            m.default_value = material_props.displacement_midlevel
+    except (AttributeError, KeyError):
+        pass
+
+
+def _ensure_displacement_setup(mat):
+    """Configure Cycles + every mesh using this material for TRUE
+    geometric displacement (silhouette break, not just bump):
+
+      1. ``mat.displacement_method = 'DISPLACEMENT'``
+         In Blender 5.1+ this lives directly on the material (used to be
+         ``mat.cycles.displacement_method`` pre-3.x). Defaults to ``BUMP``
+         which means the Displacement output is collapsed back to a bump
+         normal — invisible on the silhouette. Forcing ``DISPLACEMENT``
+         actually moves vertices.
+         Older Blender exposes it via ``mat.cycles.displacement_method``;
+         we try both with hasattr guards.
+
+      2. On older Blender (pre-5.1) also ``scene.cycles.feature_set =
+         'EXPERIMENTAL'`` — required for adaptive subd back then. Removed
+         in 5.1.
+
+      3. Each MESH using the material gets a SUBSURF modifier with the
+         modifier-level ``use_adaptive_subdivision = True`` (Blender 5.1+
+         exposes the flag here, not on ``obj.cycles`` like pre-5.x).
+
+    Skips gracefully when the renderer isn't Cycles or the API is missing.
+    """
+    scene = bpy.context.scene
+    if scene.render.engine != 'CYCLES':
+        return
+
+    # ── 1. Material displacement method ──
+    # Read user-chosen method from tlm.displacement_method (enum:
+    # BUMP / DISPLACEMENT / BOTH). Defaults to DISPLACEMENT for the
+    # geometric silhouette break that this feature was designed for.
+    desired = getattr(mat.tlm, 'displacement_method', 'DISPLACEMENT')
+    # New-style API (Blender 4.x+ / 5.x): mat.displacement_method
+    if hasattr(mat, 'displacement_method'):
+        try:
+            mat.displacement_method = desired
+        except (AttributeError, TypeError, RuntimeError):
+            pass
+    # Old-style API (pre-4.x): mat.cycles.displacement_method
+    elif hasattr(mat, 'cycles') and hasattr(mat.cycles, 'displacement_method'):
+        try:
+            mat.cycles.displacement_method = desired
+        except (AttributeError, TypeError, RuntimeError):
+            pass
+
+    # ── 2. feature_set EXPERIMENTAL (only on old Blender) ──
+    cycles = getattr(scene, 'cycles', None)
+    if cycles is not None and hasattr(cycles, 'feature_set'):
+        try:
+            cycles.feature_set = 'EXPERIMENTAL'
+        except (AttributeError, TypeError, RuntimeError):
+            pass
+
+    # ── 3. Mesh-level adaptive subdivision ──
+    for obj in bpy.data.objects:
+        if obj.type != 'MESH':
+            continue
+        if not any(slot.material is mat for slot in obj.material_slots):
+            continue
+        # Find or create a SUBSURF modifier
+        sub = next((m for m in obj.modifiers if m.type == 'SUBSURF'), None)
+        if sub is None:
+            try:
+                sub = obj.modifiers.new(name="TLM_Adaptive_Subdiv", type='SUBSURF')
+                sub.levels = 1
+                sub.render_levels = 1
+            except (RuntimeError, AttributeError):
+                continue
+        # Modifier-level adaptive flag (5.1+ canonical location)
+        if hasattr(sub, 'use_adaptive_subdivision'):
+            try:
+                sub.use_adaptive_subdivision = True
+            except (AttributeError, TypeError, RuntimeError):
+                pass
+        # Object-level fallback (pre-5.x)
+        if hasattr(obj.cycles, 'use_adaptive_subdivision'):
+            try:
+                obj.cycles.use_adaptive_subdivision = True
+            except (AttributeError, TypeError, RuntimeError):
+                pass
 
 
 def _on_volume_scatter_change(material_props, context):
@@ -484,7 +637,16 @@ def _on_proc_color_stop_change(stop, context):
 
     target_ptr = stop.as_pointer()
     for layer in mat.tlm.layers:
-        if getattr(layer, 'layer_type', '') != 'PROCEDURAL':
+        # Extra colour stops drive a ColorRamp on two layer kinds:
+        #   - PROCEDURAL: its own pattern ColorRamp.
+        #   - REFERENCE in RAW_PATTERN mode: a ColorRamp this layer applies
+        #     to the source procedural's raw FAC (see _build_channel's
+        #     REFERENCE branch). Both tag the ColorRamp with the LAYER's own
+        #     name, so _hot_proc_color(nt, layer, ...) finds it either way.
+        # Skipping REFERENCE here was the bug: editing an extra stop on a
+        # RAW_PATTERN reference never reached the hot path, so neither colour
+        # nor position updated live.
+        if getattr(layer, 'layer_type', '') not in ('PROCEDURAL', 'REFERENCE'):
             continue
         for s in getattr(layer, 'proc_extra_color_stops', []):
             if s.as_pointer() == target_ptr:
@@ -497,14 +659,14 @@ def _on_proc_color_stop_change(stop, context):
                 return
 
 
-# â”€â”€â”€ Single Layer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─── Single Layer ─────────────────────────────────────────────────────────────
 
 class TLM_LayerItem(PropertyGroup):
     """Represents a single texture layer."""
 
     # Override the implicit PropertyGroup `name` so renames trigger:
     #   1. A debounced full rebuild (so `tlm_layer` tags on existing
-    #      nodes are refreshed â€” without this, the hot-update path
+    #      nodes are refreshed — without this, the hot-update path
     #      can no longer find any of this layer's nodes by the new
     #      name and silently goes stale until the user nudges any
     #      other property to force a manual rebuild).
@@ -520,11 +682,14 @@ class TLM_LayerItem(PropertyGroup):
 
     # NOTE: the previous name is shadowed in self["_name_prev"] (an ID
     # custom property, set/read via the dict-style API). No
-    # bpy.props annotation is needed â€” IDPropertyGroup supports
+    # bpy.props annotation is needed — IDPropertyGroup supports
     # arbitrary keys directly. See _on_name_change for the read/write.
 
     layer_type: EnumProperty(
         name="Type",
+        description="Layer kind: Paint (image canvas), Fill (flat colour), "
+                    "Procedural (generated pattern), Adjustment (remap below), "
+                    "Group (folder), Reference (reuse another layer)",
         items=LAYER_TYPES,
         default="PAINT",
         update=_on_layer_update,
@@ -566,7 +731,7 @@ class TLM_LayerItem(PropertyGroup):
 
     opacity: FloatProperty(
         name="Opacity",
-        description="Layer opacity â€” 0 is fully transparent, 1 is fully opaque",
+        description="Layer opacity — 0 is fully transparent, 1 is fully opaque",
         min=0.0, max=1.0,
         default=1.0,
         subtype='FACTOR',
@@ -581,7 +746,7 @@ class TLM_LayerItem(PropertyGroup):
         update=_make_hot_callback("blend_mode"),
     )
 
-    # â”€â”€ Per-channel blend mode overrides (Branching) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Per-channel blend mode overrides (Branching) ─────────────────────
     # Default INHERIT means "use the main blend_mode above". Setting any
     # other value lets a single layer have DIFFERENT blending per channel.
     # Example: a Voronoi layer that MULTIPLY-darkens base_color grooves
@@ -631,23 +796,28 @@ class TLM_LayerItem(PropertyGroup):
         update=_on_layer_update,
     )
 
-    # â”€â”€ Output channel routing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Output channel routing ──────────────────────────────────────────────
     # Each layer is pinned to ONE BSDF input among the 4 routable channels.
     # The non-routable channels (Normal / Emission / Transmission / Bump) are
     # multi-channel-friendly and continue to use their use_<channel> toggles
-    # â€” they can coexist with any output_channel value.
+    # — they can coexist with any output_channel value.
     # Removed the legacy 'AUTO' entry: it was confusing for new users (output
     # said "Auto" while the layer was actually routed to base color via an
     # implicit toggle path). .blend files saved with output_channel='AUTO'
     # silently fall back to 'BASE_COLOR' on load (see _layer_contributes_to).
     output_channel: EnumProperty(
         name="Output Channel",
-        description="Which Principled BSDF input this layer contributes to",
+        description="Which Principled BSDF input this layer's PRIMARY output drives. "
+                    "Additional channels can be enabled via the use_* toggles in "
+                    "PBR Channels — but the dropdown sets where the layer's "
+                    "procedural pattern / fill colour goes first",
         items=[
-            ('BASE_COLOR',    "Base Color",    "Send this layer to Base Color"),
-            ('ROUGHNESS',     "Roughness",     "Send this layer to Roughness"),
-            ('METALLIC',      "Metallic",      "Send this layer to Metallic"),
-            ('ALPHA',         "Alpha",         "Send this layer to Alpha (surface opacity)"),
+            ('BASE_COLOR',   "Base Color",   "Send this layer to Base Color (default)"),
+            ('ROUGHNESS',    "Roughness",    "Send this layer to Roughness — pattern drives surface shininess"),
+            ('METALLIC',     "Metallic",     "Send this layer to Metallic — pattern drives metallic mask"),
+            ('EMISSION',     "Emission",     "Send this layer to Emission Color — pattern drives glow colour (use Emission Strength for intensity)"),
+            ('TRANSMISSION', "Transmission", "Send this layer to Transmission Weight — pattern drives glass/clear-coat amount"),
+            ('ALPHA',        "Alpha",        "Send this layer to Alpha (surface opacity / cutout)"),
         ],
         default='BASE_COLOR',
         update=_on_layer_update,
@@ -672,7 +842,7 @@ class TLM_LayerItem(PropertyGroup):
         update=_make_hot_callback("fill_color"),
     )
 
-    # â”€â”€ Advanced combinable masks â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Advanced combinable masks ────────────────────────────────────────
     # Two composable mask slots (A and B) plus a combine operation.
     # Each slot can pull from IMAGE, AO (ambient occlusion) or POINTINESS
     # (geometry-derived curvature/edge detection).  This unlocks physical
@@ -689,20 +859,22 @@ class TLM_LayerItem(PropertyGroup):
         description="Where the primary mask value comes from",
         items=[
             ('IMAGE',      "Image",      "Use a painted image as mask",                    0),
-            ('AO',         "Ambient Occlusion", "Cavity mask from Ambient Occlusion â€” dark in recesses", 1),
-            ('POINTINESS', "Pointiness", "Geometry curvature â€” bright on convex edges, dark in concavities", 2),
+            ('AO',         "Ambient Occlusion", "Cavity mask from Ambient Occlusion — dark in recesses", 1),
+            ('POINTINESS', "Pointiness", "Geometry curvature — bright on convex edges, dark in concavities", 2),
             ('WIREFRAME',  "Wireframe",  "Real mesh-edge mask from Blender's Wireframe shader node. Follows the actual topology/triangulation of the mesh instead of a fake crack/grid pattern.", 30),
-            # â”€â”€ Smart generators (LIVE): physics-based masks with noise breakup, â”€â”€
-            # â”€â”€ evaluated every shader sample. For BAKED alternatives use the    â”€â”€
-            # â”€â”€ "Bake Smart Mask" button below.                                  â”€â”€
-            ('EDGE_WEAR',       "Edge Wear (Live)",       "Pointiness convex edges + noise breakup + sharpness â€” simulates worn-out edges (real-time)", 3),
-            ('DIRT',            "Dirt (Live)",            "Inverted AO Ã— noise grunge â€” accumulates in cavities with organic variation (real-time)",   4),
-            ('CURVATURE_SMART', "Curvature (Live)",       "Bipolar pointiness (both convex + concave) with threshold â€” highlights all edges (real-time)", 5),
-            # â”€â”€ View-angle source â”€â”€
-            ('FRESNEL',         "Fresnel",                "Viewing-angle gradient â€” 0 facing camera, 1 at grazing silhouette. Pair with a procedural's ColorRamp (color1/color2/contrast) to drive iridescent / oil-slick / bubble / hologram materials.", 6),
-            # â”€â”€ Light-angle source â€” for anime cel-shading and NdotL effects â”€â”€
-            ('NDOTL',           "Light Angle (NdotL)",    "Normal Ã— Sun direction (world space), remapped to [0,1]. 1 = surface fully lit, 0 = surface in shadow. Pair with proc_contrast=1.0 ColorRamp for HARD binary cel-shading (anime/toon look). Uses the first Sun light in the scene; rebuild material after moving the Sun.", 7),
-            ('NDOTH',           "Half-Vector (NdotH)",    "Normal Ã— Half-Vector between Sun and View. Peaks at the classic Phong specular highlight position (between sun and camera). Use for stylized toon specular highlights (anime sparkle), with proc_contrast=1.0 ColorRamp for a hard-edged shaped highlight.", 8),
+            # ── Smart generators (LIVE): physics-based masks with noise breakup, ──
+            # ── evaluated every shader sample. For BAKED alternatives use the    ──
+            # ── "Bake Smart Mask" button below.                                  ──
+            ('EDGE_WEAR',       "Edge Wear (Live)",       "Pointiness convex edges + noise breakup + sharpness — simulates worn-out edges (real-time)", 3),
+            ('DIRT',            "Dirt (Live)",            "Inverted AO × noise grunge — accumulates in cavities with organic variation (real-time)",   4),
+            ('CURVATURE_SMART', "Curvature (Live)",       "Bipolar pointiness (both convex + concave) with threshold — highlights all edges (real-time)", 5),
+            # ── View-angle source ──
+            ('FRESNEL',         "Fresnel",                "Viewing-angle gradient — 0 facing camera, 1 at grazing silhouette. Pair with a procedural's ColorRamp (color1/color2/contrast) to drive iridescent / oil-slick / bubble / hologram materials.", 6),
+            # ── Light-angle source — for anime cel-shading and NdotL effects ──
+            ('NDOTL',           "Light Angle (NdotL)",    "Normal × Sun direction (world space), remapped to [0,1]. 1 = surface fully lit, 0 = surface in shadow. Pair with proc_contrast=1.0 ColorRamp for HARD binary cel-shading (anime/toon look). Uses the first Sun light in the scene; rebuild material after moving the Sun.", 7),
+            ('NDOTH',           "Half-Vector (NdotH)",    "Normal × Half-Vector between Sun and View. Peaks at the classic Phong specular highlight position (between sun and camera). Use for stylized toon specular highlights (anime sparkle), with proc_contrast=1.0 ColorRamp for a hard-edged shaped highlight.", 8),
+            # ── Procedural-driven mask ──
+            ('VORONOI',         "Voronoi",                "Use a Voronoi pattern as the mask. Pick F1 (cell distance, peaks at cell centres) or DISTANCE_TO_EDGE (peaks at cell centres, 0 at edges = ideal for crack/joint masks). Pair with mask_invert to flip. Use the SAME mask_voronoi_scale as a layer's proc_scale to align the mask cells with the layer's pattern (e.g. cobblestone: stone colour Voronoi and dirt mask Voronoi share scale so dirt lands exactly between stones).", 9),
         ],
         default='IMAGE',
         update=_on_mask_source_change,
@@ -717,7 +889,7 @@ class TLM_LayerItem(PropertyGroup):
 
     mask_invert: BoolProperty(
         name="Invert Mask A",
-        description="Invert the primary mask (whiteâ†”black)",
+        description="Invert the primary mask (white↔black)",
         default=False,
         update=_on_layer_update,
     )
@@ -727,6 +899,41 @@ class TLM_LayerItem(PropertyGroup):
         description="Maximum distance for AO ray in mask A. Larger = broader cavities",
         default=0.5, min=0.01, max=10.0,
         update=_make_hot_callback("mask_ao_distance"),
+    )
+    # ── Voronoi mask (when mask_source = 'VORONOI') ──
+    mask_voronoi_feature: EnumProperty(
+        name="Voronoi Feature A",
+        description="Which Voronoi output drives the mask",
+        items=[
+            ('F1', "F1 (Distance to Cell)",
+             "Distance to nearest cell centre. 0 at centre, increases outward — peaks at cell edges. Use mask_invert for centre-peaks."),
+            ('DISTANCE_TO_EDGE', "Distance to Edge",
+             "Distance to the nearest cell edge. 0 at edges (cracks), peaks at cell centres. Ideal for cobblestone joints — invert for crack-only mask."),
+        ],
+        default='DISTANCE_TO_EDGE',
+        update=_on_layer_update,
+    )
+    mask_voronoi_scale: FloatProperty(
+        name="Voronoi Scale A",
+        description="Cell density of the Voronoi mask. Match the scale of a layer's proc_scale to align mask cells with the layer pattern (cobblestone trick)",
+        default=10.0, min=0.1, max=200.0,
+        update=_make_hot_callback("mask_voronoi_scale"),
+    )
+    mask_voronoi_randomness: FloatProperty(
+        name="Voronoi Randomness A",
+        description="Cell-centre jitter. 0 = grid, 1 = fully scattered",
+        default=1.0, min=0.0, max=1.0,
+        update=_make_hot_callback("mask_voronoi_randomness"),
+    )
+    mask_voronoi_edge_width: FloatProperty(
+        name="Voronoi Edge Width A",
+        description="How far the edge zone of the DTE mask extends INTO the cell (with mask_invert). "
+                    "1.0 = full smooth gradient edge→centre. Lower values (~0.3) make the mask hit "
+                    "saturation closer to the edge, producing thinner crack-only bands. Higher values "
+                    "(>1.0) would extend beyond cell boundaries (clamped). For cobblestone dirt "
+                    "filling broad areas between stones, use 1.0; for thin crack-only ink, use 0.3.",
+        default=1.0, min=0.05, max=2.0,
+        update=_make_hot_callback("mask_voronoi_edge_width"),
     )
     mask_wireframe_size: FloatProperty(
         name="Wireframe Size",
@@ -741,7 +948,7 @@ class TLM_LayerItem(PropertyGroup):
         update=_make_hot_callback("mask_wireframe_use_pixel_size"),
     )
 
-    # â”€â”€ Anime / toon tint strength â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Anime / toon tint strength ──────────────────────────────────────
     # Multiplies the layer's output color by the first Sun light's color,
     # preserving the base value (only hue+saturation transfer). Implements
     # the "Tint Strength" parameter from anime shaders (e.g. Genshin) where
@@ -767,12 +974,12 @@ class TLM_LayerItem(PropertyGroup):
         description="Index of refraction when mask_source = FRESNEL. "
                     "Low (1.05-1.20) = wide rim covering most viewing angles; "
                     "high (2.0-5.0) = narrow rim only at grazing silhouette. "
-                    "Glass-like â‰ˆ 1.45, water â‰ˆ 1.33, diamond â‰ˆ 2.42",
+                    "Glass-like ≈ 1.45, water ≈ 1.33, diamond ≈ 2.42",
         default=1.45, min=1.0, max=5.0,
         update=_make_hot_callback("mask_fresnel_ior"),
     )
 
-    # â”€â”€ Secondary mask (combines with primary) â”€â”€
+    # ── Secondary mask (combines with primary) ──
     use_mask_b: BoolProperty(
         name="Use Secondary Mask",
         description="Enable a second mask combined with the first (AND/OR/etc.)",
@@ -786,14 +993,15 @@ class TLM_LayerItem(PropertyGroup):
         items=[
             ('IMAGE',      "Image",      "Use a painted image as mask",                    0),
             ('AO',         "Ambient Occlusion", "Cavity mask from Ambient Occlusion",                   1),
-            ('POINTINESS', "Pointiness", "Geometry curvature â€” edges vs recesses",                     2),
+            ('POINTINESS', "Pointiness", "Geometry curvature — edges vs recesses",                     2),
             ('WIREFRAME',  "Wireframe",  "Real mesh-edge mask from Blender's Wireframe shader node", 30),
             ('EDGE_WEAR',       "Edge Wear (Smart)",       "Pointiness convex + noise breakup",                                  3),
-            ('DIRT',            "Dirt (Smart)",            "Inverted AO Ã— noise grunge",                                         4),
-            ('CURVATURE_SMART', "Curvature (Smart)",       "Bipolar pointiness â€” both convex + concave edges",                   5),
-            ('FRESNEL',         "Fresnel",                 "Viewing-angle gradient â€” 0 facing, 1 grazing",                       6),
-            ('NDOTL',           "Light Angle (NdotL)",     "Normal Â· Sun direction in [0,1] â€” for anime/toon shading",            7),
-            ('NDOTH',           "Half-Vector (NdotH)",     "Normal Â· Half-Vector (sun+view) â€” for toon specular highlights",       8),
+            ('DIRT',            "Dirt (Smart)",            "Inverted AO × noise grunge",                                         4),
+            ('CURVATURE_SMART', "Curvature (Smart)",       "Bipolar pointiness — both convex + concave edges",                   5),
+            ('FRESNEL',         "Fresnel",                 "Viewing-angle gradient — 0 facing, 1 grazing",                       6),
+            ('NDOTL',           "Light Angle (NdotL)",     "Normal · Sun direction in [0,1] — for anime/toon shading",            7),
+            ('NDOTH',           "Half-Vector (NdotH)",     "Normal · Half-Vector (sun+view) — for toon specular highlights",       8),
+            ('VORONOI',         "Voronoi",                 "Voronoi pattern mask (see Mask A description for details)",         9),
         ],
         default='POINTINESS',
         update=_on_mask_source_change,
@@ -819,18 +1027,46 @@ class TLM_LayerItem(PropertyGroup):
         default=0.5, min=0.01, max=10.0,
         update=_make_hot_callback("mask_ao_distance_b"),
     )
+    mask_voronoi_feature_b: EnumProperty(
+        name="Voronoi Feature B",
+        description="Which Voronoi output drives the secondary mask",
+        items=[
+            ('F1', "F1 (Distance to Cell)", "0 at centre, peaks at edges"),
+            ('DISTANCE_TO_EDGE', "Distance to Edge", "0 at edges, peaks at centres"),
+        ],
+        default='DISTANCE_TO_EDGE',
+        update=_on_layer_update,
+    )
+    mask_voronoi_scale_b: FloatProperty(
+        name="Voronoi Scale B",
+        description="Cell density of the secondary Voronoi mask",
+        default=10.0, min=0.1, max=200.0,
+        update=_make_hot_callback("mask_voronoi_scale_b"),
+    )
+    mask_voronoi_randomness_b: FloatProperty(
+        name="Voronoi Randomness B",
+        description="Cell-centre jitter on the secondary Voronoi mask",
+        default=1.0, min=0.0, max=1.0,
+        update=_make_hot_callback("mask_voronoi_randomness_b"),
+    )
+    mask_voronoi_edge_width_b: FloatProperty(
+        name="Voronoi Edge Width B",
+        description="Edge zone width for the secondary Voronoi mask (see slot A description)",
+        default=1.0, min=0.05, max=2.0,
+        update=_make_hot_callback("mask_voronoi_edge_width_b"),
+    )
 
     mask_combine: EnumProperty(
         name="Combine",
         description="How to combine mask A with mask B",
         items=[
-            ('MULTIPLY',  "AND (Multiply)", "Both masks must be bright â†’ mask AND",         0),
-            ('MINIMUM',   "AND (Strict)",   "Take the darker of A and B â†’ strict AND",      1),
-            ('MAXIMUM',   "OR (Lighten)",   "Take the brighter of A and B â†’ mask OR",       2),
-            ('ADD',       "Add",            "Sum both masks (clamped) â€” brightens result",  3),
-            ('SUBTRACT',  "Subtract",       "A minus B â€” removes B regions from A",         4),
-            ('SCREEN',    "Screen",         "1-(1-A)(1-B) â€” softer OR, less clipping",      5),
-            ('DIFFERENCE',"Difference",     "|A-B| â€” mask XOR where they disagree",         6),
+            ('MULTIPLY',  "AND (Multiply)", "Both masks must be bright → mask AND",         0),
+            ('MINIMUM',   "AND (Strict)",   "Take the darker of A and B → strict AND",      1),
+            ('MAXIMUM',   "OR (Lighten)",   "Take the brighter of A and B → mask OR",       2),
+            ('ADD',       "Add",            "Sum both masks (clamped) — brightens result",  3),
+            ('SUBTRACT',  "Subtract",       "A minus B — removes B regions from A",         4),
+            ('SCREEN',    "Screen",         "1-(1-A)(1-B) — softer OR, less clipping",      5),
+            ('DIFFERENCE',"Difference",     "|A-B| — mask XOR where they disagree",         6),
         ],
         default='MULTIPLY',
         update=_on_layer_update,
@@ -843,7 +1079,7 @@ class TLM_LayerItem(PropertyGroup):
         update=_make_hot_callback("mask_contrast"),
     )
 
-    # â”€â”€ Mask refinement: Levels + Softness â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Mask refinement: Levels + Softness ───────────────────────────────
     # Levels: remap input range, apply gamma, remap output range
     use_mask_levels: BoolProperty(
         name="Mask Levels",
@@ -865,19 +1101,19 @@ class TLM_LayerItem(PropertyGroup):
     )
     mask_levels_gamma: FloatProperty(
         name="Gamma",
-        description="Midpoint bias â€” <1 brightens midtones, >1 darkens them",
+        description="Midpoint bias — <1 brightens midtones, >1 darkens them",
         default=1.0, min=0.05, max=10.0,
         update=_make_hot_callback("mask_levels_gamma"),
     )
     mask_levels_out_min: FloatProperty(
         name="Out Min",
-        description="Output floor â€” mask will never be darker than this",
+        description="Output floor — mask will never be darker than this",
         default=0.0, min=0.0, max=1.0,
         update=_make_hot_callback("mask_levels_out_min"),
     )
     mask_levels_out_max: FloatProperty(
         name="Out Max",
-        description="Output ceiling â€” mask will never be brighter than this",
+        description="Output ceiling — mask will never be brighter than this",
         default=1.0, min=0.0, max=1.0,
         update=_make_hot_callback("mask_levels_out_max"),
     )
@@ -899,7 +1135,7 @@ class TLM_LayerItem(PropertyGroup):
         update=_make_hot_callback("mask_blur"),
     )
 
-    # â”€â”€ Smart generator parameters (EDGE_WEAR / DIRT / CURVATURE_SMART) â”€â”€
+    # ── Smart generator parameters (EDGE_WEAR / DIRT / CURVATURE_SMART) ──
     # These are shared across the generator mask sources below.
     mask_gen_intensity: FloatProperty(
         name="Intensity",
@@ -909,7 +1145,7 @@ class TLM_LayerItem(PropertyGroup):
     )
     mask_gen_breakup: FloatProperty(
         name="Breakup",
-        description="Organic noise variation applied to the generator â€” 0 = clean, 1 = very broken",
+        description="Organic noise variation applied to the generator — 0 = clean, 1 = very broken",
         default=0.3, min=0.0, max=1.0,
         update=_on_layer_update,
     )
@@ -926,7 +1162,7 @@ class TLM_LayerItem(PropertyGroup):
         update=_on_layer_update,
     )
 
-    # Clipping mask â€” clip this layer to the alpha of the layer directly below
+    # Clipping mask — clip this layer to the alpha of the layer directly below
     use_clipping_mask: BoolProperty(
         name="Clipping Mask",
         description="Show this layer only where the layer directly below has alpha (alpha-clipped to the layer underneath)",
@@ -947,7 +1183,7 @@ class TLM_LayerItem(PropertyGroup):
         default="",
     )
 
-    # â”€â”€ Image Texture mapping (paint + PBR image layers) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Image Texture mapping (paint + PBR image layers) ────────────────────
     # Applied to ShaderNodeTexImage's Vector input via a ShaderNodeMapping
     # node. Default values (loc=0, rot=0, scale=1) trigger no Mapping node,
     # keeping the node graph minimal for layers that don't need transforms.
@@ -955,7 +1191,7 @@ class TLM_LayerItem(PropertyGroup):
         name="Extension",
         description="How the image is sampled outside its [0,1] UV range",
         items=[
-            ('CLIP',   "Clip",   "Clamp to image edge â€” no repetition (decals, badges)"),
+            ('CLIP',   "Clip",   "Clamp to image edge — no repetition (decals, badges)"),
             ('REPEAT', "Repeat", "Tile the image (seamless textures)"),
             ('EXTEND', "Extend", "Stretch the edge pixels outward"),
             ('MIRROR', "Mirror", "Mirror at the boundary (no visible seam)"),
@@ -964,7 +1200,7 @@ class TLM_LayerItem(PropertyGroup):
         update=_on_layer_update,
     )
 
-    # Texture filter â€” how the sampler picks/blends pixels at sub-texel
+    # Texture filter — how the sampler picks/blends pixels at sub-texel
     # locations. 'Linear' is the sane default; 'Closest' gives a pixel-art
     # look; 'Cubic' is smoother for normal maps & smooth-shaded surfaces;
     # 'Smart' is Cycles-only and adaptive (falls back to Linear in Eevee).
@@ -972,16 +1208,16 @@ class TLM_LayerItem(PropertyGroup):
         name="Interpolation",
         description="Pixel sampling filter used when the image is magnified or minified",
         items=[
-            ('Linear',  "Linear",  "Standard bilinear filtering â€” smooth default"),
+            ('Linear',  "Linear",  "Standard bilinear filtering — smooth default"),
             ('Cubic',   "Cubic",   "Smoother filtering (good for normal maps and gradients)"),
-            ('Closest', "Closest", "Nearest-neighbour â€” no blending (pixel-art / 1:1 stamps)"),
-            ('Smart',   "Smart",   "Cycles only â€” adaptive between Cubic and Linear"),
+            ('Closest', "Closest", "Nearest-neighbour — no blending (pixel-art / 1:1 stamps)"),
+            ('Smart',   "Smart",   "Cycles only — adaptive between Cubic and Linear"),
         ],
         default='Linear',
         update=_on_layer_update,
     )
 
-    # Projection â€” how the UV / vector input is interpreted to sample
+    # Projection — how the UV / vector input is interpreted to sample
     # the image. 'Flat' is the typical UV-mapped case; 'Box' is
     # triplanar built into Blender (replaces our custom triplanar);
     # 'Sphere' and 'Tube' are for HDR / panoramic images.
@@ -990,15 +1226,15 @@ class TLM_LayerItem(PropertyGroup):
         description="How the image is projected onto the surface",
         items=[
             ('FLAT',   "Flat",   "Standard UV mapping (default)"),
-            ('BOX',    "Box",    "Triplanar â€” sample along the three world axes and blend"),
-            ('SPHERE', "Sphere", "Equirectangular wrap (HDR / 360Â°)"),
+            ('BOX',    "Box",    "Triplanar — sample along the three world axes and blend"),
+            ('SPHERE', "Sphere", "Equirectangular wrap (HDR / 360°)"),
             ('TUBE',   "Tube",   "Cylindrical wrap (labels around bottles, etc.)"),
         ],
         default='FLAT',
         update=_on_layer_update,
     )
 
-    # Box projection blend distance â€” only meaningful when projection
+    # Box projection blend distance — only meaningful when projection
     # is 'BOX'. Width in UV units of the blend zone between adjacent
     # world-axis projections. 0 = hard seam, 1 = fully blended.
     paint_projection_blend: FloatProperty(
@@ -1008,14 +1244,14 @@ class TLM_LayerItem(PropertyGroup):
         update=_make_hot_callback("paint_projection_blend"),
     )
 
-    # Image source â€” what kind of image data is sampled. 'Single Image'
+    # Image source — what kind of image data is sampled. 'Single Image'
     # is the standard still texture. 'Generated' lets the image's
     # generated_color show through. 'Sequence' and 'Movie' are for
     # animated textures (frame range + offset + duration come from
     # the image datablock itself, this just toggles the mode).
     paint_source: EnumProperty(
         name="Source",
-        description="Image source type â€” what kind of pixel data is sampled",
+        description="Image source type — what kind of pixel data is sampled",
         items=[
             ('FILE',           "Single Image", "Still image from a file"),
             ('GENERATED',      "Generated",    "Procedurally generated (uses the image's generated_color)"),
@@ -1026,7 +1262,7 @@ class TLM_LayerItem(PropertyGroup):
         update=_on_layer_update,
     )
 
-    # NOTE: paint_location_* are in UV space â€” 1.0 means "shift by exactly
+    # NOTE: paint_location_* are in UV space — 1.0 means "shift by exactly
     # one image width". soft_min/soft_max bound slider drag to [-2, +2] so
     # the user can't accidentally fling the image off the visible UV range
     # (which would make the layer "disappear" with extension=CLIP). Manual
@@ -1046,43 +1282,72 @@ class TLM_LayerItem(PropertyGroup):
     paint_location_z: FloatProperty(
         name="Location Z", default=0.0,
         soft_min=-2.0, soft_max=2.0, step=1, precision=3,
-        description="Z shift â€” used only with 3D textures or rotated UVs",
+        description="Z shift — used only with 3D textures or rotated UVs",
         update=_make_hot_callback("paint_location_z"),
     )
     paint_rotation_x: FloatProperty(
         name="Rotation X", default=0.0, subtype='ANGLE',
-        soft_min=-6.2832, soft_max=6.2832,  # Â±2Ï€
+        soft_min=-6.2832, soft_max=6.2832,  # ±2π
+        description="Rotate the UV/image around the X axis (radians)",
         update=_make_hot_callback("paint_rotation_x"),
     )
     paint_rotation_y: FloatProperty(
         name="Rotation Y", default=0.0, subtype='ANGLE',
         soft_min=-6.2832, soft_max=6.2832,
+        description="Rotate the UV/image around the Y axis (radians)",
         update=_make_hot_callback("paint_rotation_y"),
     )
     paint_rotation_z: FloatProperty(
         name="Rotation Z", default=0.0, subtype='ANGLE',
         soft_min=-6.2832, soft_max=6.2832,
+        description="Rotate the UV/image around the Z axis (radians) — main rotation for 2D paint",
         update=_make_hot_callback("paint_rotation_z"),
     )
     paint_scale_x: FloatProperty(
         name="Scale X", default=1.0, soft_min=0.01, soft_max=20.0,
         step=10, precision=3,
+        description="UV scale along X. >1 zooms out (tiling); <1 zooms in",
         update=_make_hot_callback("paint_scale_x"),
     )
     paint_scale_y: FloatProperty(
         name="Scale Y", default=1.0, soft_min=0.01, soft_max=20.0,
         step=10, precision=3,
+        description="UV scale along Y. >1 zooms out (tiling); <1 zooms in",
         update=_make_hot_callback("paint_scale_y"),
     )
     paint_scale_z: FloatProperty(
         name="Scale Z", default=1.0, soft_min=0.01, soft_max=20.0,
         step=10, precision=3,
+        description="Z scale — only meaningful with Box/Sphere/Tube projections",
         update=_make_hot_callback("paint_scale_z"),
     )
 
-    # â”€â”€ Reference Layer: reuses another layer's pattern output â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Pixelate (LED screen / pixel-art / mosaic) ──────────────────────────
+    # Snaps the image sampling coordinate to a regular grid before reading,
+    # so each cell shows one flat colour (true pixelation) instead of the
+    # continuous image. The defining ingredient of an LED-matrix look:
+    # pair with a DOTS procedural (output Alpha) + use_emission_output and
+    # each LED dot carries one quantised colour from the image.
+    paint_pixelate: BoolProperty(
+        name="Pixelate",
+        description="Quantise the image into a grid of flat-colour cells "
+                    "(pixel-art / LED-screen / mosaic). Snaps the sampling "
+                    "UV to a grid and samples each cell's centre",
+        default=False,
+        update=_on_layer_update,
+    )
+    paint_pixelate_size: IntProperty(
+        name="Pixelate Cells",
+        description="Number of pixel cells across the 0..1 UV range. "
+                    "Higher = finer pixels / more LEDs. Match this to a "
+                    "DOTS procedural's scale to align dots with colour cells",
+        default=32, min=1, soft_max=256,
+        update=_on_layer_update,
+    )
+
+    # ── Reference Layer: reuses another layer's pattern output ──────────────
     # When layer_type == 'REFERENCE', this layer doesn't generate its own
-    # pattern â€” it fetches the color/alpha outputs of the referenced layer
+    # pattern — it fetches the color/alpha outputs of the referenced layer
     # and blends them with this layer's OWN blend_mode, opacity, mask, and
     # per-channel overrides. Enables "one Voronoi, many behaviors" workflows.
     reference_layer_name: StringProperty(
@@ -1092,7 +1357,36 @@ class TLM_LayerItem(PropertyGroup):
         update=_on_layer_update,
     )
 
-    # â”€â”€ PBR Channels â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    reference_mode: EnumProperty(
+        name="Reference Mode",
+        description=(
+            "How this Reference layer reuses the source's pattern.\n\n"
+            "COMPOSED (default) — reuses the source's COMPLETE post-ColorRamp "
+            "output. The Reference applies its own blend/opacity/mask/channels "
+            "on top of the finished pattern. Use for: pattern duplication "
+            "across channels, alpha-cutout reuse, simple re-routing.\n\n"
+            "RAW_PATTERN — taps the source procedural's UNDERLYING value "
+            "BEFORE its ColorRamp is applied (raw gradient FAC, voronoi "
+            "distance, fresnel angle, noise FAC). The Reference then applies "
+            "its OWN ColorRamp and routing. Lets a SINGLE source procedural "
+            "drive MULTIPLE channels with DIFFERENT colour remappings — burn "
+            "dissolve (alpha + emission band), cel-shading (shadow bands + "
+            "specular), iridescent (hue ramp + roughness), worn metal "
+            "(edge colour + edge roughness). Only meaningful when the source "
+            "is a PROCEDURAL."
+        ),
+        items=[
+            ('COMPOSED',    "Composed Output",
+             "Reuse the source's finished pattern (post-ColorRamp)"),
+            ('RAW_PATTERN', "Raw Pattern",
+             "Reuse the source's underlying value pre-ColorRamp; apply own "
+             "remapping (procedural sources only)"),
+        ],
+        default='COMPOSED',
+        update=_on_layer_update,
+    )
+
+    # ── PBR Channels ─────────────────────────────────────────────────────────
     # Each layer can independently paint/fill additional PBR channels.
     # All channels are opt-in: disabling them leaves the channel untouched.
 
@@ -1175,7 +1469,7 @@ class TLM_LayerItem(PropertyGroup):
         update=_make_hot_callback("transmission_fill"),
     )
 
-    # Alpha (BSDF Alpha input â€” controls overall surface opacity)
+    # Alpha (BSDF Alpha input — controls overall surface opacity)
     use_alpha: BoolProperty(name="Alpha",
         description="Enable alpha channel for this layer (drives BSDF Alpha for surface opacity / cutout)",
         default=False, update=_on_layer_update)
@@ -1189,7 +1483,7 @@ class TLM_LayerItem(PropertyGroup):
         update=_make_hot_callback("alpha_fill"),
     )
 
-    # Bump â€” derived from the layer's own Fac signal (Proc) or image (Paint)
+    # Bump — derived from the layer's own Fac signal (Proc) or image (Paint)
     use_bump: BoolProperty(
         name="Bump",
         description="Generate bump/surface detail from this layer's texture signal",
@@ -1207,27 +1501,97 @@ class TLM_LayerItem(PropertyGroup):
         update=_make_hot_callback("bump_distance"),
     )
 
-    # UI state â€” collapsible PBR section
+    # ── True geometric displacement ──
+    # Layers with use_displacement=True contribute a HEIGHT signal that
+    # gets summed across the stack and wired to Material Output.Displacement.
+    # Unlike Bump (which only perturbs the shading normal — silhouette
+    # stays smooth), real Displacement moves the actual mesh vertices via
+    # Cycles' adaptive subdivision feature. Required for chunky materials
+    # like rocky terrain, brick walls, sci-fi panels with deep grooves —
+    # anywhere the SILHOUETTE needs to break, not just the shading.
+    use_displacement: BoolProperty(
+        name="Displacement",
+        description="Contribute this layer's texture to the material's "
+                    "displacement height. Cumulative — multiple layers' "
+                    "heights sum together exactly like Bump. Activating "
+                    "this auto-enables the material-level Displacement "
+                    "master (in Composite) if it was off.",
+        default=False,
+        update=_on_layer_use_displacement_change,
+    )
+    displacement_scale: FloatProperty(
+        name="Displacement Scale",
+        description="Per-layer height contribution before the material-level "
+                    "displacement_strength multiplier. Positive pushes outward, "
+                    "negative pushes inward. 1.0 = full layer height, "
+                    "0.5 = half, 0.0 = no contribution.",
+        default=1.0, min=-5.0, max=5.0,
+        update=_make_hot_callback("displacement_scale"),
+    )
+
+    # UI state — collapsible PBR section
     show_pbr_channels: BoolProperty(
         name="Show PBR Channels",
+        description="Expand the PBR Channels section: Bump + per-channel "
+                    "(Roughness / Metallic / Normal / Emission / Transmission / "
+                    "Alpha) toggles and their image/fill controls",
         default=False,
     )
-    # UI state â€” collapsible Branching (per-channel blend overrides) section
+    # UI state — collapsible Branching (per-channel blend overrides) section
     show_blend_overrides: BoolProperty(
         name="Show Branching",
         description="Expand per-channel blend mode overrides",
         default=False,
     )
-    # UI state â€” collapsible Mask section (only shown when use_mask=True)
+    # UI state — collapsible Mask section (only shown when use_mask=True)
     show_mask_section: BoolProperty(
         name="Show Mask Details",
         description="Expand the mask configuration (sources, refinement, etc.)",
         default=True,
     )
-    # UI state â€” collapsible Image Mapping section
+    # UI state — collapsible Image Mapping section
     show_paint_mapping: BoolProperty(
         name="Show Image Mapping",
         description="Expand Extension + Location/Rotation/Scale for image textures",
+        default=False,
+    )
+    # UI state — collapsible sub-sections of a PROCEDURAL layer's panel.
+    # Defaults chosen so the most frequently tweaked controls are open
+    # (Color + Pattern) while the verbose Mapping block is folded.
+    show_proc_color_section: BoolProperty(
+        name="Show Color Ramp",
+        description="Expand the Color Ramp section: Color 1/2, extra stops, "
+                    "Mode + Interpolation, Manual Stops toggle, Contrast/Center",
+        default=True,
+    )
+    show_proc_pattern_section: BoolProperty(
+        name="Show Pattern Params",
+        description="Expand per-procedural pattern parameters "
+                    "(Detail / Roughness / Feature / Wave Profile / etc)",
+        default=True,
+    )
+    show_proc_mapping_section: BoolProperty(
+        name="Show Mapping",
+        description="Expand the Mapping block: Mapping Type, Location/Rotation/Scale, "
+                    "Coordinate preset/type, Transform, Vector Distortion",
+        default=False,
+    )
+    # UI state — collapsible Mask Refinement section (Levels + Softness + Blur).
+    # Collapsed by default since refinement is advanced — most users set up the
+    # mask source and don't need to remap Levels.
+    show_mask_refinement: BoolProperty(
+        name="Show Mask Refinement",
+        description="Expand Levels (Input/Output/Gamma) + Softness + Blur controls",
+        default=False,
+    )
+    # UI state — collapsible "Surface Effects" section.
+    # Groups Fresnel Rim (per-layer), Displacement (per-layer toggle + shared
+    # material-level shortcut) and Volume (material-level shortcut) into one
+    # collapsible so the top-level layer panel stays readable. Collapsed by
+    # default since these are advanced — most layers don't use them.
+    show_surface_effects: BoolProperty(
+        name="Show Surface Effects",
+        description="Expand Fresnel Rim + Displacement + Volume controls",
         default=False,
     )
 
@@ -1255,7 +1619,7 @@ class TLM_LayerItem(PropertyGroup):
     def alpha_image(self):
         return bpy.data.images.get(self.alpha_image_name)
 
-    # â”€â”€ Group / folder properties â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Group / folder properties ─────────────────────────────────────────────
 
     # Name of the parent GROUP layer (empty string = top-level, no parent)
     group_name: StringProperty(
@@ -1271,15 +1635,19 @@ class TLM_LayerItem(PropertyGroup):
         default=False,
     )
 
-    # â”€â”€ Adjustment layer properties â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Adjustment layer properties ───────────────────────────────────────────
 
     adj_type: EnumProperty(
         name="Adjustment",
+        description="Which remap to apply on the layers below: Hue/Saturation, "
+                    "Brightness/Contrast, Levels (in/out remap + gamma), or "
+                    "Color Balance (Lift/Gamma/Gain cinematic grading)",
         items=[
             ('HUE_SAT',        "Hue/Saturation",    "Adjust hue, saturation and value",             0),
             ('BRIGHT_CONTRAST', "Brightness/Contrast","Adjust brightness and contrast",              1),
             ('LEVELS',         "Levels",             "Remap input/output tonal range",               2),
             ('COLOR_BALANCE',  "Color Balance",      "Lift / Gamma / Gain (cinematic grading)",      3),
+            ('GRADIENT_MAP',   "Gradient Map",       "Recolour by luminance through the Color Ramp (Photoshop-style)", 4),
         ],
         default='HUE_SAT',
         update=_on_layer_update,
@@ -1287,17 +1655,17 @@ class TLM_LayerItem(PropertyGroup):
 
     # Hue/Saturation/Value
     adj_hue: FloatProperty(
-        name="Hue", description="Rotate hue â€” 0.5 is no change",
+        name="Hue", description="Rotate hue — 0.5 is no change",
         default=0.5, min=0.0, max=1.0, subtype='FACTOR',
         update=_make_hot_callback("adj_hue"),
     )
     adj_saturation: FloatProperty(
-        name="Saturation", description="Saturation multiplier â€” 1.0 is no change, 0 is greyscale",
+        name="Saturation", description="Saturation multiplier — 1.0 is no change, 0 is greyscale",
         default=1.0, min=0.0, max=2.0,
         update=_make_hot_callback("adj_saturation"),
     )
     adj_value: FloatProperty(
-        name="Value", description="Value/brightness multiplier â€” 1.0 is no change",
+        name="Value", description="Value/brightness multiplier — 1.0 is no change",
         default=1.0, min=0.0, max=2.0,
         update=_make_hot_callback("adj_value"),
     )
@@ -1358,37 +1726,46 @@ class TLM_LayerItem(PropertyGroup):
         default=(1.0, 1.0, 1.0), update=_make_hot_callback("adj_gain"),
     )
 
-    # â”€â”€ Procedural layer properties â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Procedural layer properties ───────────────────────────────────────────
 
     proc_type: EnumProperty(
         name="Type",
+        description="Procedural pattern generator. Each type has its own "
+                    "Pattern Params (Detail / Roughness / Feature / etc) and "
+                    "is composited via a shared ColorRamp for colour output",
         # Alphabetical order by display label so the dropdown is
         # scannable. Numeric identifiers are kept stable across versions
         # (changing them would re-shuffle existing presets/.tlm files).
         items=[
             ('BRICK',       "Brick",       "Brick / tile pattern with offset, mortar, color variation", 7),
             ('CHECKER',     "Checker",     "Alternating checkerboard pattern",                     5),
-            ('CRACKS',      "Cracks",      "Organic crack / vein network from Voronoi distance-to-edge â€” marble veins, cracked ceramic, ice, lava fractures", 15),
-            ('DOTS',        "Dots",        "Packed circular dots in a jittered grid â€” paint splatter, polkadots, freckles, perforations", 13),
-            ('FRESNEL',     "Fresnel Gradient", "View-angle gradient: fac=0 facing camera, fac=1 at grazing silhouette. IOR controlled by proc_fresnel_ior. Pair Color1/Color2 with contrast+ramp_center for iridescent / oil-slick / bubble / hologram materials â€” the ColorRamp maps the angular sweep to a smooth or banded multi-colour rainbow.", 16),
-            ('GABOR',       "Gabor",       "Anisotropic Gabor noise â€” directional streaks for brushed metal, fibers, woven fabric, scratches", 12),
+            ('CRACKS',      "Cracks",      "Organic crack / vein network from Voronoi distance-to-edge — marble veins, cracked ceramic, ice, lava fractures", 15),
+            ('DOTS',        "Dots",        "Packed circular dots in a jittered grid — paint splatter, polkadots, freckles, perforations", 13),
+            ('FRESNEL',     "Fresnel Gradient", "View-angle gradient: fac=0 facing camera, fac=1 at grazing silhouette. IOR controlled by proc_fresnel_ior. Pair Color1/Color2 with contrast+ramp_center for iridescent / oil-slick / bubble / hologram materials — the ColorRamp maps the angular sweep to a smooth or banded multi-colour rainbow.", 16),
+            ('GABOR',       "Gabor",       "Anisotropic Gabor noise — directional streaks for brushed metal, fibers, woven fabric, scratches", 12),
             ('GRADIENT',    "Gradient",    "Linear, radial, quadratic or spherical gradient",      3),
             ('HEX_GRID',    "Hex Grid",    "Honeycomb / cell grid using Voronoi distance-to-edge", 11),
             ('MAGIC',       "Magic",       "Kaleidoscopic colored swirl pattern",                  8),
-            ('MARBLE',      "Marble",      "Wave bands distorted by noise â€” marble/veined stone", 6),
+            ('MARBLE',      "Marble",      "Wave bands distorted by noise — marble/veined stone", 6),
             ('MUSGRAVE',    "Musgrave",    "Fractal noise (Multifractal, Ridged, etc.)",           4),
             ('NOISE',       "Noise",       "Perlin/FBM noise",                                    0),
-            ('RIDGED',      "Ridged",      "Sharp inverted-ridge fractal â€” mountain crests, rock veins, lightning, crackle", 14),
+            ('RIDGED',      "Ridged",      "Sharp inverted-ridge fractal — mountain crests, rock veins, lightning, crackle", 14),
             ('STRIPES',     "Stripes",     "Hard-edged stripes (X, Y or diagonal) with adjustable width and sharpness", 10),
             ('VORONOI',     "Voronoi",     "Cell/Worley noise",                                   1),
             ('WAVE',        "Wave",        "Sine wave bands or rings",                             2),
-            ('WHITE_NOISE', "White Noise", "Per-pixel random â€” fine grain, dust, dithering",       9),
+            ('WHITE_NOISE', "White Noise", "Per-pixel random — fine grain, dust, dithering",       9),
+            ('WOOD',        "Wood",        "Concentric growth rings with organic distortion + fine grain — planks, boards, tree-ring cross-sections", 17),
+            ('SCRATCHES',   "Scratches",   "Anisotropic fine scratches — worn metal, scratched glass, brushed plastic, used surfaces", 20),
+            ('CAUSTICS',    "Caustics",    "Water-caustics / interference web — pool light, oil film, holographic shimmer", 22),
+            ('WEAVE',       "Weave",       "Over-under woven threads — fabric, carpet, wicker, mesh, canvas", 19),
+            ('TILES',       "Tiles",       "Tile generator — Running Bond / Stack layout, per-tile random shade, mortar lines (use UV coords)", 18),
+            ('SCATTER',     "Scatter",     "Texture-bombing scatter — random dots/spots over Voronoi cells: freckles, rivets, gravel, anti-tiling break-up", 23),
         ],
         default='NOISE',
         update=_on_layer_update,
     )
 
-    # â”€â”€ Brick-specific parameters â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Brick-specific parameters ───────────────────────────────────────
     # Stock ShaderNodeTexBrick exposes mortar size/smooth/bias and
     # squash/squash_frequency plus offset/offset_frequency. Mortar color
     # uses a third color (we re-use proc_color3 for it when active).
@@ -1447,10 +1824,105 @@ class TLM_LayerItem(PropertyGroup):
         update=_make_hot_callback("proc_brick_row_height"),
     )
 
-    # â”€â”€ Magic-specific parameters â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Wood-specific parameters ────────────────────────────────────────
+    proc_wood_distortion: FloatProperty(
+        name="Ring Distortion",
+        description="Organic wobble of the growth rings (0 = perfect circles, "
+                    "higher = natural irregular wood)",
+        default=1.5, min=0.0, max=20.0,
+        update=_on_layer_update,
+    )
+    proc_wood_grain: FloatProperty(
+        name="Grain",
+        description="Amount of fine grain streaks layered over the rings",
+        default=0.12, min=0.0, max=1.0, subtype='FACTOR',
+        update=_on_layer_update,
+    )
+
+    # ── Scratches-specific parameters ───────────────────────────────────
+    proc_scratches_angle: FloatProperty(
+        name="Angle",
+        description="Direction of the scratch streaks in degrees",
+        default=25.0, min=-360.0, max=360.0,
+        update=_on_layer_update,
+    )
+    proc_scratches_aniso: FloatProperty(
+        name="Anisotropy",
+        description="How elongated the streaks are (higher = longer, finer scratches)",
+        default=8.0, min=1.0, max=50.0,
+        update=_on_layer_update,
+    )
+    proc_scratches_width: FloatProperty(
+        name="Width",
+        description="Thickness / density of the scratch lines",
+        default=0.12, min=0.01, max=0.6, subtype='FACTOR',
+        update=_on_layer_update,
+    )
+
+    # ── Caustics-specific parameter ─────────────────────────────────────
+    proc_caustics_freq: FloatProperty(
+        name="Frequency",
+        description="Ripple frequency of the caustic web (higher = finer, busier lines)",
+        default=12.0, min=1.0, max=60.0,
+        update=_on_layer_update,
+    )
+
+    # ── Weave-specific parameter ────────────────────────────────────────
+    proc_weave_width: FloatProperty(
+        name="Thread Width",
+        description="Thickness of the woven threads (lower = thinner threads, wider gaps)",
+        default=0.5, min=0.05, max=1.0, subtype='FACTOR',
+        update=_on_layer_update,
+    )
+
+    # ── Tiles-specific parameters ───────────────────────────────────────
+    proc_tiles_layout: EnumProperty(
+        name="Layout",
+        description="Tile arrangement",
+        items=[
+            ('RUNNING_BOND', "Running Bond", "Offset rows like a brick wall"),
+            ('STACK',        "Stack",        "Aligned grid, no offset"),
+        ],
+        default='RUNNING_BOND',
+        update=_on_layer_update,
+    )
+    proc_tiles_aspect: FloatProperty(
+        name="Aspect",
+        description="Tile width / height ratio (1 = square, 2 = brick-like)",
+        default=2.0, min=0.1, max=10.0,
+        update=_on_layer_update,
+    )
+    proc_tiles_mortar: FloatProperty(
+        name="Mortar",
+        description="Width of the grout / mortar lines between tiles",
+        default=0.06, min=0.0, max=0.4, subtype='FACTOR',
+        update=_on_layer_update,
+    )
+    proc_tiles_random: FloatProperty(
+        name="Random Shade",
+        description="Per-tile brightness variation (0 = uniform, 1 = fully random)",
+        default=0.5, min=0.0, max=1.0, subtype='FACTOR',
+        update=_on_layer_update,
+    )
+
+    # ── Scatter-specific parameters ─────────────────────────────────────
+    proc_scatter_density: FloatProperty(
+        name="Density",
+        description="Fraction of cells that get a scattered dot (0 = none, 1 = all)",
+        default=0.5, min=0.0, max=1.0, subtype='FACTOR',
+        update=_on_layer_update,
+    )
+    proc_scatter_size: FloatProperty(
+        name="Dot Size",
+        description="Radius of each scattered dot within its cell",
+        default=0.4, min=0.05, max=1.0, subtype='FACTOR',
+        update=_on_layer_update,
+    )
+
+    # ── Magic-specific parameters ───────────────────────────────────────
     proc_magic_depth: IntProperty(
         name="Depth",
-        description="Number of iterations â€” higher = more swirly detail",
+        description="Number of iterations — higher = more swirly detail",
         default=2, min=0, max=10,
         update=_make_hot_callback("proc_magic_depth"),
     )
@@ -1460,13 +1932,13 @@ class TLM_LayerItem(PropertyGroup):
     # users expect.
     proc_magic_distortion: FloatProperty(
         name="Distortion",
-        description="Warp strength of the swirls â€” 0 = vertical bands, "
+        description="Warp strength of the swirls — 0 = vertical bands, "
                     "1 = canonical swirl, higher = more chaotic",
         default=1.0, min=0.0, max=10.0,
         update=_make_hot_callback("proc_magic_distortion"),
     )
 
-    # â”€â”€ Gabor-specific parameters â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Gabor-specific parameters ───────────────────────────────────────
     # ShaderNodeTexGabor (Blender 4.3+) generates anisotropic Gabor noise:
     # directional streaks ideal for brushed metal, fiber weaves, hairline
     # scratches and other surfaces with a clear orientation. When the
@@ -1486,67 +1958,67 @@ class TLM_LayerItem(PropertyGroup):
         default=45.0, min=-360.0, max=360.0,
         update=_make_hot_callback("proc_gabor_orientation"),
     )
-    # â”€â”€ Fresnel-gradient-specific parameter â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Fresnel-gradient-specific parameter ─────────────────────────────
     # When proc_type='FRESNEL', the procedural's fac comes from a Fresnel
     # node whose IOR is controlled here. Same semantics as the mask Fresnel
-    # IOR â€” low (1.05-1.20) = wide angular sweep, high (2-5) = narrow rim.
+    # IOR — low (1.05-1.20) = wide angular sweep, high (2-5) = narrow rim.
     proc_fresnel_ior: FloatProperty(
         name="Fresnel IOR (Proc)",
         description="Index of refraction for the Fresnel Gradient procedural. "
                     "Low (1.05-1.20) = wide sweep across most viewing angles; "
                     "high (2.0-5.0) = pattern concentrated at grazing edges. "
-                    "Glass â‰ˆ 1.45, water â‰ˆ 1.33, diamond â‰ˆ 2.42",
+                    "Glass ≈ 1.45, water ≈ 1.33, diamond ≈ 2.42",
         default=1.45, min=1.0, max=5.0,
         update=_make_hot_callback("proc_fresnel_ior"),
     )
 
     proc_gabor_frequency: FloatProperty(
         name="Frequency",
-        description="Spatial frequency of the streak pattern â€” higher = "
+        description="Spatial frequency of the streak pattern — higher = "
                     "thinner / more closely packed streaks. Range up to 500 "
                     "is useful for very fine hairline brushed metal grooves.",
         default=2.0, min=0.1, max=500.0,
         update=_make_hot_callback("proc_gabor_frequency"),
     )
 
-    # â”€â”€ Dots-specific parameters â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Dots-specific parameters ────────────────────────────────────────
     # Packed circles in a jittered grid: Voronoi F1 distance, thresholded
     # by Map Range, scaled by proc_scale. Useful for paint splatter,
     # polka dots, freckles and perforations.
     proc_dots_radius: FloatProperty(
         name="Dot Radius",
-        description="Dot size as a fraction of the cell â€” 0 = no dots, "
+        description="Dot size as a fraction of the cell — 0 = no dots, "
                     "1 = dots fill the entire cell",
         default=0.35, min=0.01, max=1.0, subtype='FACTOR',
         update=_make_hot_callback("proc_dots_radius"),
     )
     proc_dots_softness: FloatProperty(
         name="Dot Softness",
-        description="Edge falloff â€” 0 = hard circles, 1 = soft halos",
+        description="Edge falloff — 0 = hard circles, 1 = soft halos",
         default=0.15, min=0.0, max=1.0, subtype='FACTOR',
         update=_make_hot_callback("proc_dots_softness"),
     )
 
-    # â”€â”€ Ridged-specific parameters â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Ridged-specific parameters ──────────────────────────────────────
     # Classic ridged fractal noise: 1 - |2*noise - 1|, then sharpened.
     # Produces clean crests / valleys ideal for mountain ridges, rock
     # veins, lightning patterns and crackle textures.
     proc_ridged_offset: FloatProperty(
         name="Ridge Offset",
-        description="Pre-fold offset â€” shifts where the ridge crest sits "
+        description="Pre-fold offset — shifts where the ridge crest sits "
                     "(1.0 = symmetric ridges, lower = thicker bases)",
         default=1.0, min=0.0, max=2.0,
         update=_make_hot_callback("proc_ridged_offset"),
     )
     proc_ridged_gain: FloatProperty(
         name="Ridge Gain",
-        description="Sharpness of the ridges â€” higher = thinner, more "
+        description="Sharpness of the ridges — higher = thinner, more "
                     "razor-like crests",
         default=2.0, min=0.5, max=6.0,
         update=_make_hot_callback("proc_ridged_gain"),
     )
 
-    # â”€â”€ Cracks-specific parameters â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Cracks-specific parameters ──────────────────────────────────────
     # Voronoi distance-to-edge thresholded to thin organic crack lines.
     # Similar mechanism to HEX_GRID but with irregular cells and tuned
     # for narrow line geometry. proc_randomness controls cell jitter.
@@ -1559,14 +2031,14 @@ class TLM_LayerItem(PropertyGroup):
     )
     proc_cracks_sharpness: FloatProperty(
         name="Crack Sharpness",
-        description="Edge falloff â€” 0 = soft fissures, 1 = razor-sharp cracks",
+        description="Edge falloff — 0 = soft fissures, 1 = razor-sharp cracks",
         default=0.7, min=0.0, max=1.0, subtype='FACTOR',
         update=_make_hot_callback("proc_cracks_sharpness"),
     )
 
-    # â”€â”€ Stripes-specific parameters â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Stripes-specific parameters ─────────────────────────────────────
     # Stripes are built from a Wave (BANDS, SAW profile) thresholded
-    # through a Map Range smoothstep â€” that lets the user dial both the
+    # through a Map Range smoothstep — that lets the user dial both the
     # width of the lit stripe and the sharpness of its edge.
     proc_stripe_direction: EnumProperty(
         name="Direction",
@@ -1578,29 +2050,29 @@ class TLM_LayerItem(PropertyGroup):
             ('Z',        "Z",        "Depth-oriented stripes (perpendicular to Z)", 3),
         ],
         default='Y',
-        update=_on_layer_update,  # structural â€” direction changes the wave node
+        update=_on_layer_update,  # structural — direction changes the wave node
     )
     proc_stripe_width: FloatProperty(
         name="Width",
-        description="Fraction of each stripe period that is the bright stripe â€” "
+        description="Fraction of each stripe period that is the bright stripe — "
                     "0 = no stripes, 0.5 = equal stripes, 1 = solid bright",
         default=0.5, min=0.0, max=1.0, subtype='FACTOR',
         update=_make_hot_callback("proc_stripe_width"),
     )
     proc_stripe_sharpness: FloatProperty(
         name="Sharpness",
-        description="Edge hardness of the stripe â€” 0 = soft fade, 1 = perfectly sharp",
+        description="Edge hardness of the stripe — 0 = soft fade, 1 = perfectly sharp",
         default=1.0, min=0.0, max=1.0, subtype='FACTOR',
         update=_make_hot_callback("proc_stripe_sharpness"),
     )
 
-    # â”€â”€ Hex Gridâ€“specific parameters â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    # Hex grid uses Voronoi(feature=DISTANCE_TO_EDGE) thresholded â€” true
+    # ── Hex Gridâ€“specific parameters ────────────────────────────────────
+    # Hex grid uses Voronoi(feature=DISTANCE_TO_EDGE) thresholded — true
     # regular hexagons need a custom UV transform, but the Voronoi
     # approximation gives a good honeycomb look with proc_randomness=0.
     proc_hex_edge_width: FloatProperty(
         name="Edge Width",
-        description="Width of the hex grid lines â€” 0 = no lines, 0.5 = thick lines",
+        description="Width of the hex grid lines — 0 = no lines, 0.5 = thick lines",
         default=0.05, min=0.0, max=0.5, subtype='FACTOR',
         update=_make_hot_callback("proc_hex_edge_width"),
     )
@@ -1713,9 +2185,9 @@ class TLM_LayerItem(PropertyGroup):
     proc_use_manual_stops: BoolProperty(
         name="Manual Stops",
         description="Drag each colour stop position directly (overrides Contrast + Ramp Center). "
-                    "Off: stop positions are derived from Contrast + Ramp Center (default). "
-                    "On: use Color1 Pos / Color2 Pos / Color3 Pos sliders.",
-        default=False, update=_on_layer_update,
+                    "On (default): use Color1 Pos / Color2 Pos / extras Pos sliders for direct stop placement. "
+                    "Off: positions are derived from Contrast + Ramp Center (legacy artist-friendly model).",
+        default=True, update=_on_layer_update,
     )
     proc_color1_position: FloatProperty(
         name="Color 1 Pos",
@@ -1780,7 +2252,7 @@ class TLM_LayerItem(PropertyGroup):
 
     # Noise / Musgrave
     proc_detail: FloatProperty(
-        name="Detail", description="Number of noise octaves â€” more detail means finer grain",
+        name="Detail", description="Number of noise octaves — more detail means finer grain",
         default=2.0, min=0.0, max=15.0,
         update=_make_hot_callback("proc_detail"),
     )
@@ -1803,6 +2275,10 @@ class TLM_LayerItem(PropertyGroup):
     # Voronoi
     proc_voronoi_feature: EnumProperty(
         name="Feature",
+        description="Which Voronoi metric drives the output: F1=distance to "
+                    "nearest cell centre (filled cells), F2=second nearest, "
+                    "Edge=distance to cell edge (for cracks/joints), "
+                    "Radius=N-sphere radius",
         items=[
             ('F1',           "F1",           "Distance to nearest point",    0),
             ('F2',           "F2",           "Distance to second nearest",   1),
@@ -1815,6 +2291,9 @@ class TLM_LayerItem(PropertyGroup):
     )
     proc_voronoi_distance: EnumProperty(
         name="Distance",
+        description="Distance metric for cell shapes: Euclidean (round), "
+                    "Manhattan (axis-aligned), Chebychev (square cells), "
+                    "Minkowski (parametric)",
         items=[
             ('EUCLIDEAN', "Euclidean", "Standard straight-line distance",    0),
             ('MANHATTAN', "Manhattan", "Grid-based taxi-cab distance",       1),
@@ -1830,10 +2309,10 @@ class TLM_LayerItem(PropertyGroup):
         update=_make_hot_callback("proc_randomness"),
     )
 
-    # â”€â”€ Voronoi random-per-cell (jawbreaker, greeble, mosaic) â”€â”€
+    # ── Voronoi random-per-cell (jawbreaker, greeble, mosaic) ──
     # When enabled, each Voronoi cell gets a random value derived from the
     # cell's Position output through a WhiteNoise texture.  The result feeds
-    # the same ColorRamp (color1â†’color2â†’optional color3), so each cell picks
+    # the same ColorRamp (color1→color2→optional color3), so each cell picks
     # a discrete color from the ramp instead of the smooth distance gradient.
     proc_voronoi_random_color: BoolProperty(
         name="Random Per Cell",
@@ -1854,6 +2333,9 @@ class TLM_LayerItem(PropertyGroup):
     # Wave
     proc_wave_type: EnumProperty(
         name="Wave Type",
+        description="Wave layout: Bands = parallel stripes (use for wood "
+                    "planks / striated patterns), Rings = concentric rings "
+                    "(use for marble / wood end-grain / ripples)",
         items=[
             ('BANDS', "Bands", "Parallel bands",     0),
             ('RINGS', "Rings", "Concentric rings",    1),
@@ -1863,6 +2345,8 @@ class TLM_LayerItem(PropertyGroup):
     )
     proc_wave_profile: EnumProperty(
         name="Profile",
+        description="Cross-section of one wave cycle: Sine = smooth, "
+                    "Sawtooth = sharp ramp, Triangle = symmetric zigzag",
         items=[
             ('SIN',      "Sine",     "Smooth sine wave",         0),
             ('SAW',      "Sawtooth", "Sharp sawtooth ramp",      1),
@@ -1873,6 +2357,7 @@ class TLM_LayerItem(PropertyGroup):
     )
     proc_wave_bands_direction: EnumProperty(
         name="Bands Direction",
+        description="Axis along which the bands repeat",
         items=[
             ('X',        "X",        "Bands along the X axis", 0),
             ('Y',        "Y",        "Bands along the Y axis", 1),
@@ -1884,6 +2369,8 @@ class TLM_LayerItem(PropertyGroup):
     )
     proc_wave_rings_direction: EnumProperty(
         name="Rings Direction",
+        description="Axis perpendicular to the ring plane (Spherical = "
+                    "concentric 3D shells)",
         items=[
             ('X',         "X",         "Rings around the X axis", 0),
             ('Y',         "Y",         "Rings around the Y axis", 1),
@@ -1914,6 +2401,9 @@ class TLM_LayerItem(PropertyGroup):
     # Gradient
     proc_gradient_type: EnumProperty(
         name="Gradient Type",
+        description="Gradient shape: Linear/Quadratic/Easing/Diagonal go "
+                    "across the surface, Spherical/Radial radiate from a "
+                    "centre — pair with Color Ramp for masks or gradients",
         items=[
             ('LINEAR',     "Linear",     "Straight linear gradient",             0),
             ('QUADRATIC',  "Quadratic",  "Quadratic falloff gradient",           1),
@@ -1992,6 +2482,29 @@ class TLM_LayerItem(PropertyGroup):
         update=_on_layer_update,
     )
 
+    # View-driven UV shift — additive offset of the coord stream by the
+    # CAMERA-SPACE surface normal BEFORE the Mapping node. Because the
+    # camera-space normal rotates WITH the surface, the pattern's phase
+    # slides as the object is reoriented (or viewed through the render
+    # camera) → the bands physically scroll across the surface, the way
+    # a real holographic foil's diffraction pattern moves with the light.
+    # Pair with proc_type='FRESNEL' (hue shift) for the full foil look.
+    # Default 0 → zero graph change for existing materials.
+    proc_uv_view_shift: FloatProperty(
+        name="View Shift",
+        description="Slide the pattern across the surface as it's reoriented, "
+                    "driven by the camera-space normal — the bands scroll "
+                    "like a real holographic foil catching the light. Use "
+                    "0.2–0.5 for foil parallax; higher for stylised sweeps. "
+                    "0 = off (no extra nodes inserted)",
+        default=0.0, min=0.0, max=2.0, soft_max=1.0,
+        # Toggling between 0 ↔ >0 changes graph topology (adds/removes
+        # Geom→Scale→Add nodes), so we rebuild rather than hot-update.
+        # Fine-tuning between two positive values still triggers rebuild
+        # for now; a future optimisation could keep this hot for >0 deltas.
+        update=_on_layer_update,
+    )
+
     proc_coord_preset: EnumProperty(
         name="Coord Preset",
         description="Quick coordinate setup for common use cases",
@@ -2012,7 +2525,7 @@ class TLM_LayerItem(PropertyGroup):
         update=_on_layer_update,
     )
 
-    # â”€â”€ Coordinate transform (polar / spherical / swirl / cylindrical) â”€â”€
+    # ── Coordinate transform (polar / spherical / swirl / cylindrical) ──
     # Converts the Cartesian coords into a transformed space BEFORE the
     # Mapping node so that texture patterns wrap circularly, spherically,
     # or spiral-twist.  This unlocks planet / lollipop / ring / cylinder
@@ -2020,15 +2533,15 @@ class TLM_LayerItem(PropertyGroup):
     proc_coord_transform: EnumProperty(
         name="Coord Transform",
         description="Spatial transformation applied to coordinates before texturing. "
-                    "NONE = raw Cartesian. POLAR = circular (XY â†’ angle,radius). "
-                    "SPHERICAL = planet-like (XYZ â†’ phi,theta). "
-                    "SWIRL = spiral twist. CYLINDRICAL = cylinder wrap (XY â†’ angle, Z)",
+                    "NONE = raw Cartesian. POLAR = circular (XY → angle,radius). "
+                    "SPHERICAL = planet-like (XYZ → phi,theta). "
+                    "SWIRL = spiral twist. CYLINDRICAL = cylinder wrap (XY → angle, Z)",
         items=[
-            ('NONE',        "None",        "No transform â€” raw XYZ",                             0),
-            ('POLAR',       "Polar",       "XY â†’ angle/radius â€” circular / radial patterns",      1),
-            ('SPHERICAL',   "Spherical",   "XYZ â†’ phi/theta â€” planet / spherical patterns",       2),
-            ('SWIRL',       "Swirl",       "Rotate XY around Z by radius â€” spiral patterns",      3),
-            ('CYLINDRICAL', "Cylindrical", "XY â†’ angle, Z vertical â€” cylinder wrap patterns",     4),
+            ('NONE',        "None",        "No transform — raw XYZ",                             0),
+            ('POLAR',       "Polar",       "XY → angle/radius — circular / radial patterns",      1),
+            ('SPHERICAL',   "Spherical",   "XYZ → phi/theta — planet / spherical patterns",       2),
+            ('SWIRL',       "Swirl",       "Rotate XY around Z by radius — spiral patterns",      3),
+            ('CYLINDRICAL', "Cylindrical", "XY → angle, Z vertical — cylinder wrap patterns",     4),
         ],
         default='NONE',
         update=_on_layer_update,
@@ -2051,7 +2564,7 @@ class TLM_LayerItem(PropertyGroup):
     )
     proc_ramp_center: FloatProperty(
         name="Ramp Center",
-        description="Where the Color1â†’Color2 transition band sits along the procedural Fac "
+        description="Where the Color1→Color2 transition band sits along the procedural Fac "
                     "(0=low end, 0.5=middle/symmetric, 1=high end). Combined with Contrast, "
                     "lets you make asymmetric thin outlines (band near 0 with high contrast = "
                     "thin Color1 line at low Fac), or thin highlights (band near 1)",
@@ -2059,7 +2572,7 @@ class TLM_LayerItem(PropertyGroup):
         update=_make_hot_callback("proc_ramp_center"),
     )
 
-    # Vector coordinate distortion â€” inject Noise into texture coordinates
+    # Vector coordinate distortion — inject Noise into texture coordinates
     # for organic, non-geometric patterns (e.g. warped Voronoi cracks)
     proc_vector_distortion: FloatProperty(
         name="Vector Distortion",
@@ -2069,7 +2582,7 @@ class TLM_LayerItem(PropertyGroup):
         update=_make_hot_callback("proc_vector_distortion"),
     )
 
-    # Emission mask â€” smooth threshold with controllable falloff
+    # Emission mask — smooth threshold with controllable falloff
     proc_emission_threshold: FloatProperty(
         name="Emission Threshold",
         description="Where the emission 'turns on'. Higher = wider glowing area. "
@@ -2085,9 +2598,9 @@ class TLM_LayerItem(PropertyGroup):
         update=_on_layer_update,
     )
 
-    # â”€â”€ Selective emission â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    # The procedural emission pipeline (proc fac â†’ invert â†’ power â†’
-    # smoothstep â†’ emission_color) lights up EVERY pixel where the
+    # ── Selective emission ────────────────────────────────────────────────────
+    # The procedural emission pipeline (proc fac → invert → power →
+    # smoothstep → emission_color) lights up EVERY pixel where the
     # procedural's fac says so. For sci-fi panel use cases the artist
     # usually wants only SOME regions to glow (e.g. a random subset of
     # cells, or a hand-painted area), not the entire pattern.
@@ -2102,11 +2615,11 @@ class TLM_LayerItem(PropertyGroup):
                     "None = the whole procedural pattern glows (current "
                     "behaviour); other modes restrict the glow to a subset",
         items=[
-            ('NONE',         "None",         "Uniform â€” every fac-positive pixel glows"),
+            ('NONE',         "None",         "Uniform — every fac-positive pixel glows"),
             ('RANDOM_CELLS', "Random Cells", "Voronoi-cell based: only some cells glow, "
                                               "controlled by selector_threshold (=fraction lit). "
                                               "Best for circuit-board / panel-grid effects"),
-            ('NOISE',        "Noise",        "Soft organic blobs â€” glows where a Perlin noise "
+            ('NOISE',        "Noise",        "Soft organic blobs — glows where a Perlin noise "
                                               "is above selector_threshold"),
             ('IMAGE',        "Image",        "Use a painted black/white image as the selector. "
                                               "White = lit, Black = unlit"),
@@ -2131,7 +2644,7 @@ class TLM_LayerItem(PropertyGroup):
     )
     emission_selector_seed: FloatProperty(
         name="Selector Seed",
-        description="Randomization seed â€” change to get a different "
+        description="Randomization seed — change to get a different "
                     "subset of glowing regions without altering anything else",
         default=0.0,
         update=_make_hot_callback("emission_selector_seed"),
@@ -2144,7 +2657,7 @@ class TLM_LayerItem(PropertyGroup):
         update=_on_layer_update,
     )
 
-    # Fresnel mask â€” edge glow based on viewing angle
+    # Fresnel mask — edge glow based on viewing angle
     use_fresnel_mask: BoolProperty(
         name="Fresnel Mask",
         description="Apply a Fresnel (viewing angle) mask to this layer. "
@@ -2177,7 +2690,7 @@ class TLM_LayerItem(PropertyGroup):
         return bpy.data.images.get(self.mask_image_name)
 
 
-# â”€â”€â”€ Per-Material Settings â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─── Per-Material Settings ────────────────────────────────────────────────────
 
 class TLM_MaterialProperties(PropertyGroup):
     """Attached to every bpy.types.Material as mat.tlm"""
@@ -2213,7 +2726,7 @@ class TLM_MaterialProperties(PropertyGroup):
         description=(
             "Route the TLM Base Color stack to BSDF.Emission Color "
             "instead of BSDF.Base Color, with Base Color forced to BLACK. "
-            "This BYPASSES Cycles' natural NdotL diffuse shading â€” necessary "
+            "This BYPASSES Cycles' natural NdotL diffuse shading — necessary "
             "for true cel-shading where shadow band colours must NOT be "
             "multiplied by cos(NdotL). Use for anime/toon-style materials "
             "driven by NDOTL mask source bands"
@@ -2320,6 +2833,69 @@ class TLM_MaterialProperties(PropertyGroup):
         update=lambda self, ctx: _on_volume_scatter_param_change(self, ctx),
     )
 
+    # ── True geometric Displacement (material-level master switch) ──
+    # Wires a ShaderNodeDisplacement to Material Output.Displacement when
+    # ON. Each PROCEDURAL/PAINT layer with its own `use_displacement=True`
+    # contributes a height summed into the displacement node's Height
+    # input. Requires Cycles + Adaptive Subdivision on the mesh for actual
+    # vertex movement (else falls back to bump-style normal perturbation).
+    # When `displacement_adaptive` is True, the rebuild auto-configures
+    # cycles.feature_set='EXPERIMENTAL' + Subsurf modifier with adaptive
+    # subdivision on every mesh using this material.
+    use_displacement: BoolProperty(
+        name="Displacement",
+        description="Wire the layer stack's displacement contributions to "
+                    "Material Output.Displacement. Unlike Bump (shading-only), "
+                    "this moves real geometry (silhouette breaks). Needs "
+                    "Cycles + Adaptive Subdivision for visible effect.",
+        default=False,
+        update=lambda self, ctx: _on_displacement_change(self, ctx),
+    )
+    displacement_strength: FloatProperty(
+        name="Displacement Strength",
+        description="Master multiplier on the displacement height. 0 = flat. "
+                    "0.05-0.20 = typical (small details). 0.5+ = dramatic chunky "
+                    "displacement (rocky pile, brick wall). Combined with "
+                    "per-layer displacement_scale.",
+        default=0.1, min=0.0, max=5.0,
+        update=lambda self, ctx: _on_displacement_param_change(self, ctx),
+    )
+    displacement_midlevel: FloatProperty(
+        name="Midlevel",
+        description="Height value treated as 'neutral' (no displacement). "
+                    "0.5 (default) means values around 0.5 stay at the original "
+                    "surface; >0.5 pushes out; <0.5 pushes in.",
+        default=0.5, min=0.0, max=1.0, subtype='FACTOR',
+        update=lambda self, ctx: _on_displacement_param_change(self, ctx),
+    )
+    displacement_adaptive: BoolProperty(
+        name="Adaptive Subdivision",
+        description="Auto-enable Cycles experimental + add a Subsurf modifier "
+                    "with adaptive subdivision on meshes using this material. "
+                    "Required for the displacement to actually move geometry "
+                    "(otherwise Cycles falls back to bump-like shading). Off "
+                    "if you've already set this up manually.",
+        default=True,
+        update=lambda self, ctx: _on_displacement_change(self, ctx),
+    )
+    displacement_method: EnumProperty(
+        name="Displacement Method",
+        description="How Cycles converts the Displacement output to surface deformation.\n"
+                    "• Bump Only: shading normal only (no silhouette break, no subdiv needed). "
+                    "Same as Bump but uses the unified Displacement chain.\n"
+                    "• Displacement Only (default): real vertex movement — silhouette breaks. "
+                    "Requires Cycles + Adaptive Subdivision.\n"
+                    "• Both: large vertices move (Displacement) and fine details survive as "
+                    "Bump on top. Best for chunky materials with micro-grain.",
+        items=[
+            ('BUMP',         "Bump Only",         "Shading normal only (default Blender behaviour). No silhouette break, no subdiv required.", 0),
+            ('DISPLACEMENT', "Displacement Only", "Real vertex movement, silhouette breaks. Needs Adaptive Subdivision.",                       1),
+            ('BOTH',         "Both",              "Vertex displacement + bump in one — combine big shapes with micro detail.",                  2),
+        ],
+        default='DISPLACEMENT',
+        update=lambda self, ctx: _on_displacement_change(self, ctx),
+    )
+
     # use_custom_slots: BoolProperty(
     #     name="Custom Slots",
     #     description=(
@@ -2334,15 +2910,20 @@ class TLM_MaterialProperties(PropertyGroup):
     # alpha of a PAINT layer's image) is wired to BSDF.Alpha. Lets a
     # PAINT layer with a transparent PNG render as transparent and bake
     # to a real RGBA PNG without setting up a dedicated Output=Alpha layer.
-    # Default OFF â€” without this, an empty PAINT layer (alpha=0 everywhere)
+    # Default OFF — without this, an empty PAINT layer (alpha=0 everywhere)
     # would unintentionally hide the cube.
     use_base_color_alpha: BoolProperty(
-        name="Use Paint Alpha",
+        name="Use PNG Alpha Channel",
         description=(
-            "Wire the alpha of the base color chain (PAINT image alpha) to "
-            "BSDF.Alpha. Enable for cutout/decal/foliage workflows so an "
-            "empty/transparent paint shows through. Disable for additive "
-            "painting where new strokes should layer over a solid base"
+            "Wire the ALPHA CHANNEL of a PAINT layer's image to BSDF.Alpha. "
+            "Use this when a PAINT layer carries a PNG with real transparency "
+            "(foliage textures, decals, stickers) — the PNG's transparent "
+            "pixels become transparent on the material in one layer.\n\n"
+            "Different from a layer set to 'Output: Alpha':\n"
+            "  • This reads the IMAGE's alpha channel (transparent PNG pixels)\n"
+            "  • Output:Alpha reads the layer's RGB/value (paint a B&W mask)\n\n"
+            "Has NO effect on TLM-generated paint canvases (their alpha is "
+            "always 1.0) or on solid PNGs without an alpha channel"
         ),
         default=False,
         update=_on_layer_update,
@@ -2351,7 +2932,7 @@ class TLM_MaterialProperties(PropertyGroup):
     # Eevee/Material Preview transparency mode. Even when TLM wires
     # BSDF.Alpha correctly, Eevee with mat.blend_method='OPAQUE' (the
     # default) silently ignores the input and renders the surface
-    # opaque â€” a confusing UX where the user sees no effect from
+    # opaque — a confusing UX where the user sees no effect from
     # output_channel=ALPHA layers.
     #
     # AUTO: TLM decides based on what's connected. When any layer
@@ -2375,14 +2956,14 @@ class TLM_MaterialProperties(PropertyGroup):
             ('AUTO',   "Auto",
              "Hashed when alpha is wired, Opaque otherwise (recommended)"),
             ('OPAQUE', "Opaque",
-             "Ignore alpha â€” no transparency"),
+             "Ignore alpha — no transparency"),
             ('CLIP',   "Clip",
-             "Binary cutout â€” alpha < 0.5 is fully transparent (foliage masks)"),
+             "Binary cutout — alpha < 0.5 is fully transparent (foliage masks)"),
             ('HASHED', "Hashed",
-             "Stochastic dithering â€” supports smooth alpha, anti-aliased "
+             "Stochastic dithering — supports smooth alpha, anti-aliased "
              "edges (general-purpose default for decals / cutout)"),
             ('BLEND',  "Blend",
-             "True alpha blending â€” needed for glass, ghosts, smoke. "
+             "True alpha blending — needed for glass, ghosts, smoke. "
              "Costs sorting and may have artefacts on overlapping faces"),
         ],
         default='AUTO',
@@ -2392,11 +2973,14 @@ class TLM_MaterialProperties(PropertyGroup):
     # Resolution for new layers
     resolution: EnumProperty(
         name="New Layer Resolution",
+        description="Default image size used when adding a new Paint layer "
+                    "or generating a Smart Mask. Existing layers are NOT "
+                    "resized — change this BEFORE adding the layer",
         items=[
-            ("512",  "512 Ã— 512",   "Low resolution, fast performance"),
-            ("1024", "1024 Ã— 1024", "Standard resolution for most use cases"),
-            ("2048", "2048 Ã— 2048", "High resolution for detailed textures"),
-            ("4096", "4096 Ã— 4096", "Ultra-high resolution, may be slow"),
+            ("512",  "512 × 512",   "Low resolution, fast performance"),
+            ("1024", "1024 × 1024", "Standard resolution for most use cases"),
+            ("2048", "2048 × 2048", "High resolution for detailed textures"),
+            ("4096", "4096 × 4096", "Ultra-high resolution, may be slow"),
         ],
         default="1024",
     )
@@ -2408,7 +2992,7 @@ class TLM_MaterialProperties(PropertyGroup):
         default="UVMap",
     )
 
-    # Solo layer â€” isolate one layer without modifying visibility states
+    # Solo layer — isolate one layer without modifying visibility states
     solo_layer_index: IntProperty(
         name="Solo Layer",
         description="Index of the solo'd layer (-1 = off)",
@@ -2500,7 +3084,7 @@ class TLM_MaterialProperties(PropertyGroup):
         return None
 
 
-# â”€â”€â”€ Registration â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─── Registration ─────────────────────────────────────────────────────────────
 
 classes = [
     TLM_ProcColorStop,   # MUST register before TLM_LayerItem (it's the type= for the CollectionProperty)
@@ -2518,7 +3102,7 @@ def register():
         try:
             bpy.utils.unregister_class(cls)
         except (RuntimeError, ValueError):
-            pass  # not registered â€” fine
+            pass  # not registered — fine
     for cls in classes:
         bpy.utils.register_class(cls)
     if hasattr(bpy.types.Material, 'tlm'):

@@ -12,13 +12,13 @@ from ._common import _get_material, _can_edit_tlm_stack, _ensure_nodes, composit
 from .pbr import CHANNEL_INFO
 
 
-# â”€â”€â”€ Export / Import JSON â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─── Export / Import JSON ─────────────────────────────────────────────────────
 
 
 def _image_to_png_b64(image):
     """
     Encode a bpy.data.images image as a base64 PNG string.
-    Pure Python â€” no external deps beyond numpy (already required).
+    Pure Python — no external deps beyond numpy (already required).
     """
     if image is None:
         return None
@@ -31,7 +31,7 @@ def _image_to_png_b64(image):
     image.pixels.foreach_get(buf)
     buf = buf.reshape((h, w, 4))
 
-    # Flip vertically (Blender bottom-up â†’ PNG top-down)
+    # Flip vertically (Blender bottom-up → PNG top-down)
     buf = buf[::-1, :, :]
 
     # Convert to uint8
@@ -45,11 +45,11 @@ def _image_to_png_b64(image):
     # PNG signature
     sig = b'\x89PNG\r\n\x1a\n'
 
-    # IHDR â€” RGBA 8-bit (color type 6)
+    # IHDR — RGBA 8-bit (color type 6)
     ihdr_data = struct.pack('>II', w, h) + bytes([8, 6, 0, 0, 0])
     ihdr = png_chunk(b'IHDR', ihdr_data)
 
-    # IDAT â€” prepend filter byte 0 to each scanline, then compress.
+    # IDAT — prepend filter byte 0 to each scanline, then compress.
     # Using numpy to build the raw byte stream is significantly faster than
     # string concatenation in a Python loop on large images.
     filter_col = np.zeros((h, 1), dtype=np.uint8)
@@ -109,9 +109,9 @@ def _layer_to_dict(layer):
         "group_name":        layer.group_name,
         "collapsed":         layer.collapsed,
         "use_clipping_mask": layer.use_clipping_mask,
-        # Routing â€” which BSDF input this layer drives
+        # Routing — which BSDF input this layer drives
         "output_channel":    getattr(layer, 'output_channel', 'BASE_COLOR'),
-        # Branching â€” per-channel blend mode overrides
+        # Branching — per-channel blend mode overrides
         "blend_mode_base_color":   getattr(layer, 'blend_mode_base_color',   'INHERIT'),
         "blend_mode_roughness":    getattr(layer, 'blend_mode_roughness',    'INHERIT'),
         "blend_mode_metallic":     getattr(layer, 'blend_mode_metallic',     'INHERIT'),
@@ -155,6 +155,19 @@ def _layer_to_dict(layer):
         d["proc_dots_softness"]    = round(getattr(layer, 'proc_dots_softness', 0.15), 4)
         d["proc_cracks_width"]     = round(getattr(layer, 'proc_cracks_width', 0.05), 4)
         d["proc_cracks_sharpness"] = round(getattr(layer, 'proc_cracks_sharpness', 0.7), 4)
+        d["proc_wood_distortion"]  = round(getattr(layer, 'proc_wood_distortion', 1.5), 4)
+        d["proc_wood_grain"]       = round(getattr(layer, 'proc_wood_grain', 0.12), 4)
+        d["proc_scratches_angle"]  = round(getattr(layer, 'proc_scratches_angle', 25.0), 4)
+        d["proc_scratches_aniso"]  = round(getattr(layer, 'proc_scratches_aniso', 8.0), 4)
+        d["proc_scratches_width"]  = round(getattr(layer, 'proc_scratches_width', 0.12), 4)
+        d["proc_caustics_freq"]    = round(getattr(layer, 'proc_caustics_freq', 12.0), 4)
+        d["proc_weave_width"]      = round(getattr(layer, 'proc_weave_width', 0.5), 4)
+        d["proc_tiles_layout"]     = getattr(layer, 'proc_tiles_layout', 'RUNNING_BOND')
+        d["proc_tiles_aspect"]     = round(getattr(layer, 'proc_tiles_aspect', 2.0), 4)
+        d["proc_tiles_mortar"]     = round(getattr(layer, 'proc_tiles_mortar', 0.06), 4)
+        d["proc_tiles_random"]     = round(getattr(layer, 'proc_tiles_random', 0.5), 4)
+        d["proc_scatter_density"]  = round(getattr(layer, 'proc_scatter_density', 0.5), 4)
+        d["proc_scatter_size"]     = round(getattr(layer, 'proc_scatter_size', 0.4), 4)
         d["proc_ridged_offset"]    = round(getattr(layer, 'proc_ridged_offset', 1.0), 4)
         d["proc_ridged_gain"]      = round(getattr(layer, 'proc_ridged_gain', 2.0), 4)
         d["proc_gabor_anisotropy"] = round(getattr(layer, 'proc_gabor_anisotropy', 1.0), 4)
@@ -186,6 +199,7 @@ def _layer_to_dict(layer):
         d["proc_ramp_center"]      = round(getattr(layer, 'proc_ramp_center', 0.5), 4)
         d["proc_vector_distortion"]= round(layer.proc_vector_distortion, 4)
         d["proc_coord_type"]       = layer.proc_coord_type
+        d["proc_uv_view_shift"]    = round(getattr(layer, 'proc_uv_view_shift', 0.0), 4)
         d["proc_marble_distortion"]= round(layer.proc_marble_distortion, 4)
         d["proc_marble_wave_type"] = layer.proc_marble_wave_type
         d["proc_marble_wave_profile"] = getattr(layer, 'proc_marble_wave_profile', 'SIN')
@@ -209,17 +223,34 @@ def _layer_to_dict(layer):
             {"color": list(s.color), "position": round(s.position, 4)}
             for s in getattr(layer, 'proc_extra_color_stops', [])
         ]
-        # Feature A â€” Advanced coordinates (POLAR / SPHERICAL / SWIRL / CYLINDRICAL)
+        # Feature A — Advanced coordinates (POLAR / SPHERICAL / SWIRL / CYLINDRICAL)
         d["proc_coord_transform"]  = getattr(layer, 'proc_coord_transform', 'NONE')
         d["proc_swirl_amount"]     = round(getattr(layer, 'proc_swirl_amount', 2.0), 4)
-        # Feature B â€” Voronoi random per cell
+        # Feature B — Voronoi random per cell
         d["proc_voronoi_random_color"] = getattr(layer, 'proc_voronoi_random_color', False)
         d["proc_voronoi_random_seed"]  = round(getattr(layer, 'proc_voronoi_random_seed', 0.0), 4)
 
     elif layer.layer_type == "REFERENCE":
-        # Reference layers reuse another layer's pattern â€” only the source name
-        # is distinctive; everything else is in the common mask/PBR sections.
+        # Reference layers reuse another layer's pattern. COMPOSED mode needs
+        # only the source name; RAW_PATTERN mode also carries its OWN ColorRamp
+        # (applied to the source's raw FAC), so serialize that too — otherwise
+        # reload reverts to COMPOSED + default colours.
         d["reference_layer_name"] = getattr(layer, 'reference_layer_name', "")
+        d["reference_mode"] = getattr(layer, 'reference_mode', 'COMPOSED')
+        d["proc_color1"] = [round(c, 4) for c in layer.proc_color1]
+        d["proc_color2"] = [round(c, 4) for c in layer.proc_color2]
+        d["proc_use_manual_stops"] = getattr(layer, 'proc_use_manual_stops', False)
+        d["proc_color1_position"] = round(getattr(layer, 'proc_color1_position', 0.0), 4)
+        d["proc_color2_position"] = round(getattr(layer, 'proc_color2_position', 1.0), 4)
+        d["proc_contrast"] = round(getattr(layer, 'proc_contrast', 0.5), 4)
+        d["proc_ramp_center"] = round(getattr(layer, 'proc_ramp_center', 0.5), 4)
+        d["proc_color_ramp_mode"] = getattr(layer, 'proc_color_ramp_mode', 'RGB')
+        d["proc_color_ramp_interpolation"] = getattr(
+            layer, 'proc_color_ramp_interpolation', 'LINEAR')
+        d["proc_extra_color_stops"] = [
+            {"color": [round(c, 4) for c in s.color], "position": round(s.position, 4)}
+            for s in getattr(layer, 'proc_extra_color_stops', [])
+        ]
 
     elif layer.layer_type == "ADJUSTMENT":
         d["adj_type"]        = layer.adj_type
@@ -244,27 +275,35 @@ def _layer_to_dict(layer):
         d["fresnel_strength"]  = round(getattr(layer, 'fresnel_strength', 1.0), 4)
         d["use_mask"]          = layer.use_mask
         d["mask_image_name"]   = layer.mask_image_name
-        # Feature C â€” Advanced combinable masks
+        # Feature C — Advanced combinable masks
         d["mask_source"]        = getattr(layer, 'mask_source', 'IMAGE')
         d["mask_invert"]        = getattr(layer, 'mask_invert', False)
         d["mask_ao_distance"]   = round(getattr(layer, 'mask_ao_distance', 0.5), 4)
         d["mask_wireframe_size"] = round(getattr(layer, 'mask_wireframe_size', 0.01), 4)
         d["mask_wireframe_use_pixel_size"] = getattr(layer, 'mask_wireframe_use_pixel_size', True)
+        d["mask_voronoi_feature"]    = getattr(layer, 'mask_voronoi_feature', 'DISTANCE_TO_EDGE')
+        d["mask_voronoi_scale"]      = round(getattr(layer, 'mask_voronoi_scale', 10.0), 4)
+        d["mask_voronoi_randomness"] = round(getattr(layer, 'mask_voronoi_randomness', 1.0), 4)
+        d["mask_voronoi_edge_width"] = round(getattr(layer, 'mask_voronoi_edge_width', 1.0), 4)
         d["use_mask_b"]         = getattr(layer, 'use_mask_b', False)
         d["mask_source_b"]      = getattr(layer, 'mask_source_b', 'POINTINESS')
         d["mask_image_name_b"]  = getattr(layer, 'mask_image_name_b', "")
         d["mask_invert_b"]      = getattr(layer, 'mask_invert_b', False)
         d["mask_ao_distance_b"] = round(getattr(layer, 'mask_ao_distance_b', 0.5), 4)
+        d["mask_voronoi_feature_b"]    = getattr(layer, 'mask_voronoi_feature_b', 'DISTANCE_TO_EDGE')
+        d["mask_voronoi_scale_b"]      = round(getattr(layer, 'mask_voronoi_scale_b', 10.0), 4)
+        d["mask_voronoi_randomness_b"] = round(getattr(layer, 'mask_voronoi_randomness_b', 1.0), 4)
+        d["mask_voronoi_edge_width_b"] = round(getattr(layer, 'mask_voronoi_edge_width_b', 1.0), 4)
         d["mask_combine"]       = getattr(layer, 'mask_combine', 'MULTIPLY')
         d["mask_contrast"]      = round(getattr(layer, 'mask_contrast', 0.5), 4)
-        # Mask refinement â€” Levels (input range + gamma + output range)
+        # Mask refinement — Levels (input range + gamma + output range)
         d["use_mask_levels"]     = getattr(layer, 'use_mask_levels', False)
         d["mask_levels_in_min"]  = round(getattr(layer, 'mask_levels_in_min', 0.0), 4)
         d["mask_levels_in_max"]  = round(getattr(layer, 'mask_levels_in_max', 1.0), 4)
         d["mask_levels_gamma"]   = round(getattr(layer, 'mask_levels_gamma', 1.0), 4)
         d["mask_levels_out_min"] = round(getattr(layer, 'mask_levels_out_min', 0.0), 4)
         d["mask_levels_out_max"] = round(getattr(layer, 'mask_levels_out_max', 1.0), 4)
-        # Mask refinement â€” Softness + Blur
+        # Mask refinement — Softness + Blur
         d["mask_softness"]       = round(getattr(layer, 'mask_softness', 0.0), 4)
         d["mask_blur"]           = round(getattr(layer, 'mask_blur', 0.0), 4)
         # Smart-generator parameters (shared across EDGE_WEAR/DIRT/CURVATURE_SMART)
@@ -274,12 +313,14 @@ def _layer_to_dict(layer):
         d["mask_gen_sharpness"]      = round(getattr(layer, 'mask_gen_sharpness', 0.5), 4)
         # Image texture mapping config (Source / Interpolation /
         # Projection / Extension + Box blend). Triplanar used to live
-        # here as a custom feature â€” now replaced by paint_projection
+        # here as a custom feature — now replaced by paint_projection
         # = 'BOX' which uses Blender's native triplanar.
         d["paint_interpolation"]    = getattr(layer, 'paint_interpolation', 'Linear')
         d["paint_projection"]       = getattr(layer, 'paint_projection', 'FLAT')
         d["paint_projection_blend"] = round(getattr(layer, 'paint_projection_blend', 0.3), 4)
         d["paint_source"]           = getattr(layer, 'paint_source', 'FILE')
+        d["paint_pixelate"]         = getattr(layer, 'paint_pixelate', False)
+        d["paint_pixelate_size"]    = getattr(layer, 'paint_pixelate_size', 32)
         # PBR channels
         d["use_roughness"]     = layer.use_roughness
         d["roughness_fill"]    = round(layer.roughness_fill, 4)
@@ -290,6 +331,8 @@ def _layer_to_dict(layer):
         d["use_bump"]          = layer.use_bump
         d["bump_strength"]     = round(layer.bump_strength, 4)
         d["bump_distance"]     = round(layer.bump_distance, 4)
+        d["use_displacement"]  = getattr(layer, 'use_displacement', False)
+        d["displacement_scale"] = round(getattr(layer, 'displacement_scale', 1.0), 4)
         d["use_normal"]        = getattr(layer, 'use_normal', False)
         d["normal_image_name"]    = getattr(layer, 'normal_image_name', "")
         d["normal_strength"]   = round(getattr(layer, 'normal_strength', 1.0), 4)
@@ -330,16 +373,16 @@ def _dict_to_layer(d, tlm):
     layer.locked     = d.get("locked", False)
     layer.opacity    = d.get("opacity", 1.0)
     # Use the shared blend-mode normaliser so legacy .tlm files saved
-    # in TLM â‰¤ 0.3 (title-case names like "Screen") don't silently
+    # in TLM ≤ 0.3 (title-case names like "Screen") don't silently
     # collapse to MIX. operators/presets.py also goes through this.
     layer.blend_mode = _normalize_blend_mode(d.get("blend_mode"))
-    # GROUP layers are always root-level â€” discard any stray parent to
+    # GROUP layers are always root-level — discard any stray parent to
     # block nested-group states from arriving via external files.
     _raw_group = d.get("group_name", "")
     layer.group_name = "" if layer.layer_type == "GROUP" else _raw_group
     layer.collapsed         = d.get("collapsed", False)
     layer.use_clipping_mask = d.get("use_clipping_mask", False)
-    # Routing â€” default BASE_COLOR keeps pre-routing presets working.
+    # Routing — default BASE_COLOR keeps pre-routing presets working.
     # Legacy 'AUTO' (older builds) falls through to BASE_COLOR via the
     # alias in _layer_contributes_to.
     _out_ch = d.get("output_channel", "BASE_COLOR")
@@ -349,7 +392,7 @@ def _dict_to_layer(d, tlm):
         layer.output_channel = _out_ch
     except (TypeError, ValueError):
         layer.output_channel = "BASE_COLOR"
-    # Branching â€” per-channel blend mode overrides (INHERIT default = backward-compat)
+    # Branching — per-channel blend mode overrides (INHERIT default = backward-compat)
     layer.blend_mode_base_color   = d.get("blend_mode_base_color",   "INHERIT")
     layer.blend_mode_roughness    = d.get("blend_mode_roughness",    "INHERIT")
     layer.blend_mode_metallic     = d.get("blend_mode_metallic",     "INHERIT")
@@ -368,7 +411,7 @@ def _dict_to_layer(d, tlm):
             img = _png_b64_to_image(img_data, img_name, 0, 0)
             layer.image_name = img.name
         else:
-            # No pixel data â€” create blank image
+            # No pixel data — create blank image
             res = int(tlm.resolution)
             img = bpy.data.images.new(img_name, width=res, height=res, alpha=True)
             img.pixels[:] = [0.0] * (res * res * 4)
@@ -415,6 +458,19 @@ def _dict_to_layer(d, tlm):
         layer.proc_dots_softness    = d.get("proc_dots_softness", 0.15)
         layer.proc_cracks_width     = d.get("proc_cracks_width", 0.05)
         layer.proc_cracks_sharpness = d.get("proc_cracks_sharpness", 0.7)
+        layer.proc_wood_distortion  = d.get("proc_wood_distortion", 1.5)
+        layer.proc_wood_grain       = d.get("proc_wood_grain", 0.12)
+        layer.proc_scratches_angle  = d.get("proc_scratches_angle", 25.0)
+        layer.proc_scratches_aniso  = d.get("proc_scratches_aniso", 8.0)
+        layer.proc_scratches_width  = d.get("proc_scratches_width", 0.12)
+        layer.proc_caustics_freq    = d.get("proc_caustics_freq", 12.0)
+        layer.proc_weave_width      = d.get("proc_weave_width", 0.5)
+        layer.proc_tiles_layout     = d.get("proc_tiles_layout", 'RUNNING_BOND')
+        layer.proc_tiles_aspect     = d.get("proc_tiles_aspect", 2.0)
+        layer.proc_tiles_mortar     = d.get("proc_tiles_mortar", 0.06)
+        layer.proc_tiles_random     = d.get("proc_tiles_random", 0.5)
+        layer.proc_scatter_density  = d.get("proc_scatter_density", 0.5)
+        layer.proc_scatter_size     = d.get("proc_scatter_size", 0.4)
         layer.proc_ridged_offset    = d.get("proc_ridged_offset", 1.0)
         layer.proc_ridged_gain      = d.get("proc_ridged_gain", 2.0)
         layer.proc_gabor_anisotropy = d.get("proc_gabor_anisotropy", 1.0)
@@ -446,6 +502,7 @@ def _dict_to_layer(d, tlm):
         layer.proc_ramp_center      = d.get("proc_ramp_center", 0.5)
         layer.proc_vector_distortion= d.get("proc_vector_distortion", 0.0)
         layer.proc_coord_type       = d.get("proc_coord_type", "GENERATED")
+        layer.proc_uv_view_shift    = d.get("proc_uv_view_shift", 0.0)
         layer.proc_marble_distortion= d.get("proc_marble_distortion", 5.0)
         layer.proc_marble_wave_type = d.get("proc_marble_wave_type", "BANDS")
         layer.proc_marble_wave_profile = d.get("proc_marble_wave_profile", "SIN")
@@ -479,18 +536,38 @@ def _dict_to_layer(d, tlm):
             item.color = list(layer.proc_color3)
             item.position = layer.proc_color3_position
             layer.use_proc_color3 = False
-        # Feature A â€” Advanced coordinates
+        # Feature A — Advanced coordinates
         layer.proc_coord_transform  = d.get("proc_coord_transform", "NONE")
         layer.proc_swirl_amount     = d.get("proc_swirl_amount", 2.0)
-        # Feature B â€” Voronoi random per cell
+        # Feature B — Voronoi random per cell
         layer.proc_voronoi_random_color = d.get("proc_voronoi_random_color", False)
         layer.proc_voronoi_random_seed  = d.get("proc_voronoi_random_seed", 0.0)
 
     elif layer.layer_type == "REFERENCE":
         layer.reference_layer_name = d.get("reference_layer_name", "")
+        try:
+            layer.reference_mode = d.get("reference_mode", "COMPOSED")
+        except (TypeError, ValueError):
+            layer.reference_mode = "COMPOSED"
+        # RAW_PATTERN ColorRamp data (harmless no-op for COMPOSED references).
+        layer.proc_color1 = d.get("proc_color1", [0, 0, 0, 1])
+        layer.proc_color2 = d.get("proc_color2", [1, 1, 1, 1])
+        layer.proc_use_manual_stops = d.get("proc_use_manual_stops", False)
+        layer.proc_color1_position = d.get("proc_color1_position", 0.0)
+        layer.proc_color2_position = d.get("proc_color2_position", 1.0)
+        layer.proc_contrast = d.get("proc_contrast", 0.5)
+        layer.proc_ramp_center = d.get("proc_ramp_center", 0.5)
+        layer.proc_color_ramp_mode = d.get("proc_color_ramp_mode", "RGB")
+        layer.proc_color_ramp_interpolation = d.get(
+            "proc_color_ramp_interpolation", "LINEAR")
+        layer.proc_extra_color_stops.clear()
+        for s in d.get("proc_extra_color_stops", []):
+            item = layer.proc_extra_color_stops.add()
+            item.color = s.get("color", [0.5, 0.5, 0.5, 1.0])
+            item.position = s.get("position", 0.5)
 
     elif layer.layer_type == "ADJUSTMENT":
-        # CURVES was removed in favour of LEVELS+BRIGHT_CONTRAST â€” remap
+        # CURVES was removed in favour of LEVELS+BRIGHT_CONTRAST — remap
         # legacy presets so they still load without an enum error.
         adj_t = d.get("adj_type", "HUE_SAT")
         if adj_t == "CURVES":
@@ -518,27 +595,41 @@ def _dict_to_layer(d, tlm):
         layer.fresnel_strength  = d.get("fresnel_strength", 1.0)
         layer.use_mask          = d.get("use_mask", False)
         layer.mask_image_name   = d.get("mask_image_name", "")
-        # Feature C â€” Advanced combinable masks
+        # Feature C — Advanced combinable masks
         layer.mask_source        = d.get("mask_source", "IMAGE")
         layer.mask_invert        = d.get("mask_invert", False)
         layer.mask_ao_distance   = d.get("mask_ao_distance", 0.5)
         layer.mask_wireframe_size = d.get("mask_wireframe_size", 0.01)
         layer.mask_wireframe_use_pixel_size = d.get("mask_wireframe_use_pixel_size", True)
+        try:
+            layer.mask_voronoi_feature    = d.get("mask_voronoi_feature", 'DISTANCE_TO_EDGE')
+        except (TypeError, ValueError):
+            pass
+        layer.mask_voronoi_scale      = d.get("mask_voronoi_scale", 10.0)
+        layer.mask_voronoi_randomness = d.get("mask_voronoi_randomness", 1.0)
+        layer.mask_voronoi_edge_width = d.get("mask_voronoi_edge_width", 1.0)
         layer.use_mask_b         = d.get("use_mask_b", False)
         layer.mask_source_b      = d.get("mask_source_b", "POINTINESS")
         layer.mask_image_name_b  = d.get("mask_image_name_b", "")
         layer.mask_invert_b      = d.get("mask_invert_b", False)
         layer.mask_ao_distance_b = d.get("mask_ao_distance_b", 0.5)
+        try:
+            layer.mask_voronoi_feature_b    = d.get("mask_voronoi_feature_b", 'DISTANCE_TO_EDGE')
+        except (TypeError, ValueError):
+            pass
+        layer.mask_voronoi_scale_b      = d.get("mask_voronoi_scale_b", 10.0)
+        layer.mask_voronoi_randomness_b = d.get("mask_voronoi_randomness_b", 1.0)
+        layer.mask_voronoi_edge_width_b = d.get("mask_voronoi_edge_width_b", 1.0)
         layer.mask_combine       = d.get("mask_combine", "MULTIPLY")
         layer.mask_contrast      = d.get("mask_contrast", 0.5)
-        # Mask refinement â€” Levels
+        # Mask refinement — Levels
         layer.use_mask_levels     = d.get("use_mask_levels", False)
         layer.mask_levels_in_min  = d.get("mask_levels_in_min", 0.0)
         layer.mask_levels_in_max  = d.get("mask_levels_in_max", 1.0)
         layer.mask_levels_gamma   = d.get("mask_levels_gamma", 1.0)
         layer.mask_levels_out_min = d.get("mask_levels_out_min", 0.0)
         layer.mask_levels_out_max = d.get("mask_levels_out_max", 1.0)
-        # Mask refinement â€” Softness + Blur
+        # Mask refinement — Softness + Blur
         layer.mask_softness       = d.get("mask_softness", 0.0)
         layer.mask_blur           = d.get("mask_blur", 0.0)
         # Smart generator parameters
@@ -546,7 +637,7 @@ def _dict_to_layer(d, tlm):
         layer.mask_gen_breakup       = d.get("mask_gen_breakup", 0.3)
         layer.mask_gen_breakup_scale = d.get("mask_gen_breakup_scale", 15.0)
         layer.mask_gen_sharpness     = d.get("mask_gen_sharpness", 0.5)
-        # Image texture mapping config â€” Triplanar removed in favour
+        # Image texture mapping config — Triplanar removed in favour
         # of paint_projection='BOX'. Legacy files that still carry
         # use_triplanar=True are auto-migrated below.
         layer.paint_interpolation    = d.get("paint_interpolation", "Linear")
@@ -556,6 +647,8 @@ def _dict_to_layer(d, tlm):
         )
         layer.paint_projection_blend = d.get("paint_projection_blend", 0.3)
         layer.paint_source           = d.get("paint_source", "FILE")
+        layer.paint_pixelate         = d.get("paint_pixelate", False)
+        layer.paint_pixelate_size    = d.get("paint_pixelate_size", 32)
         # PBR channels
         layer.use_roughness        = d.get("use_roughness", False)
         layer.roughness_fill       = d.get("roughness_fill", 0.5)
@@ -566,6 +659,8 @@ def _dict_to_layer(d, tlm):
         layer.use_bump             = d.get("use_bump", False)
         layer.bump_strength        = d.get("bump_strength", 0.5)
         layer.bump_distance        = d.get("bump_distance", 0.05)
+        layer.use_displacement     = d.get("use_displacement", False)
+        layer.displacement_scale   = d.get("displacement_scale", 1.0)
         layer.use_normal           = d.get("use_normal", False)
         layer.normal_image_name    = d.get("normal_image_name", "")
         layer.normal_strength      = d.get("normal_strength", 1.0)
@@ -637,6 +732,14 @@ class TLM_OT_ExportJSON(Operator):
                 "use_emission_output":       getattr(tlm, 'use_emission_output', False),
                 "use_base_color_alpha":      getattr(tlm, 'use_base_color_alpha', False),
                 "alpha_blend_method":        getattr(tlm, 'alpha_blend_method', 'AUTO'),
+                # Real geometric Displacement — material-level master switch
+                # + Cycles Displacement node Scale/Midlevel. Without these,
+                # a rocky/brick preset round-trip loses the chunky silhouette.
+                "use_displacement":          getattr(tlm, 'use_displacement', False),
+                "displacement_method":       getattr(tlm, 'displacement_method', 'DISPLACEMENT'),
+                "displacement_strength":     getattr(tlm, 'displacement_strength', 0.1),
+                "displacement_midlevel":     getattr(tlm, 'displacement_midlevel', 0.5),
+                "displacement_adaptive":     getattr(tlm, 'displacement_adaptive', True),
             },
             "layers":      [_layer_to_dict(l) for l in tlm.layers],
         }
@@ -694,7 +797,7 @@ class TLM_OT_ImportJSON(Operator):
 
         # Schema validation: top-level must be a dict, "layers" must be a list.
         # A malformed file (corrupted, hand-edited, future version) shouldn't
-        # crash Blender â€” fail soft with a user-visible error.
+        # crash Blender — fail soft with a user-visible error.
         if not isinstance(data, dict):
             self.report({'ERROR'}, "Invalid .tlm file: top-level must be an object")
             return {'CANCELLED'}
@@ -724,6 +827,11 @@ class TLM_OT_ImportJSON(Operator):
                 ('use_emission_output',            False),
                 ('use_base_color_alpha',           False),
                 ('alpha_blend_method',             'AUTO'),
+                ('use_displacement',               False),
+                ('displacement_method',            'DISPLACEMENT'),
+                ('displacement_strength',          0.1),
+                ('displacement_midlevel',          0.5),
+                ('displacement_adaptive',          True),
             ):
                 if prop_name in mp:
                     try:
@@ -767,7 +875,7 @@ class TLM_OT_ImportJSON(Operator):
         return {'FINISHED'}
 
 
-# â”€â”€â”€ Layer da Clipboard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─── Layer da Clipboard ───────────────────────────────────────────────────────
 
 class TLM_OT_LayerFromClipboard(Operator):
     """Create a new layer from an image in the clipboard."""
@@ -802,7 +910,7 @@ class TLM_OT_LayerFromClipboard(Operator):
         # finally block can clean up if an exception fires after the
         # blank image was created but before it gets renamed into a
         # real Clipboard_N layer image. Without this, repeated failed
-        # paste attempts left TLM_Clipboard_Temp / .001 / .002 â€¦
+        # paste attempts left TLM_Clipboard_Temp / .001 / .002 …
         # accumulating in bpy.data.images.
         temp_img = None
         committed = False
