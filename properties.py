@@ -1755,6 +1755,7 @@ class TLM_LayerItem(PropertyGroup):
             ('SCRATCHES',   "Scratches",   "Anisotropic fine scratches — worn metal, scratched glass, brushed plastic, used surfaces", 20),
             ('STRIPES',     "Stripes",     "Hard-edged stripes (X, Y or diagonal) with adjustable width and sharpness", 10),
             ('TILES',       "Tiles",       "Tile generator — Running Bond / Stack layout, per-tile random shade, mortar lines (use UV coords)", 18),
+            ('TRUCHET',     "Truchet",     "Connected-path Truchet maze — pipes, circuits, mazes, organic flow (use UV coords)", 21),
             ('VORONOI',     "Voronoi",     "Cell/Worley noise",                                   1),
             ('WAVE',        "Wave",        "Sine wave bands or rings",                             2),
             ('WEAVE',       "Weave",       "Over-under woven threads — fabric, carpet, wicker, mesh, canvas", 19),
@@ -1916,6 +1917,14 @@ class TLM_LayerItem(PropertyGroup):
         name="Dot Size",
         description="Radius of each scattered dot within its cell",
         default=0.4, min=0.05, max=1.0, subtype='FACTOR',
+        update=_on_layer_update,
+    )
+
+    # ── Truchet-specific parameter ──────────────────────────────────────
+    proc_truchet_width: FloatProperty(
+        name="Line Width",
+        description="Thickness of the Truchet path lines",
+        default=0.15, min=0.02, max=0.5, subtype='FACTOR',
         update=_on_layer_update,
     )
 

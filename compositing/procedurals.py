@@ -873,6 +873,69 @@ def _build_fresnel_mask(node_tree, layer, x, y, name_tag=""):
 
 # ── Procedural node builder ───────────────────────────────────────────────────
 
+def _get_truchet_node_group():
+    """Build (once) and return the shared Truchet Fac node group.
+    Inputs: Vector, Scale, Width.  Output: Fac (0-1, 1 on the path).
+
+    Truchet's per-cell logic needs ~20 math nodes; building that inline on
+    every rebuild trips Blender's node-reference staleness at high node
+    counts (see the TILES history). So it lives in a reusable node group
+    created a SINGLE time and merely instanced thereafter — the per-material
+    rebuild only adds one ShaderNodeGroup node, which is robust.
+    """
+    name = "TLM_Truchet_v1"
+    ng = bpy.data.node_groups.get(name)
+    if ng is not None:
+        return ng
+    ng = bpy.data.node_groups.new(name, 'ShaderNodeTree')
+    itf = ng.interface
+    itf.new_socket("Vector", in_out='INPUT', socket_type='NodeSocketVector')
+    itf.new_socket("Scale",  in_out='INPUT', socket_type='NodeSocketFloat')
+    itf.new_socket("Width",  in_out='INPUT', socket_type='NodeSocketFloat')
+    itf.new_socket("Fac",    in_out='OUTPUT', socket_type='NodeSocketFloat')
+    nd = ng.nodes
+    lk = ng.links
+    gin = nd.new('NodeGroupInput');  gin.location = (-900, 0)
+    gout = nd.new('NodeGroupOutput'); gout.location = (900, 0)
+
+    def _m(op, xy):
+        n = nd.new('ShaderNodeMath'); n.operation = op; n.location = xy; return n
+
+    sep = nd.new('ShaderNodeSeparateXYZ'); sep.location = (-720, 0)
+    lk.new(gin.outputs["Vector"], sep.inputs[0])
+    sx = _m('MULTIPLY', (-560, 80)); lk.new(sep.outputs["X"], sx.inputs[0]); lk.new(gin.outputs["Scale"], sx.inputs[1])
+    sy = _m('MULTIPLY', (-560, -80)); lk.new(sep.outputs["Y"], sy.inputs[0]); lk.new(gin.outputs["Scale"], sy.inputs[1])
+    fu = _m('FRACT', (-400, 120)); lk.new(sx.outputs[0], fu.inputs[0])
+    fv = _m('FRACT', (-400, -40)); lk.new(sy.outputs[0], fv.inputs[0])
+    cu = _m('FLOOR', (-400, 260)); lk.new(sx.outputs[0], cu.inputs[0])
+    cv = _m('FLOOR', (-400, -200)); lk.new(sy.outputs[0], cv.inputs[0])
+    comb = nd.new('ShaderNodeCombineXYZ'); comb.location = (-240, 260)
+    lk.new(cu.outputs[0], comb.inputs["X"]); lk.new(cv.outputs[0], comb.inputs["Y"])
+    wn = nd.new('ShaderNodeTexWhiteNoise'); wn.location = (-80, 260)
+    lk.new(comb.outputs["Vector"], wn.inputs["Vector"])
+    bit = _m('GREATER_THAN', (80, 260)); bit.inputs[1].default_value = 0.5
+    lk.new(wn.outputs["Value"], bit.inputs[0])
+    # "/" distance = |fu - fv|
+    s1 = _m('SUBTRACT', (-240, 120)); lk.new(fu.outputs[0], s1.inputs[0]); lk.new(fv.outputs[0], s1.inputs[1])
+    dA = _m('ABSOLUTE', (-80, 120)); lk.new(s1.outputs[0], dA.inputs[0])
+    # "\" distance = |fu + fv - 1|
+    a1 = _m('ADD', (-240, -40)); lk.new(fu.outputs[0], a1.inputs[0]); lk.new(fv.outputs[0], a1.inputs[1])
+    s2 = _m('SUBTRACT', (-80, -40)); lk.new(a1.outputs[0], s2.inputs[0]); s2.inputs[1].default_value = 1.0
+    dB = _m('ABSOLUTE', (80, -40)); lk.new(s2.outputs[0], dB.inputs[0])
+    # select per cell: d = dA + bit*(dB - dA)
+    diff = _m('SUBTRACT', (240, 40)); lk.new(dB.outputs[0], diff.inputs[0]); lk.new(dA.outputs[0], diff.inputs[1])
+    sel = _m('MULTIPLY', (400, 120)); lk.new(bit.outputs[0], sel.inputs[0]); lk.new(diff.outputs[0], sel.inputs[1])
+    d = _m('ADD', (560, 40)); lk.new(dA.outputs[0], d.inputs[0]); lk.new(sel.outputs[0], d.inputs[1])
+    mr = nd.new('ShaderNodeMapRange'); mr.interpolation_type = 'SMOOTHSTEP'; mr.clamp = True; mr.location = (720, 40)
+    mr.inputs["From Min"].default_value = 0.0
+    mr.inputs["To Min"].default_value = 1.0
+    mr.inputs["To Max"].default_value = 0.0
+    lk.new(gin.outputs["Width"], mr.inputs["From Max"])
+    lk.new(d.outputs[0], mr.inputs["Value"])
+    lk.new(mr.outputs["Result"], gout.inputs["Fac"])
+    return ng
+
+
 def _build_procedural_node(node_tree, layer, uv_map, x, y):
     """
     Build the shader nodes for a PROCEDURAL layer.
@@ -1849,6 +1912,21 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
         node_tree.links.new(pres.outputs["Value"], facn.inputs[1])
         return _build_proc_color_ramp(node_tree, layer, x, y, facn.outputs["Value"]), None
 
+    elif pt == 'TRUCHET':
+        # Connected-path Truchet via a reusable node group (per-cell random
+        # diagonal orientation → continuous maze paths). proc_scale=cell
+        # density, proc_truchet_width=line thickness. Color1=background,
+        # Color2=path. (UV coords recommended.)
+        grp = node_tree.nodes.new("ShaderNodeGroup")
+        grp.node_tree = _get_truchet_node_group()
+        grp.name = f"{TLM_PREFIX}proc_tex_{_next_id()}"
+        grp.location = (x - 100, y)
+        _tag(grp, layer.name, "proc_tex")
+        node_tree.links.new(vec_out, grp.inputs["Vector"])
+        grp.inputs["Scale"].default_value = layer.proc_scale
+        grp.inputs["Width"].default_value = getattr(layer, 'proc_truchet_width', 0.15)
+        return _build_proc_color_ramp(node_tree, layer, x, y, grp.outputs["Fac"]), None
+
     if tex_node is None:
         return None, None
 
@@ -2605,6 +2683,17 @@ def _build_proc_fac_node(node_tree, layer, name_suffix, x, y, uv_map="UVMap"):
         node_tree.links.new(dot.outputs["Result"], facn.inputs[0])
         node_tree.links.new(pres.outputs["Value"], facn.inputs[1])
         return facn.outputs["Value"]
+
+    elif pt == 'TRUCHET':
+        grp = node_tree.nodes.new("ShaderNodeGroup")
+        grp.node_tree = _get_truchet_node_group()
+        grp.name = f"{TLM_PREFIX}pfac_tru_{name_suffix}"
+        grp.location = (x - 100, y)
+        _tag(grp, layer.name, "proc_tex")
+        node_tree.links.new(vec_out, grp.inputs["Vector"])
+        grp.inputs["Scale"].default_value = layer.proc_scale
+        grp.inputs["Width"].default_value = getattr(layer, 'proc_truchet_width', 0.15)
+        return grp.outputs["Fac"]
 
     if tex is None or fac_out is None:
         return None

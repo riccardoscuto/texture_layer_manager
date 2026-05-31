@@ -573,6 +573,11 @@ def _draw_procedural(col, active, tlm):
         col_pat.label(text="Tip: Color1 = background, Color2 = scattered dots",
                       icon='INFO')
 
+    elif pt == 'TRUCHET':
+        col_pat.prop(active, "proc_truchet_width", text="Line Width", slider=True)
+        col_pat.label(text="Tip: use UV coords · Color1 = background, Color2 = path",
+                      icon='INFO')
+
     # End of pattern params (col_pat box). Tail handles mapping + Fresnel
     # + mask + pbr channels regardless of whether pattern section is open.
     _draw_procedural_advanced_tail(col, active, tlm)

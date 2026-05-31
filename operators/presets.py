@@ -237,6 +237,7 @@ class TLM_OT_ApplyPreset(Operator):
                 layer.proc_tiles_random    = ld.get("proc_tiles_random", 0.5)
                 layer.proc_scatter_density = ld.get("proc_scatter_density", 0.5)
                 layer.proc_scatter_size    = ld.get("proc_scatter_size", 0.4)
+                layer.proc_truchet_width   = ld.get("proc_truchet_width", 0.15)
                 layer.proc_ridged_offset   = ld.get("proc_ridged_offset", 1.0)
                 layer.proc_ridged_gain     = ld.get("proc_ridged_gain", 2.0)
                 layer.proc_gabor_anisotropy = ld.get("proc_gabor_anisotropy", 1.0)
@@ -587,6 +588,7 @@ class TLM_OT_SavePreset(Operator):
                     "proc_tiles_random": getattr(layer, 'proc_tiles_random', 0.5),
                     "proc_scatter_density": getattr(layer, 'proc_scatter_density', 0.5),
                     "proc_scatter_size": getattr(layer, 'proc_scatter_size', 0.4),
+                    "proc_truchet_width": getattr(layer, 'proc_truchet_width', 0.15),
                     "proc_ridged_offset": getattr(layer, 'proc_ridged_offset', 1.0),
                     "proc_ridged_gain": getattr(layer, 'proc_ridged_gain', 2.0),
                     "proc_gabor_anisotropy": getattr(layer, 'proc_gabor_anisotropy', 1.0),
