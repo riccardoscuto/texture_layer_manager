@@ -87,6 +87,98 @@ def _on_depsgraph_update_post(scene, depsgraph):
         pass  # never crash the depsgraph from a hot-update handler
 
 
+# ── Frame-change handler: drive ANIMATED layer props into the node tree ────
+# Blender's animation system writes property values directly and BYPASSES the
+# Python `update=` callbacks TLM relies on to hot-sync the node graph. So a
+# keyframed `tlm.layers[i].opacity` (the Keyframe button) animated the property
+# but never moved the compositing Mix factor — the material looked frozen and
+# the button "did nothing". On each frame change we re-apply the matching
+# hot-updater for the animated layer props so animation shows live AND in
+# rendered output.
+import re as _re
+_TLM_LAYER_FCURVE_RE = _re.compile(r"tlm\.layers\[(\d+)\]\.([A-Za-z_0-9]+)")
+
+
+def _iter_action_fcurves(action):
+    """Yield an Action's F-curves across legacy and 4.4+ slotted layouts."""
+    legacy = getattr(action, "fcurves", None)
+    if legacy is not None:
+        for fc in legacy:
+            yield fc
+        return
+    for layer in getattr(action, "layers", []):
+        for strip in getattr(layer, "strips", []):
+            bags = getattr(strip, "channelbags", None)
+            if bags is not None:
+                for bag in bags:
+                    for fc in getattr(bag, "fcurves", []):
+                        yield fc
+            else:
+                for slot in getattr(action, "slots", []):
+                    try:
+                        bag = strip.channelbag(slot)
+                    except Exception:
+                        bag = None
+                    if bag is not None:
+                        for fc in getattr(bag, "fcurves", []):
+                            yield fc
+
+
+@bpy.app.handlers.persistent
+def _on_frame_change_post(scene, depsgraph=None):
+    """Re-sync animated TLM layer properties into the node tree each frame."""
+    try:
+        from .compositing import hot_update as _hu
+        dispatch = _hu._HOT_DISPATCH
+        opac = dispatch.get("opacity")
+    except Exception:
+        return
+    for mat in bpy.data.materials:
+      try:
+        if not getattr(mat, "use_nodes", False):
+            continue
+        tlm = getattr(mat, "tlm", None)
+        if tlm is None or len(tlm.layers) == 0:
+            continue
+        ad = mat.animation_data
+        if ad is None or ad.action is None:
+            continue
+        nt = mat.node_tree
+        if nt is None:
+            continue
+        # (1) Cheap unconditional opacity re-sync — guarantees the Keyframe
+        #     button works even if the Action F-curve API can't be walked.
+        if opac is not None:
+            for layer in tlm.layers:
+                try:
+                    opac(nt, layer, "opacity")
+                except Exception:
+                    pass
+        # (2) F-curve-targeted dispatch for any OTHER animated hot property
+        #     (proc params, colours, emission strength, adjustments, …).
+        try:
+            for fc in _iter_action_fcurves(ad.action):
+                m = _TLM_LAYER_FCURVE_RE.match(fc.data_path or "")
+                if not m:
+                    continue
+                prop = m.group(2)
+                if prop == "opacity":
+                    continue  # handled above
+                li = int(m.group(1))
+                if li >= len(tlm.layers):
+                    continue
+                fn = dispatch.get(prop)
+                if fn is not None:
+                    try:
+                        fn(nt, tlm.layers[li], prop)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+      except Exception:
+        continue  # one bad material must never break playback
+
+
 def register():
     # Print loaded version + module path so the user can verify in the
     # System Console that Blender actually picked up the latest code
@@ -98,6 +190,10 @@ def register():
     # Register depsgraph handler for NDOTL/NDOTH sun hot-update
     if _on_depsgraph_update_post not in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.append(_on_depsgraph_update_post)
+    # Register frame-change handler so animated/keyframed layer props (opacity
+    # etc.) actually drive the node tree during playback and rendering.
+    if _on_frame_change_post not in bpy.app.handlers.frame_change_post:
+        bpy.app.handlers.frame_change_post.append(_on_frame_change_post)
 
 
 def unregister():
@@ -111,6 +207,9 @@ def unregister():
     # Remove depsgraph handler
     if _on_depsgraph_update_post in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.remove(_on_depsgraph_update_post)
+    # Remove frame-change handler
+    if _on_frame_change_post in bpy.app.handlers.frame_change_post:
+        bpy.app.handlers.frame_change_post.remove(_on_frame_change_post)
     for mod in reversed(modules):
         mod.unregister()
 
