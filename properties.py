@@ -1170,6 +1170,46 @@ class TLM_LayerItem(PropertyGroup):
         update=_on_layer_update,
     )
 
+    # ── Height-based blending ────────────────────────────────────────────
+    # When on, this layer's blend boundary against everything below is driven
+    # by a HEIGHT comparison (taller surface wins) instead of a flat opacity
+    # fade — the Substance "Height Blend" behaviour. Opacity becomes a height
+    # BIAS (0.5 = neutral compare, 1.0 = this layer dominates, 0.0 = recedes).
+    # Needs at least two height-blend layers in the stack: the lower ones seed
+    # the height field, the upper ones blend against it.
+    use_height_blend: BoolProperty(
+        name="Height Blend",
+        description="Blend against the layers below by HEIGHT (taller surface shows) "
+                    "instead of a flat opacity fade. Opacity becomes a height bias. "
+                    "Enable on the base layer too so it contributes its height",
+        default=False,
+        update=_on_layer_update,
+    )
+    height_blend_source: EnumProperty(
+        name="Height Source",
+        description="Where this layer's height comes from for the blend comparison",
+        items=[
+            ('AUTO',  "Auto (Pattern)", "PROCEDURAL layers use their own pattern Fac as height. "
+                                        "Other layer types have no implicit height — use Height Map", 0),
+            ('IMAGE', "Height Map",     "Use a dedicated grayscale height image (luminance)", 1),
+        ],
+        default='AUTO',
+        update=_on_layer_update,
+    )
+    height_blend_image_name: StringProperty(
+        name="Height Map",
+        description="Grayscale height image driving this layer's height when Source = Height Map",
+        default="",
+        update=_on_layer_update,
+    )
+    height_blend_contrast: FloatProperty(
+        name="Blend Contrast",
+        description="Sharpness of the height transition. Low = soft, wide interlock; "
+                    "high = razor-sharp boundary where the taller surface wins",
+        default=0.5, min=0.0, max=1.0, subtype='FACTOR',
+        update=_on_layer_update,
+    )
+
     # NOTE: Triplanar used to be a custom feature (use_triplanar /
     # triplanar_scale / triplanar_sharpness). It has been removed in
     # favour of Blender's native 'BOX' projection on the Image Texture

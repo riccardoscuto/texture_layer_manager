@@ -109,6 +109,11 @@ def _layer_to_dict(layer):
         "group_name":        layer.group_name,
         "collapsed":         layer.collapsed,
         "use_clipping_mask": layer.use_clipping_mask,
+        # Height-based blending
+        "use_height_blend":        getattr(layer, 'use_height_blend', False),
+        "height_blend_source":     getattr(layer, 'height_blend_source', 'AUTO'),
+        "height_blend_image_name": getattr(layer, 'height_blend_image_name', ''),
+        "height_blend_contrast":   round(getattr(layer, 'height_blend_contrast', 0.5), 4),
         # Routing — which BSDF input this layer drives
         "output_channel":    getattr(layer, 'output_channel', 'BASE_COLOR'),
         # Branching — per-channel blend mode overrides
@@ -383,6 +388,11 @@ def _dict_to_layer(d, tlm):
     layer.group_name = "" if layer.layer_type == "GROUP" else _raw_group
     layer.collapsed         = d.get("collapsed", False)
     layer.use_clipping_mask = d.get("use_clipping_mask", False)
+    # Height-based blending
+    layer.use_height_blend        = d.get("use_height_blend", False)
+    layer.height_blend_source     = d.get("height_blend_source", "AUTO")
+    layer.height_blend_image_name = d.get("height_blend_image_name", "")
+    layer.height_blend_contrast   = d.get("height_blend_contrast", 0.5)
     # Routing — default BASE_COLOR keeps pre-routing presets working.
     # Legacy 'AUTO' (older builds) falls through to BASE_COLOR via the
     # alias in _layer_contributes_to.

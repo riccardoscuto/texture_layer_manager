@@ -87,12 +87,30 @@ def _is_at_compositor_bottom(active, tlm):
 
 def _draw_clipping_mask(col, active, tlm):
     """Draw the Clipping Mask toggle + a warning label if the layer is at
-    the compositor bottom (where the clip silently has no effect)."""
+    the compositor bottom (where the clip silently has no effect).
+
+    Also draws the Height Blend controls — both are blend-boundary
+    modifiers, so they live together below the PBR channels."""
     col.prop(active, "use_clipping_mask",
              text="Clipping Mask", icon='CLIPUV_DEHLT', toggle=True)
     if active.use_clipping_mask and _is_at_compositor_bottom(active, tlm):
         col.label(text="No effect — nothing to clip against below",
                   icon='ERROR')
+
+    # ── Height Blend ──────────────────────────────────────────────────
+    col.prop(active, "use_height_blend",
+             text="Height Blend", icon='MOD_DISPLACE', toggle=True)
+    if active.use_height_blend:
+        hb = col.box().column(align=True)
+        hb.prop(active, "height_blend_source", text="Height")
+        if active.height_blend_source == 'IMAGE':
+            hb.prop_search(active, "height_blend_image_name",
+                           bpy.data, "images", text="Map")
+        elif active.layer_type != 'PROCEDURAL':
+            hb.label(text="Auto height needs a Procedural layer",
+                     icon='INFO')
+        hb.prop(active, "height_blend_contrast", text="Contrast", slider=True)
+        hb.label(text="Opacity = height bias (0.5 = neutral)", icon='INFO')
 
 
 class TLM_UL_LayerList(UIList):

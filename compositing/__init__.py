@@ -1303,6 +1303,15 @@ def rebuild_node_tree(material):
                     node_tree.links.new(height_out, disp_node.inputs["Height"])
                     node_tree.links.new(disp_node.outputs["Displacement"], disp_in)
 
+        # ── Height-blend pre-pass ───────────────────────────────────────
+        # Build the running-height reroutes (height_self_<layer> /
+        # height_below_<layer>) ONCE over the expanded stack, before any
+        # channel is composited. _set_factor then reads them by tag so a
+        # height-driven blend boundary stays coherent across every channel.
+        if any(getattr(l, 'use_height_blend', False) for l in expanded):
+            _build_height_stack(node_tree, expanded, uv_map,
+                                 start_x - 520, ch_y['base_color'] + 260)
+
         # ── Base Color — built from root_layers to preserve GROUP alpha for clipping mask ─
         bc_out, bc_alpha = _build_base_color(node_tree, root_layers, group_children, uv_map, start_x, ch_y['base_color'], x_step)
         if bc_out:

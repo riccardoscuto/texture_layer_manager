@@ -129,6 +129,10 @@ class TLM_OT_ApplyPreset(Operator):
             layer.group_name = "" if layer.layer_type == "GROUP" else _raw_group
             layer.collapsed  = ld.get("collapsed", False)
             layer.use_clipping_mask = ld.get("use_clipping_mask", False)
+            layer.use_height_blend        = ld.get("use_height_blend", False)
+            layer.height_blend_source     = ld.get("height_blend_source", "AUTO")
+            layer.height_blend_image_name = ld.get("height_blend_image_name", "")
+            layer.height_blend_contrast   = ld.get("height_blend_contrast", 0.5)
             # Routing — restore output_channel; legacy 'AUTO' maps to 'BASE_COLOR'
             _out_ch = ld.get("output_channel", "BASE_COLOR")
             if _out_ch == "AUTO":
@@ -511,6 +515,10 @@ class TLM_OT_SavePreset(Operator):
                 "visible": layer.visible, "group_name": layer.group_name,
                 "collapsed": layer.collapsed,
                 "use_clipping_mask": layer.use_clipping_mask,
+                "use_height_blend":        getattr(layer, 'use_height_blend', False),
+                "height_blend_source":     getattr(layer, 'height_blend_source', 'AUTO'),
+                "height_blend_image_name": getattr(layer, 'height_blend_image_name', ''),
+                "height_blend_contrast":   round(getattr(layer, 'height_blend_contrast', 0.5), 4),
             }
             # Routing — which BSDF input the layer drives
             d["output_channel"]          = getattr(layer, 'output_channel',          'BASE_COLOR')

@@ -69,6 +69,7 @@ __all__ = [
     '_build_normal_channel',
     '_build_bump_channel',
     '_build_displacement_channel',
+    '_build_height_stack',
     '_layer_contributes_to',
     '_channel_used',
     # Lookup tables / constants that live at module level
@@ -906,8 +907,103 @@ def _build_channel(node_tree, layers, channel_id, uv_map, x0, y_base, x_step):
     return current
 
 
+def _find_tagged_output(node_tree, owner, role):
+    """Return the first output socket of a node tagged (owner, role), or None.
+
+    Used to look up the height-blend pre-pass reroutes
+    (height_self_<layer> / height_below_<layer>) from inside _set_factor,
+    so the blend factor stays coherent across every channel pass without
+    threading extra arguments through the build.
+    """
+    for n in node_tree.nodes:
+        if n.get('tlm_layer') == owner and n.get('tlm_role') == role:
+            return n.outputs[0]
+    return None
+
+
+def _build_layer_height_source(node_tree, layer, uv_map, x, y):
+    """Return a scalar height socket for a layer, or None if it has none.
+
+    height_blend_source:
+      IMAGE → dedicated height_blend_image_name (luminance). Falls back to
+              AUTO when no image is assigned.
+      AUTO  → PROCEDURAL: the pattern's Fac (its natural relief).
+              Other layer types have no implicit height — use the IMAGE slot.
+    """
+    src = getattr(layer, 'height_blend_source', 'AUTO')
+    if src == 'IMAGE':
+        name = getattr(layer, 'height_blend_image_name', '')
+        img = bpy.data.images.get(name) if name else None
+        if img is not None:
+            tex = _new_img_tex(node_tree, img, uv_map, x, y, "Non-Color", layer=layer)
+            bw = node_tree.nodes.new("ShaderNodeRGBToBW")
+            bw.name = f"{TLM_PREFIX}hb_bw_{_next_id()}"
+            bw.location = (x + 220, y)
+            node_tree.links.new(tex.outputs["Color"], bw.inputs["Color"])
+            return bw.outputs["Val"]
+        # no image assigned → fall through to AUTO
+    if layer.layer_type == 'PROCEDURAL':
+        return _build_proc_fac_node(node_tree, layer, f"hb_{_next_id()}", x, y, uv_map)
+    return None
+
+
+def _build_height_stack(node_tree, layers, uv_map, x, y_base):
+    """Pre-pass for height-based blending.
+
+    Walks the layers in compositing order (layers[i] sits on top of 0..i-1)
+    and composites a running MAX height across every use_height_blend layer.
+    Drops two tagged reroutes per participating layer:
+      height_self_<layer>  — this layer's own height
+      height_below_<layer> — MAX height of every height-blend layer beneath it
+    _set_factor reads these by tag to drive a height comparison instead of a
+    flat opacity fade. The first height-blend layer has no 'below' (it just
+    seeds the stack and blends normally).
+    """
+    running = None
+    for idx, layer in enumerate(layers):
+        if not getattr(layer, 'use_height_blend', False):
+            continue
+        hy = y_base - idx * 60
+        h = _build_layer_height_source(node_tree, layer, uv_map, x, hy)
+        if h is None:
+            continue
+        self_rr = node_tree.nodes.new("NodeReroute")
+        self_rr.name = f"{TLM_PREFIX}hb_self_{_next_id()}"
+        self_rr.location = (x + 440, hy)
+        node_tree.links.new(h, self_rr.inputs[0])
+        _tag(self_rr, layer.name, "height_self")
+        if running is not None:
+            below_rr = node_tree.nodes.new("NodeReroute")
+            below_rr.name = f"{TLM_PREFIX}hb_below_{_next_id()}"
+            below_rr.location = (x + 440, hy - 24)
+            node_tree.links.new(running, below_rr.inputs[0])
+            _tag(below_rr, layer.name, "height_below")
+            mx = node_tree.nodes.new("ShaderNodeMath")
+            mx.operation = 'MAXIMUM'
+            mx.name = f"{TLM_PREFIX}hb_max_{_next_id()}"
+            mx.location = (x + 520, hy)
+            node_tree.links.new(running, mx.inputs[0])
+            node_tree.links.new(h, mx.inputs[1])
+            running = mx.outputs["Value"]
+        else:
+            running = h
+
+
 def _set_factor(node_tree, mix_node, layer, layer_alpha, prev_alpha, x, y, i, uv_map="UVMap", channel="base_color"):
     """Wire up the blend factor for a color mix node."""
+    # ── Height-blend detection ────────────────────────────────────────────
+    # When use_height_blend is on AND the pre-pass built this layer's height
+    # plus an accumulated "height below", the blend boundary is driven by a
+    # height comparison instead of a flat opacity fade. In that mode opacity
+    # becomes a HEIGHT BIAS (consumed in the comparison below), so it must NOT
+    # also multiply the factor: eff_op stays 1.0 and the opacity_target tag
+    # moves to the bias node so the Opacity slider still hot-updates.
+    h_self  = _find_tagged_output(node_tree, layer.name, 'height_self')
+    h_below = _find_tagged_output(node_tree, layer.name, 'height_below')
+    hb_active = (getattr(layer, 'use_height_blend', False)
+                 and h_self is not None and h_below is not None)
+    eff_op = 1.0 if hb_active else layer.opacity
+
     mask_applied = False
     if getattr(layer, 'use_mask', False):
         # Pass layer_alpha so the mask pipeline folds it into the final
@@ -917,8 +1013,9 @@ def _set_factor(node_tree, mix_node, layer, layer_alpha, prev_alpha, x, y, i, uv
         mult = _apply_mask(node_tree, mix_node, layer, uv_map, x, y,
                            layer_alpha=layer_alpha)
         if mult is not None:
-            mult.inputs[1].default_value = layer.opacity
-            _tag(mult, layer.name, f"opacity_target_{channel}", opacity_input_idx=1)
+            mult.inputs[1].default_value = eff_op
+            if not hb_active:
+                _tag(mult, layer.name, f"opacity_target_{channel}", opacity_input_idx=1)
             mask_applied = True
 
     if mask_applied:
@@ -936,13 +1033,15 @@ def _set_factor(node_tree, mix_node, layer, layer_alpha, prev_alpha, x, y, i, uv
             op.name = f"{TLM_PREFIX}clip_op_{i}"
             op.location = (x - 50, y - 180)
             node_tree.links.new(clip.outputs["Value"], op.inputs[0])
-            op.inputs[1].default_value = layer.opacity
-            _tag(op, layer.name, f"opacity_target_{channel}", opacity_input_idx=1)
+            op.inputs[1].default_value = eff_op
+            if not hb_active:
+                _tag(op, layer.name, f"opacity_target_{channel}", opacity_input_idx=1)
             node_tree.links.new(op.outputs["Value"], _factor_socket(mix_node))
         else:
             node_tree.links.new(prev_alpha, clip.inputs[0])
-            clip.inputs[1].default_value = layer.opacity
-            _tag(clip, layer.name, f"opacity_target_{channel}", opacity_input_idx=1)
+            clip.inputs[1].default_value = eff_op
+            if not hb_active:
+                _tag(clip, layer.name, f"opacity_target_{channel}", opacity_input_idx=1)
             node_tree.links.new(clip.outputs["Value"], _factor_socket(mix_node))
     else:
         # Factor = opacity × layer_alpha (whenever alpha exists).
@@ -961,14 +1060,66 @@ def _set_factor(node_tree, mix_node, layer, layer_alpha, prev_alpha, x, y, i, uv
             am.name = f"{TLM_PREFIX}alpha_mult_{i}"
             am.location = (x - 160, y - 180)
             node_tree.links.new(layer_alpha, am.inputs[0])
-            am.inputs[1].default_value = layer.opacity
-            _tag(am, layer.name, f"opacity_target_{channel}", opacity_input_idx=1)
+            am.inputs[1].default_value = eff_op
+            if not hb_active:
+                _tag(am, layer.name, f"opacity_target_{channel}", opacity_input_idx=1)
             node_tree.links.new(am.outputs["Value"], _factor_socket(mix_node))
         else:
-            _factor_socket(mix_node).default_value = layer.opacity
+            _factor_socket(mix_node).default_value = eff_op
             # Tag the mix node itself as opacity target (direct factor write)
-            _tag(mix_node, layer.name, f"opacity_target_{channel}",
-                 opacity_input_idx=-1)  # -1 = factor socket
+            if not hb_active:
+                _tag(mix_node, layer.name, f"opacity_target_{channel}",
+                     opacity_input_idx=-1)  # -1 = factor socket
+
+    # ── Height-blend term: gate the factor by a height comparison ─────────
+    # term = smoothstep(0.5 ± w, (h_self - h_below) + opacity_bias)
+    #   opacity 0.5 → neutral compare (layer shows where it is taller)
+    #   opacity 1.0 → layer dominates;  opacity 0.0 → layer recedes
+    #   contrast     → transition width (high = razor-sharp boundary)
+    if hb_active:
+        contrast = max(0.0, min(1.0, getattr(layer, 'height_blend_contrast', 0.5)))
+        w = (1.0 - contrast) * 0.49 + 0.01
+        sub = node_tree.nodes.new("ShaderNodeMath")
+        sub.operation = 'SUBTRACT'
+        sub.name = f"{TLM_PREFIX}hb_diff_{i}_{channel}"
+        sub.location = (x - 120, y - 380)
+        node_tree.links.new(h_self, sub.inputs[0])
+        node_tree.links.new(h_below, sub.inputs[1])
+        bias = node_tree.nodes.new("ShaderNodeMath")
+        bias.operation = 'ADD'
+        bias.name = f"{TLM_PREFIX}hb_bias_{i}_{channel}"
+        bias.location = (x - 40, y - 380)
+        node_tree.links.new(sub.outputs["Value"], bias.inputs[0])
+        bias.inputs[1].default_value = layer.opacity
+        # The Opacity slider drives the height bias → keep it hot-updatable.
+        _tag(bias, layer.name, f"opacity_target_{channel}", opacity_input_idx=1)
+        smit = node_tree.nodes.new("ShaderNodeMapRange")
+        smit.name = f"{TLM_PREFIX}hb_smooth_{i}_{channel}"
+        smit.location = (x + 60, y - 380)
+        smit.clamp = True
+        if hasattr(smit, 'interpolation_type'):
+            smit.interpolation_type = 'SMOOTHSTEP'
+        node_tree.links.new(bias.outputs["Value"], smit.inputs["Value"])
+        smit.inputs["From Min"].default_value = 0.5 - w
+        smit.inputs["From Max"].default_value = 0.5 + w
+        smit.inputs["To Min"].default_value = 0.0
+        smit.inputs["To Max"].default_value = 1.0
+        hterm = smit.outputs.get("Result") or smit.outputs[0]
+        factor_sock = _factor_socket(mix_node)
+        existing_link = next((l for l in node_tree.links if l.to_socket == factor_sock), None)
+        hmul = node_tree.nodes.new("ShaderNodeMath")
+        hmul.operation = 'MULTIPLY'
+        hmul.name = f"{TLM_PREFIX}hb_mul_{i}_{channel}"
+        hmul.use_clamp = True
+        hmul.location = (x + 240, y - 360)
+        if existing_link:
+            src = existing_link.from_socket
+            node_tree.links.remove(existing_link)
+            node_tree.links.new(src, hmul.inputs[0])
+        else:
+            hmul.inputs[0].default_value = factor_sock.default_value
+        node_tree.links.new(hterm, hmul.inputs[1])
+        node_tree.links.new(hmul.outputs["Value"], factor_sock)
 
     # ── Fresnel mask: multiply the current factor by a Fresnel output ─────
     # This makes the layer visible only at glancing angles (edge glow / rim)
