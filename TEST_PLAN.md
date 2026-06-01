@@ -1,15 +1,41 @@
 # TLM — Test Plan
 
-Piano di test manuale da eseguire in Blender 5.0.
-Ogni test ha: **Setup** (cosa fare) → **Expected** (cosa deve succedere) → ☐ Pass / ☐ Fail / **Note**.
+**Aggiornato**: 2026-05-28 — copre features fino al commit `a16134b` (PAINT-only brush icon).
+**Target Blender**: 5.0 / 5.1 (la suite supporta entrambe).
 
-Usa sempre lo stesso oggetto di test: una **Plane** con UV unwrappato (U → Unwrap), sotto una HDRI neutra, viewport shading **Rendered**.
+Piano di test manuale. Ogni test ha: **Setup** → **Expected** → ☐ Pass / ☐ Fail / **Note**.
+
+Oggetto di test consigliato: una **Plane** con UV unwrappato (U → Unwrap), sotto una HDRI neutra, viewport shading **Rendered**.
+Per i test che richiedono displacement reale, usa una mesh con subdivision (Subdiv ≥3 + Cycles). Per i test NDOTL/NDOTH, serve una **Sun light** nella scena.
 Salva spesso. Apri la console Blender (Window → Toggle System Console) per vedere errori Python.
 
 **Legenda**:
 - `☑` = da spuntare quando il test passa
 - **Crit** = test critico (se fallisce blocca tutto il resto)
 - **Reg** = regression (ha rotto in passato, merita attenzione extra)
+- **New** = aggiunto dopo il pass precedente (≥ 2026-04-22)
+
+## Cosa è NUOVO dall'ultimo pass (2026-04-22 → 2026-05-28)
+
+Sezioni interamente nuove (in fondo al file):
+- §26 — Material-Level Settings (BSDF IOR, Volume Absorption, Volume Scatter)
+- §27 — Geometric Displacement (master + per-layer)
+- §28 — Anime / Cel-Shading (NdotL mask, integrated outline, emission bypass)
+- §29 — Alpha Channel (output_channel=ALPHA + alpha_math_operation)
+- §30 — ColorRamp UI Controls (Manual Stops, Mode/Interp, multi-stop)
+- §31 — Image Mapping (paint/fill UV controls — Source/Projection/Extension + Loc/Rot/Scale)
+- §32 — UI Phase 2 Structure (Surface Effects collapsible, Mask always-on collapsible, PAINT-only brush)
+- §33 — Preset Library Integrity (post Phase 2 refactor — tutti i .tlm devono caricare con BSDF wired)
+
+Sezioni che hanno ricevuto modifiche significative:
+- §2 — HARD_LIGHT rimosso dall'enum (cross-version inconsistente)
+- §3 — Aggiunti Alpha channel + Transmission (canale completato)
+- §5 — Procedurals: passati da **8** a **17** tipi (BRICK / CRACKS / DOTS / FRESNEL / GABOR / HEX_GRID / MAGIC / RIDGED / STRIPES / WHITE_NOISE aggiunti, MARBLE/CLOUDS riassorbiti come WAVE/NOISE variants)
+- §6 — Adjustments: da 5 a **4** tipi (CURVES rimosso)
+- §9 — Mask sources: aggiunti WIREFRAME, FRESNEL, NDOTL, NDOTH, VORONOI (oltre alle 6 originarie)
+- §13 — Fresnel UI: ora dentro la collapsible "Surface Effects", non più riga inline
+- §14 — Coordinates: UI riorganizzata dentro la collapsible "Mapping"
+- §18 — Lista preset aggiornata (28+ presets, inclusi tutti gli Hero A → Q)
 
 ---
 
@@ -131,7 +157,9 @@ Salva spesso. Apri la console Blender (Window → Toggle System Console) per ved
 
 ## 2. Blend Modes
 
-TLM supporta 20 blend modes: MIX, MULTIPLY, SCREEN, OVERLAY, ADD, SUBTRACT, DIFFERENCE, DIVIDE, DARKEN, LIGHTEN, COLOR_DODGE, COLOR_BURN, SOFT_LIGHT, HARD_LIGHT, LINEAR_LIGHT, EXCLUSION, HUE, SATURATION, COLOR, LUMINOSITY.
+TLM supporta **19** blend modes: MIX, MULTIPLY, SCREEN, OVERLAY, ADD, SUBTRACT, DIFFERENCE, DIVIDE, DARKEN, LIGHTEN, COLOR_DODGE, COLOR_BURN, SOFT_LIGHT, LINEAR_LIGHT, EXCLUSION, HUE, SATURATION, COLOR, LUMINOSITY.
+
+**Nota 2026-05-xx**: HARD_LIGHT è stato **rimosso** dall'enum user-facing per inconsistenza cross-version (Blender 4.x vs 5.x). I .tlm/JSON che ancora contengono "HARD_LIGHT" cadono su MIX via `.get(..., "MIX")` in `BLEND_TO_MIX_MODE`. Non aggiungere nuove istanze.
 
 ### 2.1 [Crit] MIX (default)
 **Setup**: 2 layer Fill, uno rosso (1,0,0) sopra uno blu (0,0,1), opacity 0.5.
@@ -361,9 +389,18 @@ Permette a un singolo layer di avere blend mode diversi per ciascun canale PBR.
 
 ---
 
-## 5. Procedural Types (8 tipi)
+## 5. Procedural Types (17 tipi)
 
-Shared params: `proc_scale`, `proc_offset_x/y/z`, `proc_color1`, `proc_color2`, `proc_contrast`.
+Shared params (visibili in tutti tranne dove specificato): `proc_scale`, `proc_color1/2/3 + extras`, `proc_contrast`, `proc_ramp_center`, `proc_offset_x/y/z`, `proc_rotation_x/y/z`, `proc_mapping_scale_x/y/z`, `proc_vector_distortion`.
+
+**Sezioni UI** (per ogni procedural layer, in ordine):
+1. Pattern Params (collapsible) — knob per-type + scale
+2. Mapping (collapsible) — Location/Rotation/Scale + Coords + Transform
+3. Color Ramp (collapsible) — Mode/Interp + manual stops + extras + Contrast/Center
+4. Mask (collapsible — sempre visibile)
+5. Surface Effects (collapsible — Fresnel/Displacement/Volume)
+6. PBR Channels (collapsible)
+7. Clipping Mask + Group Assignment (inline)
 
 ### 5.1 [Crit] NOISE
 **Setup**: Procedural → Type = Noise. Regola scale, detail, distortion.
@@ -425,9 +462,69 @@ Shared params: `proc_scale`, `proc_offset_x/y/z`, `proc_color1`, `proc_color2`, 
 **Expected**: Pattern distorto.
 ☐ Pass ☐ Fail — Note:
 
+### 5.13 [New] BRICK
+**Setup**: Type = Brick. Regola Mortar Size / Brick Width / Row Height / Offset / Bias.
+**Expected**: Pattern mattoni con malta visibile. `use_proc_color3=True` → Color3 = colore malta (suggerito da hint UI).
+☐ Pass ☐ Fail — Note:
+
+### 5.14 [New] MAGIC
+**Setup**: Type = Magic. Regola Depth + Distortion.
+**Expected**: Pattern caleidoscopico colorato che cambia con Depth.
+☐ Pass ☐ Fail — Note:
+
+### 5.15 [New] WHITE_NOISE
+**Setup**: Type = White Noise. Regola Scale.
+**Expected**: Rumore per-pixel grossolano (grano fine, dust). Nessun parametro extra (label INFO conferma).
+☐ Pass ☐ Fail — Note:
+
+### 5.16 [New] STRIPES
+**Setup**: Type = Stripes. Direction = X/Y/Diagonal. Width = 0.3, Sharpness = 0.95.
+**Expected**: Strisce dure. Detail/Detail Scale aggiungono noise rotture.
+☐ Pass ☐ Fail — Note:
+
+### 5.17 [New] HEX_GRID
+**Setup**: Type = Hex Grid. Edge Width = 0.1, Randomness = 0.
+**Expected**: Pattern a nido d'ape pulito. Randomness > 0 → bordi rotti.
+☐ Pass ☐ Fail — Note:
+
+### 5.18 [New] GABOR (brushed metal)
+**Setup**: Type = Gabor. Anisotropy = 1.0, Frequency = 4, Orientation = 0.
+**Expected**: Streaks paralleli — ideale per metallo spazzolato. Frequency alta = streak più fine.
+**Reg 2026-05-12**: `proc_gabor_frequency` max alzato da 20 a 500 — verifica che il slider arrivi fino a 500.
+☐ Pass ☐ Fail — Note:
+
+### 5.19 [New] DOTS
+**Setup**: Type = Dots. Radius = 0.30, Softness = 0.05, Randomness = 1.0.
+**Expected**: Polkadots packed. Randomness=0 → lattice rigido.
+☐ Pass ☐ Fail — Note:
+
+### 5.20 [New] RIDGED
+**Setup**: Type = Ridged. Detail = 8, Gain = 3.0, Lacunarity = 2.0.
+**Expected**: Cresta affilata fractal — mountain ridges / lightning.
+☐ Pass ☐ Fail — Note:
+
+### 5.21 [New] CRACKS
+**Setup**: Type = Cracks. Width = 0.1, Sharpness = 0.9.
+**Expected**: Network di crepe organiche. Aggiungi `proc_vector_distortion > 0` per crepe più organiche.
+☐ Pass ☐ Fail — Note:
+
+### 5.22 [New] FRESNEL (procedural gradient)
+**Setup**: Type = Fresnel Gradient. IOR = 1.45.
+**Expected**: Gradiente view-angle (0 facing → 1 grazing). Color1/Color2 fondono via ColorRamp.
+**Caso d'uso**: pair con Color Ramp multi-stop per iridescente / oil-slick / hologram.
+☐ Pass ☐ Fail — Note:
+
+### 5.23 [New] MARBLE — Pattern + Profile
+**Setup**: Type = Marble. Pattern = Rings (or Bands). Profile = Sin.
+**Expected**: Venature marmo. Distortion + Marble Distortion (Turbulence) regolano la complessità.
+**Reg 2026-05-xx**: Marble proc replicava la logica ColorRamp standalone — fixato per usare la shared `_build_proc_color_ramp` (mode/interp/manual stops/extras).
+☐ Pass ☐ Fail — Note:
+
 ---
 
-## 6. Adjustment Types (5 tipi)
+## 6. Adjustment Types (4 tipi)
+
+**Cambiato 2026-05-xx**: CURVES rimosso dall'enum (l'API ShaderNodeRGBCurve era difficile da mappare a hot-update e cattiva UX da pannello). Per curve di base, usa LEVELS (gamma + input/output remap).
 
 ### 6.1 [Crit] HUE_SAT
 **Setup**: Sotto layer colorato → aggiungi Adjustment Hue/Sat → Hue slider.
@@ -449,14 +546,14 @@ Shared params: `proc_scale`, `proc_offset_x/y/z`, `proc_color1`, `proc_color2`, 
 **Expected**: Grading cinematico. Lift tocca ombre, Gamma midtones, Gain highlight.
 ☐ Pass ☐ Fail — Note:
 
-### 6.5 CURVES
-**Setup**: Adjustment Curves.
-**Expected**: Curva RGB editabile con handle.
-☐ Pass ☐ Fail — Note:
-
-### 6.6 Adjustment ignora own channels
+### 6.5 Adjustment ignora own channels
 **Setup**: Adjustment layer tra 2 Fill.
 **Expected**: Modifica composite sotto. Non contribuisce direttamente ai canali, solo modifica.
+☐ Pass ☐ Fail — Note:
+
+### 6.6 [New] Adjustment Target channel
+**Setup**: Adjustment → "Target" dropdown → Roughness/Metallic/Alpha.
+**Expected**: Adjustment opera SOLO sul canale target (non sul Base Color). Su scalar channels solo BRIGHT_CONTRAST e LEVELS hanno effetto — HUE_SAT/COLOR_BALANCE mostrano info-hint "has no effect on a scalar channel".
 ☐ Pass ☐ Fail — Note:
 
 ---
@@ -500,30 +597,34 @@ Un Reference riusa il pattern (color+alpha) di un altro layer ma applica proprio
 
 ## 8. Groups
 
-### 8.1 Create group + move layer inside
+### 8.1 [Bug noto] Create group + move layer inside
 **Setup**: Add Group → crea layer Fill → Move to Group.
 **Expected**: Layer compare nested sotto il group. Indentazione visibile nella UIList.
-☐ Pass ☐ Fail Nie gruppi, non funzionano le lampadine e l'occhio dei gruppi  Note:
+**Bug rilevato 2026-04-22**: nei gruppi, le lampadine (solo) e l'occhio (visibility) non funzionano sul group header — si replica? Verificare e creare ticket fix.
+☐ Pass ☐ Fail — Note:
 
 ### 8.2 Group collapse / expand
 **Setup**: Click triangolo sul group.
 **Expected**: Toggle show/hide dei children nella UIList.
 ☐ Pass ☐ Fail — Note:
 
-### 8.3 Group opacity
+### 8.3 [Bug noto] Group opacity
 **Setup**: Group con 2 children colorati. Group opacity = 0.3.
 **Expected**: Tutto il gruppo semitrasparente rispetto al fondo.
-☐ Pass ☐ Fail — Note: Non funziona 
+**Bug rilevato 2026-04-22**: "Non funziona" — verifica path `_build_group_chain` / mix factor sul group composite.
+☐ Pass ☐ Fail — Note:
 
-### 8.4 Group blend mode
+### 8.4 [Bug noto] Group blend mode
 **Setup**: Group blend = MULTIPLY.
 **Expected**: Tutto il gruppo moltiplica come un unico layer.
-☐ Pass ☐ Fail — Note: non funziona 
+**Bug rilevato 2026-04-22**: "Non funziona" — il blend_mode sul group header probabilmente non viene letto da `_effective_blend_mode`.
+☐ Pass ☐ Fail — Note:
 
-### 8.5 Group mask
+### 8.5 [Bug noto] Group mask
 **Setup**: Group con mask (immagine o smart).
 **Expected**: Mask si applica a tutto il gruppo.
-☐ Pass ☐ Fail — Note: non presente l'opzione 
+**Bug rilevato 2026-04-22**: "Non presente l'opzione" — il pannello GROUP in `_draw_active_layer` chiama `_draw_mask_block(col, active)` ma il group potrebbe non avere `use_mask` esposto o il path di compositing non lo legge. Verifica.
+☐ Pass ☐ Fail — Note:
 
 ### 8.6 Remove from Group
 **Setup**: Layer dentro group → Remove from Group.
@@ -535,16 +636,19 @@ Un Reference riusa il pattern (color+alpha) di un altro layer ma applica proprio
 **Expected**: Group rimosso, children orfani (root level), NON cancellati.
 ☐ Pass ☐ Fail — Note:
 
-### 8.8 Nested groups
-**Setup**: Group dentro Group (se supportato).
+### 8.8 [Rimuovere se non supportato] Nested groups
+**Setup**: Group dentro Group.
 **Expected**: Funziona o errore chiaro.
-☐ Pass ☐ Fail — Note: Non funziona. Rimuovere 
+**Bug rilevato 2026-04-22**: "Non funziona, rimuovere". L'architettura attuale considera GROUP sempre root-level (vedi `rebuild_node_tree` → `_is_root`). Decisione: documentare come non-supportato + nascondere l'option da UI, o implementare correttamente.
+☐ Pass ☐ Fail — Note:
 
 ---
 
 ## 9. Masks — Primary (Mask A)
 
-`mask_source`: IMAGE / AO / POINTINESS / EDGE_WEAR / DIRT / CURVATURE_SMART.
+`mask_source` (11 sorgenti): IMAGE / AO / POINTINESS / WIREFRAME / EDGE_WEAR / DIRT / CURVATURE_SMART / FRESNEL / NDOTL / NDOTH / VORONOI.
+
+**UI nota 2026-05-28**: la sezione Mask è ora una collapsible **sempre visibile** (anche quando `use_mask=False`). Quando OFF, il box mostra "No mask configured" + buttons Add Mask / Bake Smart Mask. Il toggle nel header (icona MOD_MASK) flipa `use_mask` senza perdere settings.
 
 ### 9.1 [Crit] Mask IMAGE (bianca default)
 **Setup**: Layer Fill → Add Mask (bianca).
@@ -590,6 +694,43 @@ Un Reference riusa il pattern (color+alpha) di un altro layer ma applica proprio
 ### 9.9 Mask AO distance slider (hot-path)
 **Setup**: Sposta `mask_ao_distance` con mask AO attiva.
 **Expected**: Update live (anche se lento per via del sampling).
+☐ Pass ☐ Fail — Note:
+
+### 9.10 [New] Mask source = WIREFRAME
+**Setup**: mask_source = WIREFRAME.
+**Expected**: Mask bianca sui bordi reali della mesh (segue topologia/triangulation, non un pattern fake). Slider `mask_wireframe_size` controlla spessore.
+☐ Pass ☐ Fail — Note:
+
+### 9.11 [New] Mask source = FRESNEL
+**Setup**: mask_source = FRESNEL.
+**Expected**: Mask = view-angle (0 facing camera, 1 grazing silhouette). IOR slider visibile. Caso d'uso: iridescent / oil-slick / hologram.
+☐ Pass ☐ Fail — Note:
+
+### 9.12 [New] Mask source = NDOTL (cel-shading)
+**Setup**: Aggiungi una Sun light alla scena. mask_source = NDOTL.
+**Expected**: Mask = Normal · SunDir, remappata in [0,1]. 1 = pieno sole, 0 = ombra. Combina con proc_contrast=1.0 + ColorRamp manual stops per cel-shading binario.
+**Hot-update**: ruotare la Sun deve rinfrescare via `hot_update_sun_direction` (depsgraph handler).
+☐ Pass ☐ Fail — Note:
+
+### 9.13 [New] Mask source = NDOTH (toon specular)
+**Setup**: Sun light + Camera + mask_source = NDOTH.
+**Expected**: Mask peakata sul classico Phong specular spot (tra sole e camera). Per highlights stilizzati anime sparkle.
+☐ Pass ☐ Fail — Note:
+
+### 9.14 [New] Mask source = VORONOI
+**Setup**: mask_source = VORONOI. Feature = F1 or DISTANCE_TO_EDGE. Scala = condivisa con il proc_scale del layer (per allineamento cella↔pattern).
+**Expected**: Mask Voronoi. Caso d'uso: cobblestone — stone Voronoi (colore) + dirt Voronoi (sporco fra le pietre) con SAME scale.
+☐ Pass ☐ Fail — Note:
+
+### 9.15 [New] mask_invert flip
+**Setup**: Mask configurata → flip `mask_invert`.
+**Expected**: Mask invertita.
+☐ Pass ☐ Fail — Note:
+
+### 9.16 [New] Mask collapsible sempre visibile
+**Setup**: Layer senza mask configurata (use_mask=False).
+**Expected**: Header "Mask" sempre presente nel pannello. Click → box espande mostrando "No mask configured" + buttons Add Mask / Bake Smart Mask.
+**Reg 2026-05-28**: prima del fix UI Phase 2 il header appariva solo con use_mask=True.
 ☐ Pass ☐ Fail — Note:
 
 ---
@@ -696,23 +837,28 @@ Un layer diventa visibile SOLO dove il layer sotto ha alpha >0.
 
 ---
 
-## 13. Fresnel
+## 13. Fresnel Rim (per-layer)
 
-Controlla blending basato sull'angolo di vista.
+Modulatore view-angle che pesa l'opacità del layer. **UI rilocato 2026-05-28**: ora dentro la collapsible **Surface Effects** (non più riga inline post-mask).
 
-### 13.1 Fresnel Factor slider
-**Setup**: Fill → Fresnel → Factor > 0.
-**Expected**: Layer visibile preferenzialmente sui bordi (glancing angle).
+### 13.1 Fresnel Strength slider
+**Setup**: Fill layer → expand "Surface Effects" → toggle "Enable" sotto Fresnel Rim → Strength > 0.
+**Expected**: Layer più visibile sui bordi (glancing angle).
 ☐ Pass ☐ Fail — Note:
 
 ### 13.2 Fresnel IOR
 **Setup**: Cambia IOR da 1.45 a 3.0.
 **Expected**: Effetto più pronunciato.
+**Reg 2026-05-xx**: Fresnel UX bug — con default contrast/center, color2 era invisibile. Fixato.
 ☐ Pass ☐ Fail — Note:
 
-### 13.3 Fresnel Invert
-**Setup**: Fresnel Invert ON.
-**Expected**: Layer visibile al centro invece che sui bordi.
+### 13.3 [Removed] Fresnel Invert
+**Stato**: rimosso. Per invertire il rim, usa `mask_invert` su una mask FRESNEL-source o flip color1/color2.
+☐ Pass ☐ Fail — Note: N/A
+
+### 13.4 [New] Fresnel su tutti i tipi di layer
+**Setup**: PAINT / FILL / PROCEDURAL / REFERENCE → Surface Effects → Enable Fresnel.
+**Expected**: Funziona su tutti e 4. ADJUSTMENT e GROUP non hanno Surface Effects (skippano).
 ☐ Pass ☐ Fail — Note:
 
 ---
@@ -837,11 +983,43 @@ Combina canali in RGBA per ottimizzare texture memory (es. Roughness in R, Metal
 
 ## 18. Presets (.tlm files)
 
-Presets attuali in `presets/`: Alien Crystal, Brushed Gold, Brushed Steel, Control, copper test, Lava Rock, Rusted Iron, sfera, sfera bellissima, Weathered Marble, My Preset.
+Presets attuali in `presets/` (28 totali, 2026-05-28):
 
-### 18.1 [Crit] Apply Preset
-**Setup**: Material vuoto → Apply Preset → Brushed Gold.
-**Expected**: Stack Brushed Gold caricato. Viewport mostra oro spazzolato.
+**Hero series (curati, da spedire)**:
+- Anime Cel-Shaded (Hero G v3 Integrated Outline)
+- Anime Genshin Hero (v7 - High Contrast Anime Palette)
+- Autumn Decaying Leaf (Hero E - Alpha)
+- Bronze Verdigris Patina (Hero D)
+- Brushed Metal Gabor (Hero B)
+- Cracked Lava Crust (Hero I - CRACKS + Emission)
+- Crystal Geode (Hero M - Random Color + Random Cells)
+- Damascus Steel (Hero H - Folded Blade)
+- Frozen Ice Glass (Hero P v6 - Full Volume + IOR persistent)
+- Galaxy Marble (Hero K - 3-Color Ramp + MARBLE)
+- Hero_Q_Rocky_Chunky_Pile
+- Iridescent Rainbow Foil (Hero F2 - FRESNEL proc)
+- Iridescent Rim (Hero F - Fresnel Single Color)
+- Sci-Fi Orange Crate (Hero N - BRICK + Selective Emission)
+- Anime Cel-Shaded NdotL (Hero G v2)
+- Anime Cel-Shading (Persistent Emission v5)
+- Anime Genshin Hero (v6 - Persistent + Wide Bands)
+
+**Control / debug**:
+- Control, Control resonant, Sci fi panel
+
+**Dev junk (DA RIMUOVERE prima del release — task #8)**:
+- Boh intanto lo salvo sembra adasd
+- Fuoco
+- hex strano
+- Ice2
+- Quasi sabbia
+- Wireframe
+- fiber
+- sfera
+
+### 18.1 [Crit] Apply Preset (Hero P — Frozen Ice Glass)
+**Setup**: Material vuoto → Apply Preset → "Frozen Ice Glass (Hero P v6 ...)".
+**Expected**: Stack ghiaccio caricato. Viewport mostra cristallo trasparente con volume scatter. BSDF.Base Color cablata, IOR=1.31, Volume Absorption ON.
 ☐ Pass ☐ Fail — Note:
 
 ### 18.2 Save Preset
@@ -1028,6 +1206,346 @@ Esempi: opacity, proc_scale, proc_contrast, blend_mode (sì rebuild ma ottimizza
 ### 25.4 Material emissive sci-fi
 **Setup**: 1 Fill dark base + 1 Procedural Voronoi con Emission ON (celle luminose).
 **Expected**: Pannello sci-fi con celle che emettono.
+☐ Pass ☐ Fail — Note:
+
+---
+
+## 26. [New] Material-Level Settings
+
+Properties material-level (su `mat.tlm`) che non appartengono a un singolo layer ma all'intero materiale. Pannello: Composite section + shortcut dentro Surface Effects (per Volume).
+
+### 26.1 [Crit] BSDF IOR
+**Setup**: TLM panel → Composite → Surface → IOR slider.
+**Expected**: Default 1.45. Range 1.0–3.0. Si propaga a `BSDF.IOR` socket. Test: 1.31 (ice), 1.33 (water), 1.50 (glass), 2.42 (diamond).
+**Reg 2026-05-xx**: serializzato in .tlm/JSON sotto `material.bsdf_ior`.
+☐ Pass ☐ Fail — Note:
+
+### 26.2 [Crit] Volume Absorption toggle
+**Setup**: Composite → Volume → Absorption ON. Color = ciano, Density = 1.0.
+**Expected**: Volume Absorption node creato + collegato a Material Output.Volume. Oggetto trasparente assorbe luce ciano (cyan→arancio nei tratti spessi).
+☐ Pass ☐ Fail — Note:
+
+### 26.3 Volume Scatter toggle
+**Setup**: Composite → Volume → Scatter ON. Color bianco, Density = 0.5, Anisotropy = 0.
+**Expected**: Volume Scatter node creato. Effetto cloudy/milky.
+☐ Pass ☐ Fail — Note:
+
+### 26.4 [Reg] Absorption + Scatter insieme
+**Setup**: Entrambi ON.
+**Expected**: Add Shader combina i due output → Material Output.Volume. Verifica nello shader editor: TLM_volume_combine_N node tipo ShaderNodeAddShader.
+☐ Pass ☐ Fail — Note:
+
+### 26.5 Volume toggle OFF teardown
+**Setup**: Disattiva entrambi.
+**Expected**: Tutti i ShaderNodeVolumeAbsorption/Scatter/AddShader con prefix TLM_volume_* rimossi. Material Output.Volume socket vuoto.
+☐ Pass ☐ Fail — Note:
+
+### 26.6 Volume shortcut dentro Surface Effects (per-layer)
+**Setup**: Su un layer PROCEDURAL → Surface Effects collapsible → la sezione Volume mostra le stesse property material-level.
+**Expected**: Toggle qui = toggle in Composite (stesso datablock). Verifica bidirezionalità.
+☐ Pass ☐ Fail — Note:
+
+### 26.7 [Reg] Material-level props persistenti in .tlm
+**Setup**: Set bsdf_ior=1.5 + volume_absorption ON + custom color → Save Preset → load su nuovo materiale.
+**Expected**: Tutte e 3 le property ripristinate.
+☐ Pass ☐ Fail — Note:
+
+---
+
+## 27. [New] Geometric Displacement
+
+Sposta veri vertici via Material Output.Displacement (Cycles only, per ora). Master toggle `mat.tlm.use_displacement` + per-layer `layer.use_displacement` cumulativi.
+
+### 27.1 [Crit] Master + per-layer toggle
+**Setup**: Subdivide la mesh (mod Subdiv viewport ≥4 + render). Procedural Noise → Surface Effects → "Add to Displace" ON.
+**Expected**: 
+- Auto-enable del master via `_on_layer_use_displacement_change`.
+- Cycles render mostra rilievo geometrico vero.
+- Material-level shared box visibile sotto: Method/Strength/Midlevel/Adaptive.
+☐ Pass ☐ Fail — Note:
+
+### 27.2 Master OFF mentre layer ON → warning
+**Setup**: Layer use_displacement=True, poi disattiva il master in Composite.
+**Expected**: Warning row "Master Displacement OFF — layer is silent" mostrato dentro Surface Effects per quel layer.
+☐ Pass ☐ Fail — Note:
+
+### 27.3 Displacement methods enum
+**Setup**: Cambia displacement_method tra BUMP / DISPLACEMENT / BOTH.
+**Expected**: 
+- BUMP: solo perturba la normale (no vertex move). Funziona anche in Eevee.
+- DISPLACEMENT: muove vertici (richiede Cycles + subdivision).
+- BOTH: combo.
+- "Auto Adaptive Subdiv" toggle visibile solo se method ≠ BUMP.
+☐ Pass ☐ Fail — Note:
+
+### 27.4 Strength + Midlevel
+**Setup**: Strength 0.1 → 1.0. Midlevel 0.5 → 0.3.
+**Expected**: Strength scala l'intensità. Midlevel decide cosa è "zero displacement" nel grayscale.
+☐ Pass ☐ Fail — Note:
+
+### 27.5 [Reg] Cumulative across layers
+**Setup**: 2 layer procedural entrambi con use_displacement, scale 1.0 e 0.5.
+**Expected**: Combine cumulativo (somma) nello stack displacement.
+☐ Pass ☐ Fail — Note:
+
+### 27.6 Displacement adaptive subdiv (Cycles)
+**Setup**: Method = DISPLACEMENT or BOTH. Auto Adaptive Subdiv ON.
+**Expected**: Adaptive subdivision attivata automaticamente sull'oggetto (cycles object property).
+☐ Pass ☐ Fail — Note:
+
+---
+
+## 28. [New] Anime / Cel-Shading
+
+Toolkit per look toon — NdotL mask source + integrated outline + emission bypass.
+
+### 28.1 [Crit] Apply preset "Anime Cel-Shaded (Hero G v3 Integrated Outline)"
+**Setup**: Material vuoto + Sun light in scena → Apply preset.
+**Expected**: Banded shading hard, outline visibile attorno al modello.
+☐ Pass ☐ Fail — Note:
+
+### 28.2 NdotL mask + ColorRamp manual stops binario
+**Setup**: Procedural FRESNEL (o Fill) → mask_source = NDOTL → ColorRamp manual stops 2 zone (es. pos 0.5 split).
+**Expected**: Hard cell shading (no gradient, banding netto).
+☐ Pass ☐ Fail — Note:
+
+### 28.3 5-zone Genshin-style terminator
+**Setup**: Procedural FRESNEL + NDOTL → 5 color stops (Shadow / Dark Mid / Mid / Light Mid / Highlight).
+**Expected**: Banding stile Genshin con 5 step di luminosità.
+☐ Pass ☐ Fail — Note:
+
+### 28.4 Integrated shader outline
+**Setup**: Apply preset Hero G v3 → l'outline è generato DENTRO lo shader (no Solidify modifier, no slot extra).
+**Expected**: Outline visibile. Verifica: niente modifier Solidify sulla mesh, slot material singolo.
+☐ Pass ☐ Fail — Note:
+
+### 28.5 [Helper] setup_inverted_hull_outline()
+**Setup**: Da Python: `bpy.ops.tlm.setup_inverted_hull_outline(...)`.
+**Expected**: Helper crea un secondo slot material con BSDF nero + flip normal + Solidify modifier. Alternativa allo shader-integrated quando vuoi più controllo.
+☐ Pass ☐ Fail — Note:
+
+### 28.6 [Helper] apply_emission_bypass()
+**Setup**: Operator `tlm.apply_emission_bypass`.
+**Expected**: Per cel-shading flat. La luce viene catturata dalla mask NdotL e iniettata via Emission, BSDF saltato. Risultato: piatto/anime senza dipendenza da BSDF lambert.
+☐ Pass ☐ Fail — Note:
+
+### 28.7 mat.tlm.use_emission_output persistente
+**Setup**: Apply emission bypass → save .blend → reopen.
+**Expected**: Flag `use_emission_output` persistente sul material. Rebuild rispetta lo stato.
+☐ Pass ☐ Fail — Note:
+
+### 28.8 [Reg] NdotL hot-update su Sun rotation
+**Setup**: Layer con mask NDOTL. Ruota la Sun light.
+**Expected**: Mask si aggiorna in viewport tramite depsgraph handler (`hot_update_sun_direction`).
+**Bug fix 2026-05-28**: dopo Phase 2 refactor, `_find_first_sun_direction` non era importato in masks.py. Verifica che funzioni post-fix.
+☐ Pass ☐ Fail — Note:
+
+---
+
+## 29. [New] Alpha Channel
+
+`output_channel = ALPHA` su un layer scrive sul socket BSDF.Alpha invece di Base Color/etc.
+
+### 29.1 [Crit] Output channel = ALPHA su Fill
+**Setup**: Fill layer → Output dropdown → ALPHA. blend_mode → ALPHA usa `alpha_math_operation` (MULTIPLY/ADD/SUBTRACT/MIN/MAX), non i blend artistici.
+**Expected**: Material diventa trasparente dove fill_color → alpha. Eevee+Cycles compatibile via wrap Mix Shader+Transparent BSDF.
+☐ Pass ☐ Fail — Note:
+
+### 29.2 alpha_math_operation = MULTIPLY (default)
+**Setup**: 2 Fill alpha, valori 0.5 e 0.5.
+**Expected**: Risultato 0.25 (moltiplicato).
+☐ Pass ☐ Fail — Note:
+
+### 29.3 alpha_math_operation = ADD
+**Setup**: 2 Fill alpha, ADD.
+**Expected**: Somma clampata.
+☐ Pass ☐ Fail — Note:
+
+### 29.4 [Crit] Procedural su ALPHA channel
+**Setup**: Procedural NOISE → Output = ALPHA.
+**Expected**: Buchi/transparency seguono il pattern. Hard via proc_contrast=1.0 ColorRamp.
+**Reg 2026-05-xx**: prima del fix, NOISE → ALPHA non generava buchi visibili.
+☐ Pass ☐ Fail — Note:
+
+### 29.5 use_base_color_alpha (material-level)
+**Setup**: `mat.tlm.use_base_color_alpha = True` (Composite → Surface → "Use Paint Alpha").
+**Expected**: Il canale Alpha del Paint layer (alpha del PNG) viene usato come opacity globale del materiale.
+☐ Pass ☐ Fail — Note:
+
+### 29.6 alpha_blend_method AUTO/CLIP/HASHED/BLEND/OPAQUE
+**Setup**: Composite → Alpha Mode dropdown.
+**Expected**: 
+- AUTO (default): HASHED se alpha cablata, OPAQUE altrimenti.
+- Forced values override AUTO.
+- Su Blender 4.2+/5.0 mappa a surface_render_method.
+☐ Pass ☐ Fail — Note:
+
+### 29.7 Hero E "Autumn Decaying Leaf"
+**Setup**: Apply preset.
+**Expected**: Foglia con buchi/strappi (alpha-driven via NOISE proc).
+☐ Pass ☐ Fail — Note:
+
+---
+
+## 30. [New] ColorRamp UI Controls (Procedural)
+
+Color Ramp di un Procedural ora ha controlli completi: Mode (RGB/HSV/HSL...) + Interpolation (Linear/Constant/Ease/...), Manual Stops toggle, posizioni manuali, multi-stop (3+).
+
+### 30.1 [Crit] Manual Stops toggle
+**Setup**: Procedural NOISE → Color Ramp collapsible → toggle "Manual Stops" ON.
+**Expected**: Slider Pos 1 / Pos 2 appaiono accanto a Color 1 / Color 2. Auto Contrast/Center grayed out (greyed group).
+☐ Pass ☐ Fail — Note:
+
+### 30.2 [Crit] Manual Stops swap automatico
+**Setup**: Manual Stops ON. Imposta Pos1 = 0.8, Pos2 = 0.3.
+**Expected**: Swap automatico per mantenere monotonicità (Pos1 ≤ Pos2). Nessun collasso su singolo colore.
+**Reg 2026-05-xx**: prima del fix, manual stops invertiti collassavano lo shader su singolo colore.
+☐ Pass ☐ Fail — Note:
+
+### 30.3 [Crit] Multi-color stops (3+)
+**Setup**: Add Color Stop button → aggiungi 1-2 extra stops oltre Color 1/2. Imposta posizioni e colori distinti.
+**Expected**: ColorRamp con 3-5 elementi visibili nel shader editor. Pos labels = "Pos 3", "Pos 4", ...
+☐ Pass ☐ Fail — Note:
+
+### 30.4 Remove extra stop
+**Setup**: Stop con bottone X.
+**Expected**: Rimosso. ColorRamp rebuilt con n-1 stops.
+☐ Pass ☐ Fail — Note:
+
+### 30.5 ColorRamp Mode (RGB/HSV/HSL)
+**Setup**: Mode = HSV. Color1 = rosso, Color2 = blu.
+**Expected**: Interpolazione passa attraverso violetti via HSV (non grigio come RGB).
+☐ Pass ☐ Fail — Note:
+
+### 30.6 ColorRamp Interpolation
+**Setup**: Interp = Constant.
+**Expected**: Banding hard (no smoothing). Per cel-shading.
+☐ Pass ☐ Fail — Note:
+
+### 30.7 [Reg] proc_ramp_center per asimmetria
+**Setup**: Auto stops (Manual Stops OFF). proc_ramp_center = 0.7.
+**Expected**: Pivot del ramp spostato a 0.7 — color1 occupa 70%, color2 30%.
+☐ Pass ☐ Fail — Note:
+
+### 30.8 [Reg] Hot-update non viola monotonicità
+**Setup**: 4 color stops. Sposta Pos 2 oltre Pos 3 (via hot-update).
+**Expected**: _hot_proc_color riordina/clamp gli elements in modo monotonic. Nessun crash.
+**Bug fix 2026-05-xx**: prima del fix, `_hot_proc_color` lasciava elements non-monotonic → ColorRamp diventava buggy.
+☐ Pass ☐ Fail — Note:
+
+### 30.9 Manual Stops support per ALL proc using ColorRamp
+**Setup**: NOISE, VORONOI, WAVE, MUSGRAVE, MARBLE, CRACKS, DOTS, RIDGED, GABOR, FRESNEL → toggle Manual Stops.
+**Expected**: Funziona su tutti i procedural che usano ColorRamp. Skip su STRIPES, HEX_GRID, CHECKER, GRADIENT, MAGIC, BRICK (non usano la shared ColorRamp).
+☐ Pass ☐ Fail — Note:
+
+---
+
+## 31. [New] Image Mapping (Paint / Fill PBR images)
+
+Sezione collapsible "Image Mapping" che mirror i controlli del native ShaderNodeTexImage di Blender.
+
+### 31.1 Image Source / Interpolation / Projection / Extension
+**Setup**: Paint layer → expand "Image Mapping" → cambia ciascuno dei 4 dropdown.
+**Expected**: 4 dropdown matching ShaderNodeTexImage (Source FILE/GENERATED, Interp Linear/Closest/Cubic/Smart, Projection FLAT/BOX/SPHERE/TUBE, Extension REPEAT/EXTEND/CLIP/MIRROR).
+☐ Pass ☐ Fail — Note:
+
+### 31.2 [Reg] Box Projection blend
+**Setup**: Projection = BOX → slider "Blend" visibile.
+**Expected**: Blend slider controlla la transizione fra le 3 proiezioni. Box projection sostituisce il custom Triplanar.
+☐ Pass ☐ Fail — Note:
+
+### 31.3 Location / Rotation / Scale per-axis
+**Setup**: paint_location_x/y/z, paint_rotation_x/y/z, paint_scale_x/y/z.
+**Expected**: Mapping node appare nello shader tree SOLO se i valori sono non-default (no Mapping node inutile per layer untouched).
+☐ Pass ☐ Fail — Note:
+
+### 31.4 [Reg] Paint canvas pixel preservation
+**Setup**: Paint un PAINT layer → cambia output_channel da Base Color a Roughness.
+**Expected**: I pixel dipinti SOPRAVVIVONO al colorspace flip. Nessun azzeramento del buffer.
+**Bug fix history**: serie di fix (eed83d6, c5454bd) per Blender 5.0 image cache che azzera GENERATED images su colorspace change. Snapshot+restore in `_new_img_tex`.
+☐ Pass ☐ Fail — Note:
+
+---
+
+## 32. [New] UI Phase 2 Structure
+
+Verifica della riorganizzazione UI 2026-05-28.
+
+### 32.1 [Crit] Surface Effects collapsible presente su PAINT/FILL/PROCEDURAL/REFERENCE
+**Setup**: Crea un layer di ogni tipo. Verifica il pannello.
+**Expected**: Tutti e 4 mostrano la collapsible "Surface Effects" con Fresnel + Displacement + Volume. ADJUSTMENT e GROUP NON mostrano Surface Effects (per design).
+☐ Pass ☐ Fail — Note:
+
+### 32.2 [Crit] Surface Effects badge counter
+**Setup**: Su un layer, attiva Fresnel + use_displacement + volume_absorption.
+**Expected**: Header mostra "Surface Effects (3)". Disattiva uno → "(2)".
+☐ Pass ☐ Fail — Note:
+
+### 32.3 [Crit] Mask collapsible sempre visibile
+**Setup**: Layer con use_mask=False.
+**Expected**: Header "Mask" presente. Click → box con "No mask configured" + 2 buttons.
+**Reg 2026-05-28**: prima del fix, header solo con use_mask=True.
+☐ Pass ☐ Fail — Note:
+
+### 32.4 PAINT-only brush icon
+**Setup**: Verifica la UIList con layer di vari tipi.
+**Expected**: Icona BRUSH_DATA visibile SOLO sulla riga del PAINT layer. FILL/PROCEDURAL/REFERENCE non la mostrano.
+**Reg 2026-05-28**: prima del fix, brush mostrato su tutto tranne GROUP/ADJUSTMENT.
+☐ Pass ☐ Fail — Note:
+
+### 32.5 Order delle collapsible consistente
+**Setup**: Su ogni layer type, verifica l'ordine: blend+opacity+output → type-specific → Mapping/Color Ramp (se applicabile) → Mask → Surface Effects → PBR Channels → Clipping → Group.
+**Expected**: Ordine identico su PAINT, FILL, PROCEDURAL, REFERENCE.
+☐ Pass ☐ Fail — Note:
+
+### 32.6 Displacement spostato fuori da PBR Channels
+**Setup**: Espandi PBR Channels su un layer.
+**Expected**: Bump presente. "Add to Displace" NON presente (è in Surface Effects).
+**Reg 2026-05-28**: prima del fix, Displacement era duplicato in PBR Channels + Composite.
+☐ Pass ☐ Fail — Note:
+
+---
+
+## 33. [New] Preset Library Integrity (post Phase 2 refactor)
+
+Test critico: la Phase 2 refactor (split di compositing.py in 9 sub-modules) ha rotto silenziosamente alcuni preset perché funzioni cross-module non erano importate. Verificare CADENZA: dopo OGNI refactor + prima del release.
+
+### 33.1 [Crit] Bulk load tutti i .tlm con BSDF.Base Color check
+**Setup**: Per ogni .tlm in `presets/`:
+  ```python
+  bpy.ops.tlm.apply_preset(preset_name=...)
+  bsdf = next(n for n in mat.node_tree.nodes if n.type == 'BSDF_PRINCIPLED' and not n.name.startswith("TLM_"))
+  assert bsdf.inputs["Base Color"].is_linked
+  ```
+**Expected**: 28/28 preset OK. Nessun NameError nella console.
+**Bug fix 2026-05-28** (commit `0c9772e`): 5 NameError post-refactor (_find_first_sun_direction, _clamped_ramp_position, _LEGACY_BLEND_METHOD, _USE_NEW_MIX, _find_bsdf). Tutti fixati.
+☐ Pass ☐ Fail — Note:
+
+### 33.2 [Crit] 4 preset multi-color ColorRamp
+**Setup**: Apply ciascuno → verifica BSDF cablato + no console errors:
+- Crystal Geode (Hero M)
+- Frozen Ice Glass (Hero P v6)
+- Iridescent Rainbow Foil (Hero F2)
+- Galaxy Marble (Hero K)
+**Expected**: Tutti caricano con colori multipli applicati alla ColorRamp.
+**Reg 2026-05-28**: il refactor aveva rotto questi 4 perché _clamped_ramp_position era usata da _build_proc_color_ramp senza import.
+☐ Pass ☐ Fail — Note:
+
+### 33.3 Anime preset post-fix
+**Setup**: Apply "Anime Cel-Shaded (Hero G v3 Integrated Outline)".
+**Expected**: NDOTL mask attiva, outline shader-integrated. No errori NDOTL/sun-direction in console.
+**Reg 2026-05-28** (commit `1241c11`): NDOTL/NDOTH richiedevano _find_first_sun_direction late-import in masks.py.
+☐ Pass ☐ Fail — Note:
+
+### 33.4 Material-level props persistono nei preset
+**Setup**: Apply Hero P (Frozen Ice).
+**Expected**: bsdf_ior=1.31, use_volume_absorption=True, volume_absorption_color custom, volume_scatter=True. Verifica con `print(mat.tlm.bsdf_ior)`, etc.
+**Reg 2026-05-xx**: serialize/deserialize material-level props in presets/io fixato.
+☐ Pass ☐ Fail — Note:
+
+### 33.5 Cleanup dev junk
+**Setup**: Visivamente: nessun preset con nome "Boh ..." / "Quasi sabbia" / "Fuoco" / etc. nella build.
+**Expected**: Preset cleanup completato (task #8).
 ☐ Pass ☐ Fail — Note:
 
 ---

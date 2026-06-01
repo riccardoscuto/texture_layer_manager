@@ -10,20 +10,21 @@ the sun shines even when the camera orbits — exactly what anime needs.
 
 Anime render anatomy (technical):
   1. Hard light/shadow band from NdotL thresholding (3 fasce: lit/mid/dark)
-  2. Geometric outline via Freestyle line render (not a material layer)
+  2. SHADER-INTEGRATED outline via Fresnel silhouette mask (no Freestyle,
+     no Solidify modifier, no extra material slot — stays in the TLM material)
   3. Specular toon highlight on convex peaks (EDGE_WEAR mask + emission)
   4. Saturated flat color palette (not PBR realistic)
 
-This preset addresses (1), (3), (4). Outline (2) is configured via
-scene properties — toggle scene.render.use_freestyle and configure
-linestyle in the caller.
+All four are handled inside the single TLM material — works the same
+in Cycles and EEVEE, survives mesh edits, no separate render passes.
 
-Layer stack (5 layers, bottom-to-top):
+Layer stack (6 layers, bottom-to-top):
   01. Base Coral FILL                  — saturated mid-tone color
   02. NDOTL Mid Tone FILL              — slightly desaturated, gated by NdotL midband
   03. NDOTL Shadow FILL                — deep purple, gated by NdotL low band
   04. Toon Highlight FILL + EDGE_WEAR  — bright peach on convex peaks (emission)
   05. Microbump NOISE                  — fine grain
+  06. Shader Outline FILL + FRESNEL    — dark ink line on silhouette band
 """
 
 import bpy
@@ -275,13 +276,32 @@ def build_anime_cel():
     l_mb.bump_strength = MICROBUMP_STRENGTH
     l_mb.bump_distance = MICROBUMP_DISTANCE
 
+    # ─── 06. SHADER-INTEGRATED OUTLINE ───────────────────────────────────
+    # Dark FILL gated by Fresnel silhouette mask. Stays INSIDE the TLM
+    # material — no Freestyle, no Solidify modifier, no extra material
+    # slot. The outline survives mesh edits and works in real-time
+    # viewports (Cycles + EEVEE) without a separate render pass.
+    #
+    # Tuning: very high IOR (15) makes Fresnel almost flat at 0.85-0.90
+    # in the body of the mesh and only spikes to ~0.95+ near the exact
+    # silhouette. Levels 0.85-0.93 gates the layer to that narrow band,
+    # giving a crisp ink-line that's actually visible (raw Fresnel at
+    # low IOR produces only a soft rim that gets lost in cel-shading).
+    OUTLINE_COLOR = (0.0, 0.0, 0.0, 1.0)
+    l_out = _add_fill(mat, "06 Shader Outline", OUTLINE_COLOR,
+                      opacity=1.0, blend_mode="MIX",
+                      output_channel="BASE_COLOR")
+    l_out.use_mask = True
+    l_out.mask_source = 'FRESNEL'
+    l_out.mask_fresnel_ior = 15.0
+    l_out.use_mask_levels = True
+    l_out.mask_levels_in_min = 0.85
+    l_out.mask_levels_in_max = 0.93
+
     tlm.auto_composite = True
     compositing.rebuild_node_tree(mat)
 
-    # Enable Freestyle outline (configurable separately if needed)
-    _setup_freestyle_outline(color=(0.92, 0.45, 0.20), thickness=4.5)
-
-    print(f"[TLM] Anime Cel-Shaded v0.2 built — {len(tlm.layers)} layers")
+    print(f"[TLM] Anime Cel-Shaded v0.3 built — {len(tlm.layers)} layers (incl. integrated outline)")
     print(f"      NDOTL-masked layers: {sum(1 for l in tlm.layers if l.mask_source == 'NDOTL')}")
     return mat
 

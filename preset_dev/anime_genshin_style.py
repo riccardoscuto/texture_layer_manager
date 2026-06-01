@@ -99,26 +99,28 @@ MICROBUMP_SCALE         = 60.0
 MICROBUMP_STRENGTH      = 0.08
 MICROBUMP_DISTANCE      = 0.0008
 
-# ── Outline (shader-integrated via Fresnel silhouette) ──
+# ── Outline (shader-integrated by default) ──
 # Two options for the outline:
-#   (A) Shader-integrated: Fresnel mask with high IOR + razor-sharp levels
-#       gates a dark FILL layer to the silhouette band only. NO modifier,
-#       NO extra material slot — everything in the single TLM material.
-#   (B) Inverted-hull: Solidify modifier + slot 1 material (legacy approach).
+#   (A) Shader-integrated (DEFAULT): Fresnel mask gates a dark FILL layer
+#       to the silhouette band only. NO modifier, NO extra material slot —
+#       everything in the single TLM material. Survives mesh edits.
+#   (B) Inverted-hull (legacy): Solidify modifier + slot 1 material.
+#       Produces a thicker ink line but requires extra geometry/setup.
 #
-# Default is (B) inverted-hull for stronger, more anime-authentic outlines.
-# (A) shader-based works but produces only a thin Fresnel rim — fine for
-# subtle outlines but doesn't match the dramatic ink-line look of Genshin-
-# style renders. Toggle USE_INVERTED_HULL_OUTLINE=False to use shader-only
-# outline (no modifier, no extra material slot) — useful when geometry
-# must stay mesh-pure (e.g. for cloth simulation, real-time game export).
-USE_INVERTED_HULL_OUTLINE = True                    # default: inverted-hull (Solidify)
+# Toggle USE_INVERTED_HULL_OUTLINE=True to use legacy mode. Default (False)
+# keeps everything inside the TLM material — what most users expect when
+# they say "anime shader with outline".
+USE_INVERTED_HULL_OUTLINE = False                   # default: shader-integrated
 OUTLINE_COLOR           = (0.10, 0.04, 0.08, 1.0)   # dark almost-black with hint of base hue
 OUTLINE_THICKNESS       = 0.012                     # only used for inverted-hull mode
-# Shader-based outline parameters:
-OUTLINE_FRESNEL_IOR     = 5.0                       # high IOR → narrow silhouette rim
-OUTLINE_LEVELS_MIN      = 0.85                      # rim fires above NdotV-based mask 0.85
-OUTLINE_LEVELS_MAX      = 0.86                      # razor-sharp transition
+# Shader-based outline parameters. High IOR (15) makes Fresnel almost
+# flat at ~0.9 across the mesh and spikes to ~0.95+ near the exact
+# silhouette. Levels 0.85-0.93 gates the layer to that narrow band,
+# producing a crisp ink-line that survives cel-shading mixing. Lower
+# IOR values produce only soft rim that gets lost in the dark bands.
+OUTLINE_FRESNEL_IOR     = 15.0
+OUTLINE_LEVELS_MIN      = 0.85
+OUTLINE_LEVELS_MAX      = 0.93
 
 
 # ─── HELPERS ──────────────────────────────────────────────────────────────────
