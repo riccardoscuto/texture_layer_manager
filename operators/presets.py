@@ -18,6 +18,26 @@ from .io import _image_to_png_b64, _png_b64_to_image
 BUILTIN_PRESETS = {}
 
 
+def _legacy_preset_dir():
+    """The curated presets we ship inside the addon (read-only set)."""
+    return os.path.join(os.path.dirname(os.path.dirname(__file__)), "presets")
+
+
+def _user_preset_dir():
+    """Writable folder for user-saved presets.
+
+    Lives under Blender's user config (not the addon folder) so user
+    presets survive addon updates/reinstalls and are never bundled into
+    the shipped package.
+    """
+    d = bpy.utils.user_resource('CONFIG', path="texture_layer_manager_presets",
+                                create=True)
+    if not d:  # extremely defensive: user_resource failed
+        d = os.path.join(os.path.expanduser("~"), ".texture_layer_manager_presets")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
 class TLM_OT_ApplyPreset(Operator):
     """Apply a built-in or saved preset layer stack."""
     bl_idname = "tlm.apply_preset"
@@ -47,10 +67,14 @@ class TLM_OT_ApplyPreset(Operator):
 
         preset_layers = BUILTIN_PRESETS.get(self.preset_name)
         if not preset_layers:
-            # Try user presets directory
-            preset_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "presets")
-            preset_file = os.path.join(preset_dir, f"{self.preset_name}.tlm")
-            if os.path.exists(preset_file):
+            # Search user-saved presets first, then the bundled (legacy) set
+            preset_file = None
+            for _d in (_user_preset_dir(), _legacy_preset_dir()):
+                _cand = os.path.join(_d, f"{self.preset_name}.tlm")
+                if os.path.exists(_cand):
+                    preset_file = _cand
+                    break
+            if preset_file:
                 try:
                     with open(preset_file, 'r') as f:
                         data = json.load(f)
@@ -502,7 +526,12 @@ class TLM_OT_SavePreset(Operator):
         mat = _get_material(context)
         tlm = mat.tlm
 
-        preset_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "presets")
+        name = _sanitize_preset_name(self.preset_name)
+        if not name:
+            self.report({'ERROR'}, "Preset name cannot be empty")
+            return {'CANCELLED'}
+
+        preset_dir = _user_preset_dir()
         os.makedirs(preset_dir, exist_ok=True)
 
         # Serialize layers. PAINT layers embed their image pixels so a preset
@@ -790,11 +819,11 @@ class TLM_OT_SavePreset(Operator):
             "displacement_adaptive":          getattr(tlm, 'displacement_adaptive', True),
         }
         data = {
-            "preset_name": self.preset_name,
+            "preset_name": name,
             "material": material_props,
             "layers": layers_data,
         }
-        filepath = os.path.join(preset_dir, f"{self.preset_name}.tlm")
+        filepath = os.path.join(preset_dir, f"{name}.tlm")
         try:
             with open(filepath, 'w') as f:
                 json.dump(data, f, indent=2)
@@ -802,7 +831,7 @@ class TLM_OT_SavePreset(Operator):
             self.report({'ERROR'}, f"Failed to save preset: {e}")
             return {'CANCELLED'}
 
-        self.report({'INFO'}, f"Saved preset '{self.preset_name}'")
+        self.report({'INFO'}, f"Saved preset '{name}'")
         return {'FINISHED'}
 
 
@@ -815,7 +844,7 @@ class TLM_OT_DeletePreset(Operator):
     preset_name: bpy.props.StringProperty(default="")
 
     def execute(self, context):
-        preset_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "presets")
+        preset_dir = _user_preset_dir()
         filepath = os.path.join(preset_dir, f"{self.preset_name}.tlm")
         if os.path.exists(filepath):
             os.remove(filepath)
@@ -862,7 +891,7 @@ class TLM_OT_RenamePreset(Operator):
         self.layout.prop(self, "new_name", text="Name")
 
     def execute(self, context):
-        preset_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "presets")
+        preset_dir = _user_preset_dir()
 
         old_name = self.preset_name
         new_name = _sanitize_preset_name(self.new_name)

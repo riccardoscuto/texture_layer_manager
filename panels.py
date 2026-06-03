@@ -20,8 +20,8 @@ import time as _time
 from bpy.types import Panel, UIList
 from . import previews
 
-# Cache user presets list to avoid os.listdir on every draw call
-_preset_cache = []
+# Cache preset lists (legacy, user) to avoid os.listdir on every draw call
+_preset_cache = ([], [])
 _preset_cache_time = 0.0
 _PRESET_CACHE_TTL = 2.0  # seconds
 
@@ -1657,28 +1657,49 @@ def _draw_bake_section(layout, tlm):
 
 def _draw_presets_section(layout, tlm):
     from .operators import BUILTIN_PRESETS
-    grid = layout.column(align=True)
-    grid.scale_y = 0.95
-    prow = None
-    for i, pname in enumerate(BUILTIN_PRESETS):
-        if i % 2 == 0:
-            prow = grid.row(align=True)
-        op = prow.operator("tlm.apply_preset", text=pname, icon='MATERIAL')
-        op.preset_name = pname
+    from .operators.presets import _legacy_preset_dir, _user_preset_dir
 
-    # User-saved presets (cached to avoid os.listdir every draw)
+    # In-code built-in presets (none shipped by default) — 2-col grid.
+    if BUILTIN_PRESETS:
+        grid = layout.column(align=True)
+        grid.scale_y = 0.95
+        prow = None
+        for i, pname in enumerate(BUILTIN_PRESETS):
+            if i % 2 == 0:
+                prow = grid.row(align=True)
+            op = prow.operator("tlm.apply_preset", text=pname, icon='MATERIAL')
+            op.preset_name = pname
+
+    # Cache both folders (legacy = bundled, user = saved) to avoid an
+    # os.listdir on every redraw.
     global _preset_cache, _preset_cache_time
-    preset_dir = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "presets")
     now = _time.monotonic()
     if now - _preset_cache_time > _PRESET_CACHE_TTL:
         _preset_cache_time = now
-        if _os.path.isdir(preset_dir):
-            _preset_cache = sorted(
-                f[:-4] for f in _os.listdir(preset_dir) if f.endswith(".tlm")
-            )
-        else:
-            _preset_cache = []
-    user_presets = _preset_cache
+
+        def _list(d):
+            try:
+                return sorted(f[:-4] for f in _os.listdir(d) if f.endswith(".tlm"))
+            except OSError:
+                return []
+        _preset_cache = (_list(_legacy_preset_dir()), _list(_user_preset_dir()))
+    legacy_presets, user_presets = _preset_cache
+
+    # ── Legacy presets: the curated set bundled with the addon (apply only) ──
+    layout.separator(factor=0.5)
+    layout.label(text="Legacy Presets:", icon='PRESET')
+    if legacy_presets:
+        lgrid = layout.column(align=True)
+        lgrid.scale_y = 0.95
+        for pname in legacy_presets:
+            op = lgrid.operator("tlm.apply_preset", text=pname, icon='MATERIAL')
+            op.preset_name = pname
+    else:
+        r = layout.row()
+        r.enabled = False
+        r.label(text="None bundled")
+
+    # ── Saved presets: user-created, stored outside the addon (full control) ──
     layout.separator(factor=0.5)
     layout.label(text="Saved Presets:", icon='FILE_FOLDER')
     if user_presets:
@@ -1692,6 +1713,10 @@ def _draw_presets_section(layout, tlm):
             rop.preset_name = pname
             dop = urow.operator("tlm.delete_preset", text="", icon='TRASH')
             dop.preset_name = pname
+    else:
+        r = layout.row()
+        r.enabled = False
+        r.label(text="No saved presets yet")
     layout.operator("tlm.save_preset",
                     text="Save Current as Preset…", icon='FILE_TICK')
 
