@@ -139,30 +139,31 @@ def _on_adj_type_change(self, context):
     _on_layer_update(self, context)
 
 
-def _on_mask_source_change(self, context):
-    """Called when ``mask_source`` (or ``mask_source_b``) changes.
+def _on_mask_source_a_change(self, context):
+    """Auto-enable mask slot A when its source leaves the ``IMAGE`` default.
 
-    Auto-enables the corresponding ``use_mask`` / ``use_mask_b`` toggle
-    when the user picks anything other than the default ``IMAGE``. Without
-    this, both the panel UI and programmatic preset construction can hit
-    a silent no-op: the user picks "DIRT" from the dropdown but the mask
-    is still gated off by ``use_mask=False``, so the layer applies
-    everywhere and the source choice has no visible effect.
+    Picking e.g. "DIRT"/"FRESNEL" from the dropdown would otherwise be a
+    silent no-op (the layer stays gated by ``use_mask=False``).
 
-    The check on the previous value path-prefix ('mask_source' vs
-    'mask_source_b') lets the same callback serve both slots — Blender's
-    update mechanism passes the PropertyGroup instance (``self``) so we
-    can inspect both fields directly.
+    CRITICAL: this touches ONLY slot A. The previous shared callback also
+    checked slot B and, because ``mask_source_b`` defaults to a NON-IMAGE
+    value ('POINTINESS'), it would fall through and switch ``use_mask_b``
+    on whenever you set slot A while ``use_mask`` was already True — silently
+    AND-ing the layer's mask with POINTINESS (≈0 on smooth meshes), which
+    zeroed the whole mask. (That is why a Fresnel/NdotL mask could render as
+    "no effect at all".)
     """
-    # Slot A
     if getattr(self, 'mask_source', 'IMAGE') != 'IMAGE' and not self.use_mask:
-        self.use_mask = True   # this also triggers _on_layer_update via the use_mask setter
+        self.use_mask = True   # setter triggers _on_layer_update
         return                 # avoid double-rebuild
-    # Slot B
+    _on_layer_update(self, context)
+
+
+def _on_mask_source_b_change(self, context):
+    """Auto-enable mask slot B when its source leaves ``IMAGE``. Slot B only."""
     if getattr(self, 'mask_source_b', 'IMAGE') != 'IMAGE' and not self.use_mask_b:
         self.use_mask_b = True
         return
-    # Normal source change (or change back to IMAGE) — just rebuild
     _on_layer_update(self, context)
 
 
@@ -909,7 +910,7 @@ class TLM_LayerItem(PropertyGroup):
             ('VORONOI',         "Voronoi",                "Use a Voronoi pattern as the mask. Pick F1 (cell distance, peaks at cell centres) or DISTANCE_TO_EDGE (peaks at cell centres, 0 at edges = ideal for crack/joint masks). Pair with mask_invert to flip. Use the SAME mask_voronoi_scale as a layer's proc_scale to align the mask cells with the layer's pattern (e.g. cobblestone: stone colour Voronoi and dirt mask Voronoi share scale so dirt lands exactly between stones).", 9),
         ],
         default='IMAGE',
-        update=_on_mask_source_change,
+        update=_on_mask_source_a_change,
     )
 
     mask_image_name: StringProperty(
@@ -1036,7 +1037,7 @@ class TLM_LayerItem(PropertyGroup):
             ('VORONOI',         "Voronoi",                 "Voronoi pattern mask (see Mask A description for details)",         9),
         ],
         default='POINTINESS',
-        update=_on_mask_source_change,
+        update=_on_mask_source_b_change,
     )
 
     mask_image_name_b: StringProperty(
