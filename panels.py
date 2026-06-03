@@ -1720,6 +1720,13 @@ def _draw_presets_section(layout, tlm):
     layout.operator("tlm.save_preset",
                     text="Save Current as Preset…", icon='FILE_TICK')
 
+    # ── Toon / anime inverted-hull outline (object-level, not in the preset) ──
+    layout.separator(factor=0.5)
+    layout.label(text="Toon Outline (active object):", icon='MOD_SOLIDIFY')
+    orow = layout.row(align=True)
+    orow.operator("tlm.add_outline", text="Add Outline", icon='MOD_SOLIDIFY')
+    orow.operator("tlm.remove_outline", text="Remove", icon='X')
+
 
 def _draw_io_section(layout, tlm):
     io_row = layout.row(align=True)
