@@ -1202,7 +1202,7 @@ def _draw_paint_fill(col, active, tlm):
     col.separator(factor=0.6)
     mr = col.row(align=True)
     mr.prop(active, "show_paint_mapping",
-            text="Image Mapping",
+            text="Mapping",
             icon='TRIA_DOWN' if active.show_paint_mapping else 'TRIA_RIGHT',
             emboss=False)
     if active.show_paint_mapping:

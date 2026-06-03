@@ -107,6 +107,38 @@ def _on_layer_update(self, context):
         pass  # object or material was deleted mid-callback
 
 
+# Auto-name per adjustment type. Keep "Hue/Sat" in sync with the default name
+# set in operators/_common.py when an ADJUSTMENT layer is created.
+_ADJ_TYPE_NAMES = {
+    'HUE_SAT':         "Hue/Sat",
+    'BRIGHT_CONTRAST': "Brightness/Contrast",
+    'LEVELS':          "Levels",
+    'COLOR_BALANCE':   "Color Balance",
+    'GRADIENT_MAP':    "Gradient Map",
+}
+
+
+def _on_adj_type_change(self, context):
+    """Rename the layer to match the new adjustment type — but ONLY while its
+    name is still an auto-generated adjustment name, so a name the user typed
+    is never overwritten. Then run the normal structural update."""
+    try:
+        import re
+        from . import compositing
+        auto_names = set(_ADJ_TYPE_NAMES.values())
+        base = re.sub(r'(\.\d+|\s\d+)$', '', (self.name or '')).strip()
+        if base in auto_names:
+            mat = self.id_data
+            if mat is not None and hasattr(mat, 'tlm'):
+                new_name = _ADJ_TYPE_NAMES.get(self.adj_type, base)
+                self.name = compositing.unique_layer_name(
+                    mat.tlm.layers, new_name, current=self
+                )
+    except (ReferenceError, AttributeError):
+        pass
+    _on_layer_update(self, context)
+
+
 def _on_mask_source_change(self, context):
     """Called when ``mask_source`` (or ``mask_source_b``) changes.
 
@@ -1690,7 +1722,7 @@ class TLM_LayerItem(PropertyGroup):
             ('GRADIENT_MAP',   "Gradient Map",       "Recolour by luminance through the Color Ramp (Photoshop-style)", 4),
         ],
         default='HUE_SAT',
-        update=_on_layer_update,
+        update=_on_adj_type_change,
     )
 
     # Hue/Saturation/Value
