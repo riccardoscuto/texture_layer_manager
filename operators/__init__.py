@@ -18,7 +18,6 @@ from .presets import classes as _presets
 from .channel_pack import classes as _channel_pack
 from .keyframes import classes as _keyframes
 from .thumbnails import classes as _thumbnails
-from .outline import classes as _outline
 
 # Re-export commonly used items for backwards compatibility
 from .pbr import CHANNEL_INFO
@@ -39,7 +38,6 @@ classes = (
     + _channel_pack
     + _keyframes
     + _thumbnails
-    + _outline
 )
 
 
