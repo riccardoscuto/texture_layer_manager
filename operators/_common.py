@@ -348,6 +348,19 @@ def _add_layer_common(context, layer_type):
     _ensure_nodes(mat)
     tlm = mat.tlm
 
+    # Non-PAINT layers: drop out of Texture Paint (or any non-Object) mode so
+    # the add + rebuild run in a clean Object-mode context. Adding a fill/
+    # procedural/adjustment/reference/group while still in Paint mode can leave
+    # a stale paint canvas/context. PAINT layers keep the current mode so the
+    # user can start painting immediately.
+    if layer_type != "PAINT":
+        _obj = context.active_object
+        if _obj is not None and _obj.mode != 'OBJECT':
+            try:
+                bpy.ops.object.mode_set(mode='OBJECT')
+            except RuntimeError:
+                pass
+
     # Determine parent group from the currently active layer:
     # - if active is an EMPTY GROUP -> new layer goes INSIDE it (first child)
     # - if active is a GROUP with children -> new layer goes ABOVE the group (root level)
