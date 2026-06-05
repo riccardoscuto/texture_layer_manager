@@ -936,54 +936,121 @@ def _get_truchet_node_group():
     return ng
 
 
-def _build_procedural_node(node_tree, layer, uv_map, x, y):
+# Procedurals that support the Triplanar toggle: fac-based organic patterns
+# that route a single scalar Fac through the shared ColorRamp at the end of
+# _build_procedural_node. (Inline-ramp procs like MARBLE/WOOD and direct-colour
+# procs like CHECKER/BRICK/MAGIC/STRIPES/HEX_GRID are excluded.)
+_TRIPLANAR_PROCS = {'NOISE', 'VORONOI', 'WAVE', 'MUSGRAVE', 'RIDGED',
+                    'WHITE_NOISE', 'GABOR', 'DOTS', 'CRACKS',
+                    'MARBLE', 'WOOD', 'SCRATCHES', 'CAUSTICS', 'WEAVE',
+                    'TILES', 'SCATTER', 'TRUCHET'}
+
+
+def _triplanar_axis_coords(node_tree, layer, vec_socket, x, y):
+    """Split the mapped coordinate into its X / Y / Z scalar components via a
+    single Separate XYZ. Each scalar, fed to a texture's Vector input, samples
+    the pattern along that one axis -- the reference triplanar logic."""
+    sep = node_tree.nodes.new("ShaderNodeSeparateXYZ")
+    sep.name = f"{TLM_PREFIX}proc_tri_sep_{_next_id()}"
+    sep.location = (x - 760, y)
+    _tag(sep, layer.name, "proc_tri_sep")
+    node_tree.links.new(vec_socket, sep.inputs[0])
+    return [sep.outputs["X"], sep.outputs["Y"], sep.outputs["Z"]]
+
+
+def _blend_min(node_tree, layer, value_socks, x, y):
+    """Chain Math MINIMUM over the scalar sockets: min(min(a, b), c). Returns
+    the final Value socket -- the reference combine."""
+    acc = value_socks[0]
+    for i, v in enumerate(value_socks[1:], start=1):
+        m = node_tree.nodes.new("ShaderNodeMath")
+        m.operation = 'MINIMUM'
+        m.name = f"{TLM_PREFIX}proc_tri_min_{_next_id()}"
+        m.location = (x + 180 * i, y)
+        _tag(m, layer.name, "proc_tri_min")
+        node_tree.links.new(acc, m.inputs[0])
+        node_tree.links.new(v, m.inputs[1])
+        acc = m.outputs["Value"]
+    return acc
+
+
+def _build_procedural_node(node_tree, layer, uv_map, x, y, coord_override=None,
+                           return_fac=False):
     """
     Build the shader nodes for a PROCEDURAL layer.
     Returns (color_out, alpha_out) sockets.
     The output is always a color: proc_color1 → proc_color2 mapped via the
     texture's Fac output through a ColorRamp for maximum control.
     """
-    # ── Texture coordinate + mapping ─────────────────────────────────────
-    tc = node_tree.nodes.new("ShaderNodeTexCoord")
-    tc.name = f"{TLM_PREFIX}proc_tc_{_next_id()}"
-    tc.location = (x - 500, y)
-    _tag(tc, layer.name, "proc_tc")
+    # -- Texture coordinate + mapping --
+    if coord_override is not None:
+        # Triplanar sub-build: reuse the projected coordinate handed in by
+        # the parent call; skip rebuilding the coord chain per projection.
+        vec_out = coord_override
+    else:
+        tc = node_tree.nodes.new("ShaderNodeTexCoord")
+        tc.name = f"{TLM_PREFIX}proc_tc_{_next_id()}"
+        tc.location = (x - 500, y)
+        _tag(tc, layer.name, "proc_tc")
 
-    mapping = node_tree.nodes.new("ShaderNodeMapping")
-    mapping.name = f"{TLM_PREFIX}proc_map_{_next_id()}"
-    mapping.location = (x - 300, y)
-    _apply_mapping_settings(mapping, layer)
-    _tag(mapping, layer.name, "proc_map")
-    # Select coordinate space based on layer setting
-    coord_type = getattr(layer, 'proc_coord_type', 'GENERATED')
-    if coord_type == 'UV':
-        uv_node = node_tree.nodes.new("ShaderNodeUVMap")
-        uv_node.name = f"{TLM_PREFIX}proc_uv_{_next_id()}"
-        uv_node.uv_map = uv_map
-        uv_node.location = (x - 500, y - 50)
-        coord_out = uv_node.outputs["UV"]
-    elif coord_type == 'OBJECT':
-        coord_out = tc.outputs["Object"]
-        coord_out = _inject_coord_normalization(
+        mapping = node_tree.nodes.new("ShaderNodeMapping")
+        mapping.name = f"{TLM_PREFIX}proc_map_{_next_id()}"
+        mapping.location = (x - 300, y)
+        _apply_mapping_settings(mapping, layer)
+        _tag(mapping, layer.name, "proc_map")
+        # Select coordinate space based on layer setting
+        coord_type = getattr(layer, 'proc_coord_type', 'GENERATED')
+        if coord_type == 'UV':
+            uv_node = node_tree.nodes.new("ShaderNodeUVMap")
+            uv_node.name = f"{TLM_PREFIX}proc_uv_{_next_id()}"
+            uv_node.uv_map = uv_map
+            uv_node.location = (x - 500, y - 50)
+            coord_out = uv_node.outputs["UV"]
+        elif coord_type == 'OBJECT':
+            coord_out = tc.outputs["Object"]
+            coord_out = _inject_coord_normalization(
+                node_tree, layer, coord_out, x, y, name_tag="proc"
+            )
+        else:  # GENERATED
+            coord_out = tc.outputs["Generated"]
+        # Apply polar/spherical/swirl/cylindrical coordinate transform
+        coord_out = _inject_coord_transform(
             node_tree, layer, coord_out, x, y, name_tag="proc"
         )
-    else:  # GENERATED
-        coord_out = tc.outputs["Generated"]
-    # Apply polar/spherical/swirl/cylindrical coordinate transform
-    coord_out = _inject_coord_transform(
-        node_tree, layer, coord_out, x, y, name_tag="proc"
-    )
-    # View-vector UV offset (parallax) — enabled per-layer via
-    # proc_uv_view_shift > 0. Lets bands scroll as the camera moves.
-    coord_out = _inject_view_uv_shift(
-        node_tree, layer, coord_out, x, y, name_tag="proc"
-    )
-    node_tree.links.new(coord_out, mapping.inputs["Vector"])
+        # View-vector UV offset (parallax) — enabled per-layer via
+        # proc_uv_view_shift > 0. Lets bands scroll as the camera moves.
+        coord_out = _inject_view_uv_shift(
+            node_tree, layer, coord_out, x, y, name_tag="proc"
+        )
+        node_tree.links.new(coord_out, mapping.inputs["Vector"])
 
-    # ── Vector distortion (organic coordinate warping) ────────────────────
-    vec_out = _inject_vector_distortion(
-        node_tree, layer, mapping.outputs["Vector"], x, y, name_tag="proc"
-    )
+        # ── Vector distortion (organic coordinate warping) ────────────────────
+        vec_out = _inject_vector_distortion(
+            node_tree, layer, mapping.outputs["Vector"], x, y, name_tag="proc"
+        )
+
+        # Triplanar projection (per-layer toggle): sample the pattern along
+        # each axis (X/Y/Z scalar from one Separate XYZ), Math-MINIMUM the three
+        # Facs, then run the shared ColorRamp once. Matches the reference logic
+        # while keeping the layer's colour ramp. Only the fac-based procs in
+        # _TRIPLANAR_PROCS are supported.
+        if (getattr(layer, 'proc_use_triplanar', False)
+                and not return_fac
+                and layer.proc_type in _TRIPLANAR_PROCS):
+            _axes = _triplanar_axis_coords(node_tree, layer, vec_out, x, y)
+            _facs = []
+            for _ti, _axc in enumerate(_axes):
+                _f, _ = _build_procedural_node(
+                    node_tree, layer, uv_map,
+                    x - 240, y + 420 - _ti * 420,
+                    coord_override=_axc, return_fac=True,
+                )
+                if _f is not None:
+                    _facs.append(_f)
+            if len(_facs) == 3:
+                _fmin = _blend_min(node_tree, layer, _facs, x, y)
+                return _build_proc_color_ramp(node_tree, layer, x, y, _fmin), None
+            # else: fall through to a normal single-projection build
 
     # ── Texture node ──────────────────────────────────────────────────────
     pt = layer.proc_type
@@ -1606,6 +1673,8 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
         # mode, interpolation, and extra stops just like every other
         # proc_type. Previously this branch had its own inline copy that
         # fell out of sync.
+        if return_fac:
+            return fac_out, None
         return _build_proc_color_ramp(node_tree, layer, x, y, fac_out), None
 
     elif pt == 'WOOD':
@@ -1663,6 +1732,8 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
             node_tree.links.new(scl.outputs["Value"], add.inputs[1])
             fac_out = add.outputs["Value"]
 
+        if return_fac:
+            return fac_out, None
         return _build_proc_color_ramp(node_tree, layer, x, y, fac_out), None
 
     elif pt == 'SCRATCHES':
@@ -1722,6 +1793,8 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
         pw.location = (x + 540, y)
         _tag(pw, layer.name, "proc_scr_pw")
         node_tree.links.new(inv.outputs["Value"], pw.inputs[0])
+        if return_fac:
+            return pw.outputs["Value"], None
         return _build_proc_color_ramp(node_tree, layer, x, y, pw.outputs["Value"]), None
 
     elif pt == 'CAUSTICS':
@@ -1776,6 +1849,8 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
         pw.location = (x + 660, y)
         _tag(pw, layer.name, "proc_cau_pw")
         node_tree.links.new(inv.outputs["Value"], pw.inputs[0])
+        if return_fac:
+            return pw.outputs["Value"], None
         return _build_proc_color_ramp(node_tree, layer, x, y, pw.outputs["Value"]), None
 
     elif pt == 'WEAVE':
@@ -1834,6 +1909,8 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
         pw.inputs[1].default_value = max(0.5, (1.0 - getattr(layer, 'proc_weave_width', 0.5)) * 5.0)
         pw.location = (x + 740, y); _tag(pw, layer.name, "proc_wv_pw")
         node_tree.links.new(add.outputs["Value"], pw.inputs[0])
+        if return_fac:
+            return pw.outputs["Value"], None
         return _build_proc_color_ramp(node_tree, layer, x, y, pw.outputs["Value"]), None
 
     elif pt == 'TILES':
@@ -1865,6 +1942,8 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
         bw = node_tree.nodes.new("ShaderNodeRGBToBW")
         bw.location = (x + 140, y); _tag(bw, layer.name, "proc_til_bw")
         node_tree.links.new(brick.outputs["Color"], bw.inputs["Color"])
+        if return_fac:
+            return bw.outputs["Val"], None
         return _build_proc_color_ramp(node_tree, layer, x, y, bw.outputs["Val"]), None
 
     elif pt == 'SCATTER':
@@ -1910,6 +1989,8 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
         facn.location = (x + 420, y); _tag(facn, layer.name, "proc_sct_fac")
         node_tree.links.new(dot.outputs["Result"], facn.inputs[0])
         node_tree.links.new(pres.outputs["Value"], facn.inputs[1])
+        if return_fac:
+            return facn.outputs["Value"], None
         return _build_proc_color_ramp(node_tree, layer, x, y, facn.outputs["Value"]), None
 
     elif pt == 'TRUCHET':
@@ -1925,6 +2006,8 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
         node_tree.links.new(vec_out, grp.inputs["Vector"])
         grp.inputs["Scale"].default_value = layer.proc_scale
         grp.inputs["Width"].default_value = getattr(layer, 'proc_truchet_width', 0.15)
+        if return_fac:
+            return grp.outputs["Fac"], None
         return _build_proc_color_ramp(node_tree, layer, x, y, grp.outputs["Fac"]), None
 
     if tex_node is None:
@@ -1943,6 +2026,8 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y):
     # Delegated to _build_proc_color_ramp so all proc_types share the
     # same ramp construction (Manual Stops, color mode, interpolation,
     # extra stops, legacy Color 3). See helper near top of file.
+    if return_fac:
+        return fac_out, None
     return _build_proc_color_ramp(node_tree, layer, x, y, fac_out), None
 
 def _build_proc_fac_node(node_tree, layer, name_suffix, x, y, uv_map="UVMap"):

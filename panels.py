@@ -601,6 +601,19 @@ def _draw_procedural(col, active, tlm):
     _draw_procedural_advanced_tail(col, active, tlm)
 
 
+# Procedurals whose texture node switches between discrete colours
+# (Color1/Color2[/Mortar]) with NO ColorRamp -- show only the colour pickers.
+# (MAGIC also has no ramp but generates its own colours, handled separately.)
+_DIRECT_COLOR_PROCS = {'CHECKER', 'BRICK'}
+
+# Procedurals that support the Triplanar toggle (fac-based organic
+# patterns). Mirror of compositing.procedurals._TRIPLANAR_PROCS.
+_TRIPLANAR_PROCS = {'NOISE', 'VORONOI', 'WAVE', 'MUSGRAVE', 'RIDGED',
+                    'WHITE_NOISE', 'GABOR', 'DOTS', 'CRACKS',
+                    'MARBLE', 'WOOD', 'SCRATCHES', 'CAUSTICS', 'WEAVE',
+                    'TILES', 'SCATTER', 'TRUCHET'}
+
+
 def _draw_procedural_advanced_tail(col, active, tlm):
     """Draw post-Pattern sections of a PROCEDURAL layer in the new order:
        Section 3/4 = Mapping (collapsible)
@@ -645,6 +658,12 @@ def _draw_procedural_advanced_tail(col, active, tlm):
         map_box.prop(active, "proc_coord_type", text="Coords")
         if active.proc_coord_type == 'OBJECT':
             map_box.prop(active, "proc_normalize_coords", text="Normalize Scale")
+        # Triplanar: project the pattern from 3 axes + blend, so it doesn't
+        # stretch on faces that don't face the mapping axis (Mapping still
+        # applies). Off by default -- costs 3 texture evaluations.
+        if active.proc_type in _TRIPLANAR_PROCS:
+            map_box.prop(active, "proc_use_triplanar",
+                         text="Triplanar (anti-stretch)", toggle=True)
         # View-driven UV parallax — the pattern slides with the camera
         # when this is > 0. Try 0.2–0.3 for holographic-foil parallax.
         map_box.prop(active, "proc_uv_view_shift", slider=True,
@@ -682,63 +701,78 @@ def _draw_procedural_advanced_tail(col, active, tlm):
     #   → Contrast/Center (legacy auto-positions, disabled when Manual
     #   Stops is on which is the new default).
     col.separator(factor=0.4)
+    # CHECKER / BRICK have no ColorRamp (discrete colours on the node), so the
+    # box is just "Colors" and only the pickers are shown.
+    is_direct_color = proc_t in _DIRECT_COLOR_PROCS
     n_extras = len(active.proc_extra_color_stops)
-    badge_col = f" (+{n_extras})" if n_extras else ""
+    badge_col = "" if is_direct_color else (f" (+{n_extras})" if n_extras else "")
     hdr_color = col.row(align=True)
     hdr_color.prop(active, "show_proc_color_section",
-                   text=f"Color Ramp{badge_col}",
+                   text=("Colors" if is_direct_color else f"Color Ramp{badge_col}"),
                    icon='TRIA_DOWN' if active.show_proc_color_section else 'TRIA_RIGHT',
                    emboss=False)
     if active.show_proc_color_section:
         cbox = col.box().column(align=True)
         cbox.scale_y = 0.95
-        # Mode / Interpolation dropdowns FIRST (only proc types using ColorRamp)
-        uses_color_ramp = proc_t not in ('STRIPES', 'HEX_GRID')
-        if uses_color_ramp:
-            mi_row = cbox.row(align=True)
-            mi_row.prop(active, "proc_color_ramp_mode", text="")
-            mi_row.prop(active, "proc_color_ramp_interpolation", text="")
-            if manual_supported:
-                ms_row = cbox.row(align=True)
-                ms_row.prop(active, "proc_use_manual_stops",
-                            text="Manual Stops", toggle=True,
-                            icon='IPO_LINEAR' if not use_manual else 'IPO_CONSTANT')
-            cbox.separator(factor=0.3)
-        # THEN colour pickers + per-stop positions
-        cr = cbox.row(align=True)
-        cr.prop(active, "proc_color1", text="")
-        cr.prop(active, "proc_color2", text="")
-        if use_manual and manual_supported:
-            pos12 = cbox.row(align=True)
-            pos12.prop(active, "proc_color1_position", text="Pos 1", slider=True)
-            pos12.prop(active, "proc_color2_position", text="Pos 2", slider=True)
-        # Legacy Color 3 row (only when the flag is True from old presets)
-        legacy_c3 = active.use_proc_color3
-        if legacy_c3:
-            c3r = cbox.row(align=True)
-            c3r.prop(active, "use_proc_color3", text="",
-                     icon='REMOVE', toggle=True)
-            c3r.prop(active, "proc_color3", text="")
-            c3r.prop(active, "proc_color3_position", text="Pos", slider=True)
-        # Extra color stops collection
-        label_offset = 4 if legacy_c3 else 3
-        for idx, stop in enumerate(active.proc_extra_color_stops):
-            sr = cbox.row(align=True)
-            sr.prop(stop, "color", text="")
-            sr.prop(stop, "position", text=f"Pos {idx + label_offset}", slider=True)
-            del_op = sr.operator("tlm.remove_proc_color_stop", text="", icon='X')
-            del_op.index = idx
-        # Add Color Stop button
-        add_row = cbox.row(align=True)
-        add_row.operator("tlm.add_proc_color_stop", text="Add Color Stop", icon='ADD')
-        # Contrast + Ramp Center (legacy auto-positions, disabled when
-        # Manual Stops is on which is now the default).
-        if proc_t not in ('CHECKER', 'GRADIENT', 'BRICK', 'MAGIC', 'FRESNEL'):
-            cbox.separator(factor=0.3)
-            cr_row = cbox.row(align=True)
-            cr_row.enabled = not use_manual
-            cr_row.prop(active, "proc_contrast", slider=True)
-            cr_row.prop(active, "proc_ramp_center", slider=True, text="Center")
+        if is_direct_color:
+            # Discrete node colours only -- no ColorRamp, so no positions / mode
+            # / interp / stops / contrast. (BRICK adds a Mortar colour.)
+            cr = cbox.row(align=True)
+            cr.prop(active, "proc_color1", text="")
+            cr.prop(active, "proc_color2", text="")
+            if active.use_proc_color3:   # BRICK mortar colour
+                c3r = cbox.row(align=True)
+                c3r.prop(active, "use_proc_color3", text="",
+                         icon='REMOVE', toggle=True)
+                c3r.prop(active, "proc_color3", text="")
+        else:
+            # Mode / Interpolation dropdowns FIRST (only proc types using ColorRamp)
+            uses_color_ramp = proc_t not in ('STRIPES', 'HEX_GRID')
+            if uses_color_ramp:
+                mi_row = cbox.row(align=True)
+                mi_row.prop(active, "proc_color_ramp_mode", text="")
+                mi_row.prop(active, "proc_color_ramp_interpolation", text="")
+                if manual_supported:
+                    ms_row = cbox.row(align=True)
+                    ms_row.prop(active, "proc_use_manual_stops",
+                                text="Manual Stops", toggle=True,
+                                icon='IPO_LINEAR' if not use_manual else 'IPO_CONSTANT')
+                cbox.separator(factor=0.3)
+            # THEN colour pickers + per-stop positions
+            cr = cbox.row(align=True)
+            cr.prop(active, "proc_color1", text="")
+            cr.prop(active, "proc_color2", text="")
+            if use_manual and manual_supported:
+                pos12 = cbox.row(align=True)
+                pos12.prop(active, "proc_color1_position", text="Pos 1", slider=True)
+                pos12.prop(active, "proc_color2_position", text="Pos 2", slider=True)
+            # Legacy Color 3 row (only when the flag is True from old presets)
+            legacy_c3 = active.use_proc_color3
+            if legacy_c3:
+                c3r = cbox.row(align=True)
+                c3r.prop(active, "use_proc_color3", text="",
+                         icon='REMOVE', toggle=True)
+                c3r.prop(active, "proc_color3", text="")
+                c3r.prop(active, "proc_color3_position", text="Pos", slider=True)
+            # Extra color stops collection
+            label_offset = 4 if legacy_c3 else 3
+            for idx, stop in enumerate(active.proc_extra_color_stops):
+                sr = cbox.row(align=True)
+                sr.prop(stop, "color", text="")
+                sr.prop(stop, "position", text=f"Pos {idx + label_offset}", slider=True)
+                del_op = sr.operator("tlm.remove_proc_color_stop", text="", icon='X')
+                del_op.index = idx
+            # Add Color Stop button
+            add_row = cbox.row(align=True)
+            add_row.operator("tlm.add_proc_color_stop", text="Add Color Stop", icon='ADD')
+            # Contrast + Ramp Center -- GRADIENT/MAGIC/FRESNEL don't use these;
+            # CHECKER/BRICK handled above.
+            if proc_t not in ('GRADIENT', 'MAGIC', 'FRESNEL'):
+                cbox.separator(factor=0.3)
+                cr_row = cbox.row(align=True)
+                cr_row.enabled = not use_manual
+                cr_row.prop(active, "proc_contrast", slider=True)
+                cr_row.prop(active, "proc_ramp_center", slider=True, text="Center")
 
     # Mask + Surface Effects (Fresnel + Displacement + Volume) + Clipping +
     # Group assignment. Order chosen so the most-edited block (Mask) sits

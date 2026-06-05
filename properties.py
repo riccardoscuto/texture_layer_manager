@@ -2552,6 +2552,19 @@ class TLM_LayerItem(PropertyGroup):
         update=_on_layer_update,
     )
 
+    proc_use_triplanar: BoolProperty(
+        name="Triplanar",
+        description=(
+            "Project the pattern from the three axis planes and blend them "
+            "with per-channel Minimum, so it no longer stretches on faces that "
+            "don't face the mapping axis. Mapping scale/rotation/location still "
+            "apply to all three projections. Costs three texture evaluations -- "
+            "leave off for flat or UV-mapped surfaces"
+        ),
+        default=False,
+        update=_on_layer_update,
+    )
+
     proc_coord_type: EnumProperty(
         name="Coordinates",
         description="Texture coordinate space for procedural patterns",
