@@ -230,7 +230,10 @@ def _hot_emission_strength(node_tree, layer, prop_name):
     if not mat:
         return False
     strengths = [l.emission_strength * l.opacity
-                 for l in mat.tlm.layers if l.use_emission and l.visible]
+                 for l in mat.tlm.layers
+                 if (l.use_emission
+                     or getattr(l, 'output_channel', '') == 'EMISSION')
+                 and l.visible]
     node.outputs[0].default_value = max(strengths) if strengths else 0.0
     return True
 

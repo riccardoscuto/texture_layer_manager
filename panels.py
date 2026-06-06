@@ -379,6 +379,8 @@ def _draw_procedural(col, active, tlm):
                 emboss=False).action = 'INSERT'
     oc = col.row(align=True)
     oc.prop(active, "output_channel", text="Output", icon='NODE_COMPOSITING')
+    if active.output_channel == 'EMISSION':
+        col.prop(active, "emission_strength", text="Emission Strength", slider=True)
 
     col.separator(factor=0.5)
     col.prop(active, "proc_type")
@@ -1204,6 +1206,13 @@ def _draw_paint_fill(col, active, tlm):
     # single channel (Base Color / Roughness / Metallic / Alpha).
     oc = col.row(align=True)
     oc.prop(active, "output_channel", text="Output", icon='NODE_COMPOSITING')
+    # Primary Output = Emission: surface strength (and, for a Fill with no
+    # image, the emission colour) right here. Previously the only way to
+    # reach these was the secondary "Emission" toggle in PBR Channels.
+    if active.output_channel == 'EMISSION':
+        if active.layer_type == "FILL":
+            col.prop(active, "emission_color", text="Emission Color")
+        col.prop(active, "emission_strength", text="Emission Strength", slider=True)
 
     if active.layer_type == "FILL":
         col.separator(factor=0.5)
