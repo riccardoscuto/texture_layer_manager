@@ -1,8 +1,8 @@
 bl_info = {
     "name": "Texture Layer Manager",
-    "author": "TLM Dev",
-    "version": (0, 5, 7),
-    "blender": (4, 0, 0),
+    "author": "Eihort",
+    "version": (0, 5, 8),
+    "blender": (5, 0, 0),
     "location": "Properties > Material > Texture Layers",
     "description": "Non-destructive layer-based texture authoring with PBR channels, smart masks, and procedurals",
     "category": "Material",
