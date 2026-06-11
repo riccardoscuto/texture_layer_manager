@@ -510,7 +510,7 @@ def _draw_procedural(col, active, tlm):
         col_pat.prop(active, "proc_hex_edge_width", text="Edge Width", slider=True)
         col_pat.prop(active, "proc_randomness",     text="Randomness", slider=True)
         col_pat.prop(active, "proc_detail",         text="Detail", slider=True)
-        col_pat.label(text="Tip: Randomness=0 gives the cleanest honeycomb",
+        col_pat.label(text="Tip: Randomness 0 = perfect hexagons",
                       icon='INFO')
     elif pt == 'GABOR':
         # Anisotropic Gabor noise — directional streak generator.
@@ -1496,10 +1496,11 @@ def _draw_composite_section(layout, tlm):
               icon=ac_icon, toggle=True)
 
     # ── 2. Surface ──
-    # IOR + Alpha pipeline. IOR governs the BSDF.IOR socket which only has
-    # a perceptible effect when Transmission > 0 (glass / water / ice) or
-    # Specular tinting is in play; we still show it always because that's
-    # where users instinctively look for it.
+    # IOR + Alpha pipeline. The IOR slider drives BSDF.IOR, but the build
+    # gates it on transmission being present in the stack: Principled's
+    # IOR also raises opaque dielectric Fresnel, so applying it without
+    # transmission would wash opaque materials toward white. The slider
+    # stays visible so users can set it before adding the glass layer.
     comp.separator(factor=0.6)
     surf_box = comp.box().column(align=True)
     surf_box.label(text="Surface", icon='NODE_MATERIAL')
@@ -1508,16 +1509,11 @@ def _draw_composite_section(layout, tlm):
     # Hint label: when IOR is a non-default value but transmission isn't in
     # the active stack, the user's IOR setting is silent — make that clear.
     if abs(tlm.bsdf_ior - 1.45) > 1e-3:
-        any_transmission = any(
-            (l.visible and (
-                getattr(l, 'use_transmission', False)
-                or getattr(l, 'output_channel', 'BASE_COLOR') == 'TRANSMISSION'))
-            for l in tlm.layers
-        )
-        if not any_transmission:
+        from .compositing.channels import stack_has_transmission
+        if not stack_has_transmission(tlm.layers):
             hint = surf_box.row(align=True)
             hint.label(
-                text=f"IOR {tlm.bsdf_ior:.2f} affects glass/transmission only",
+                text=f"IOR {tlm.bsdf_ior:.2f} not applied — needs transmission in the stack",
                 icon='INFO',
             )
     surf_box.separator(factor=0.3)

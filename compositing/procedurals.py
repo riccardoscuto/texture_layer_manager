@@ -974,6 +974,221 @@ def _blend_min(node_tree, layer, value_socks, x, y):
     return acc
 
 
+def _build_hex_grid_field(node_tree, layer, vec_out, x, y, mknm):
+    """True hexagonal honeycomb distance field (math dual-grid).
+
+    Returns a float socket with the same semantics as Voronoi
+    DISTANCE_TO_EDGE: 0.0 exactly on a cell boundary rising to 0.5 at
+    the cell centre, so the downstream Map Range edge-width windows
+    (proc_hex_mr / proc_hex_mr_inner) keep working unchanged.
+
+    A hex tiling is intrinsically 2D, so projection matters:
+      - UV coords: already a flat 2D space -> a single planar field.
+      - 3D coords (Generated/Object): TRIPLANAR -- one field per
+        projection axis (XY / XZ / YZ), blended by the object-space
+        normal raised to the 4th power. A single fixed projection would
+        read as a square contour grid on surfaces facing the other
+        axes (the bug this replaced). The DISTANCE fields are blended
+        before the Map Range threshold so lines stay crisp inside each
+        axis region, with short soft seams at 45deg borders.
+
+    Grid math per plane: two rectangular lattices offset by half a
+    period (R=(1, sqrt3), H=(0.5, sqrt3/2)), snap to the nearer centre,
+    hexagonal metric max(dot(|g|, (0.5, sqrt3/2)), |g|.x). FRACTION
+    (floor-based) instead of MODULO (trunc-based) so negative
+    coordinates tile seamlessly.
+
+    Parameter wiring (single shared head -> hot-updates unchanged):
+      proc_scale      -> one VectorMath SCALE tagged 'proc_tex' (its
+                         "Scale" input matches _hot_proc_tex_input).
+      proc_randomness -> 3D lattice wobble: 0 = perfect honeycomb,
+                         1 = fully organic. Tag 'hex_wobble'.
+      proc_detail     -> wobble noise detail. Tag 'hex_noise'.
+    """
+    SQ3H = 0.8660254  # sqrt(3)/2
+    R = (1.0, 2.0 * SQ3H, 1.0)   # dual-grid period (z=1 avoids div-by-0)
+    H = (0.5, SQ3H, 0.0)         # half period = second grid offset
+
+    _slot_i = [0]
+
+    def _slot():
+        i = _slot_i[0]
+        _slot_i[0] += 1
+        return (x - 1850 + (i // 7) * 150, y + 240 - (i % 7) * 170)
+
+    def _vm(op, role):
+        n = node_tree.nodes.new("ShaderNodeVectorMath")
+        n.operation = op
+        n.location = _slot()
+        n.name = mknm(role)
+        _tag(n, layer.name, role)
+        return n
+
+    def _ma(op, role):
+        n = node_tree.nodes.new("ShaderNodeMath")
+        n.operation = op
+        n.location = _slot()
+        n.name = mknm(role)
+        _tag(n, layer.name, role)
+        return n
+
+    def _new(idname, role):
+        n = node_tree.nodes.new(idname)
+        n.location = _slot()
+        n.name = mknm(role)
+        _tag(n, layer.name, role)
+        return n
+
+    # ── shared head: scale + 3D lattice wobble ──────────────────────
+    n_scale = _vm('SCALE', "proc_tex")
+    n_scale.inputs["Scale"].default_value = layer.proc_scale
+    node_tree.links.new(vec_out, n_scale.inputs[0])
+
+    n_noise = _new("ShaderNodeTexNoise", "hex_noise")
+    n_noise.inputs["Scale"].default_value = 1.4  # ~per-cell wobble features
+    n_noise.inputs["Detail"].default_value = layer.proc_detail
+    if "Roughness" in n_noise.inputs:
+        n_noise.inputs["Roughness"].default_value = 0.5
+    if "Distortion" in n_noise.inputs:
+        n_noise.inputs["Distortion"].default_value = 0.0
+    node_tree.links.new(n_scale.outputs["Vector"], n_noise.inputs["Vector"])
+
+    n_nc = _vm('SUBTRACT', "hexf_noise_center")
+    n_nc.inputs[1].default_value = (0.5, 0.5, 0.5)
+    node_tree.links.new(n_noise.outputs["Color"], n_nc.inputs[0])
+
+    k = 0.45 * getattr(layer, 'proc_randomness', 0.0)
+    n_wob = _vm('MULTIPLY_ADD', "hex_wobble")
+    n_wob.inputs[1].default_value = (k, k, k)
+    node_tree.links.new(n_nc.outputs["Vector"], n_wob.inputs[0])
+    node_tree.links.new(n_scale.outputs["Vector"], n_wob.inputs[2])
+
+    n_sep0 = _new("ShaderNodeSeparateXYZ", "hexf_sep0")
+    node_tree.links.new(n_wob.outputs["Vector"], n_sep0.inputs[0])
+
+    def _planar(u_sock, v_sock, sfx):
+        """One 2D honeycomb distance field from two scalar coords."""
+        comb = _new("ShaderNodeCombineXYZ", "hexf_comb" + sfx)
+        node_tree.links.new(u_sock, comb.inputs["X"])
+        node_tree.links.new(v_sock, comb.inputs["Y"])
+        uv = comb.outputs["Vector"]
+
+        d1 = _vm('DIVIDE', "hexf_a_div" + sfx)
+        d1.inputs[1].default_value = R
+        node_tree.links.new(uv, d1.inputs[0])
+        f1 = _vm('FRACTION', "hexf_a_fract" + sfx)
+        node_tree.links.new(d1.outputs["Vector"], f1.inputs[0])
+        m1 = _vm('MULTIPLY', "hexf_a_mul" + sfx)
+        m1.inputs[1].default_value = R
+        node_tree.links.new(f1.outputs["Vector"], m1.inputs[0])
+        na = _vm('SUBTRACT', "hexf_a" + sfx)
+        na.inputs[1].default_value = H
+        node_tree.links.new(m1.outputs["Vector"], na.inputs[0])
+
+        s2 = _vm('SUBTRACT', "hexf_b_off" + sfx)
+        s2.inputs[1].default_value = H
+        node_tree.links.new(uv, s2.inputs[0])
+        d2 = _vm('DIVIDE', "hexf_b_div" + sfx)
+        d2.inputs[1].default_value = R
+        node_tree.links.new(s2.outputs["Vector"], d2.inputs[0])
+        f2 = _vm('FRACTION', "hexf_b_fract" + sfx)
+        node_tree.links.new(d2.outputs["Vector"], f2.inputs[0])
+        m2 = _vm('MULTIPLY', "hexf_b_mul" + sfx)
+        m2.inputs[1].default_value = R
+        node_tree.links.new(f2.outputs["Vector"], m2.inputs[0])
+        nb = _vm('SUBTRACT', "hexf_b" + sfx)
+        nb.inputs[1].default_value = H
+        node_tree.links.new(m2.outputs["Vector"], nb.inputs[0])
+
+        da = _vm('DOT_PRODUCT', "hexf_da" + sfx)
+        node_tree.links.new(na.outputs["Vector"], da.inputs[0])
+        node_tree.links.new(na.outputs["Vector"], da.inputs[1])
+        db = _vm('DOT_PRODUCT', "hexf_db" + sfx)
+        node_tree.links.new(nb.outputs["Vector"], db.inputs[0])
+        node_tree.links.new(nb.outputs["Vector"], db.inputs[1])
+        lt = _ma('LESS_THAN', "hexf_pick" + sfx)
+        node_tree.links.new(da.outputs["Value"], lt.inputs[0])
+        node_tree.links.new(db.outputs["Value"], lt.inputs[1])
+
+        amb = _vm('SUBTRACT', "hexf_amb" + sfx)
+        node_tree.links.new(na.outputs["Vector"], amb.inputs[0])
+        node_tree.links.new(nb.outputs["Vector"], amb.inputs[1])
+        tsc = _vm('SCALE', "hexf_tscale" + sfx)
+        node_tree.links.new(amb.outputs["Vector"], tsc.inputs[0])
+        node_tree.links.new(lt.outputs["Value"], tsc.inputs["Scale"])
+        g = _vm('ADD', "hexf_g" + sfx)
+        node_tree.links.new(nb.outputs["Vector"], g.inputs[0])
+        node_tree.links.new(tsc.outputs["Vector"], g.inputs[1])
+
+        ab = _vm('ABSOLUTE', "hexf_abs" + sfx)
+        node_tree.links.new(g.outputs["Vector"], ab.inputs[0])
+        dt = _vm('DOT_PRODUCT', "hexf_dot" + sfx)
+        dt.inputs[1].default_value = (0.5, SQ3H, 0.0)
+        node_tree.links.new(ab.outputs["Vector"], dt.inputs[0])
+        sp = _new("ShaderNodeSeparateXYZ", "hexf_sepg" + sfx)
+        node_tree.links.new(ab.outputs["Vector"], sp.inputs[0])
+        mx = _ma('MAXIMUM', "hexf_max" + sfx)
+        node_tree.links.new(dt.outputs["Value"], mx.inputs[0])
+        node_tree.links.new(sp.outputs["X"], mx.inputs[1])
+        out = _ma('SUBTRACT', "hexf_dist" + sfx)
+        out.inputs[0].default_value = 0.5
+        node_tree.links.new(mx.outputs["Value"], out.inputs[1])
+        return out.outputs["Value"]
+
+    sx = n_sep0.outputs["X"]
+    sy = n_sep0.outputs["Y"]
+    sz = n_sep0.outputs["Z"]
+
+    # UV coords are already a flat 2D space -> one planar field is exact.
+    if getattr(layer, 'proc_coord_type', 'GENERATED') == 'UV':
+        return _planar(sx, sy, "")
+
+    # 3D coords -> triplanar blend of three projections.
+    d_z = _planar(sx, sy, "_z")   # pattern in XY, shows on +-Z faces
+    d_y = _planar(sx, sz, "_y")   # pattern in XZ, shows on +-Y faces
+    d_x = _planar(sy, sz, "_x")   # pattern in YZ, shows on +-X faces
+
+    tco = _new("ShaderNodeTexCoord", "hexf_nrm_src")
+    n_abs = _vm('ABSOLUTE', "hexf_nrm_abs")
+    node_tree.links.new(tco.outputs["Normal"], n_abs.inputs[0])
+    n_p2 = _vm('MULTIPLY', "hexf_nrm_p2")
+    node_tree.links.new(n_abs.outputs["Vector"], n_p2.inputs[0])
+    node_tree.links.new(n_abs.outputs["Vector"], n_p2.inputs[1])
+    n_p4 = _vm('MULTIPLY', "hexf_nrm_p4")
+    node_tree.links.new(n_p2.outputs["Vector"], n_p4.inputs[0])
+    node_tree.links.new(n_p2.outputs["Vector"], n_p4.inputs[1])
+    n_wsep = _new("ShaderNodeSeparateXYZ", "hexf_w_sep")
+    node_tree.links.new(n_p4.outputs["Vector"], n_wsep.inputs[0])
+
+    w_add1 = _ma('ADD', "hexf_w_add1")
+    node_tree.links.new(n_wsep.outputs["X"], w_add1.inputs[0])
+    node_tree.links.new(n_wsep.outputs["Y"], w_add1.inputs[1])
+    w_sum = _ma('ADD', "hexf_w_sum")
+    node_tree.links.new(w_add1.outputs["Value"], w_sum.inputs[0])
+    node_tree.links.new(n_wsep.outputs["Z"], w_sum.inputs[1])
+
+    bl_x = _ma('MULTIPLY', "hexf_bl_x")
+    node_tree.links.new(d_x, bl_x.inputs[0])
+    node_tree.links.new(n_wsep.outputs["X"], bl_x.inputs[1])
+    bl_y = _ma('MULTIPLY', "hexf_bl_y")
+    node_tree.links.new(d_y, bl_y.inputs[0])
+    node_tree.links.new(n_wsep.outputs["Y"], bl_y.inputs[1])
+    bl_z = _ma('MULTIPLY', "hexf_bl_z")
+    node_tree.links.new(d_z, bl_z.inputs[0])
+    node_tree.links.new(n_wsep.outputs["Z"], bl_z.inputs[1])
+
+    bl_a1 = _ma('ADD', "hexf_bl_add1")
+    node_tree.links.new(bl_x.outputs["Value"], bl_a1.inputs[0])
+    node_tree.links.new(bl_y.outputs["Value"], bl_a1.inputs[1])
+    bl_a2 = _ma('ADD', "hexf_bl_add2")
+    node_tree.links.new(bl_a1.outputs["Value"], bl_a2.inputs[0])
+    node_tree.links.new(bl_z.outputs["Value"], bl_a2.inputs[1])
+    bl_out = _ma('DIVIDE', "hexf_bl_out")
+    node_tree.links.new(bl_a2.outputs["Value"], bl_out.inputs[0])
+    node_tree.links.new(w_sum.outputs["Value"], bl_out.inputs[1])
+    return bl_out.outputs["Value"]
+
+
 def _build_procedural_node(node_tree, layer, uv_map, x, y, coord_override=None,
                            return_fac=False):
     """
@@ -1517,35 +1732,18 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y, coord_override=None,
         return _result_socket(mix_main), None
 
     elif pt == 'HEX_GRID':
-        # Honeycomb = Voronoi(DISTANCE_TO_EDGE) thresholded.
-        # DISTANCE_TO_EDGE returns 0 right on a cell boundary and rises
-        # toward each cell's centre, so a Map Range that promotes the
-        # low-distance band gives us the grid lines.
-        # NOTE: true regular hexagons need a custom UV transform; with
-        # proc_randomness=0 the Voronoi cells form a passable honeycomb,
-        # higher values give Voronoi-style irregular cells.
+        # True hexagonal honeycomb via the math dual-grid construction
+        # (see _build_hex_grid_field). The field has Voronoi-DTE-like
+        # semantics (0 on a cell boundary rising to 0.5 at the centre)
+        # so the Map Range edge-width windows below stay unchanged.
         #
         # Same Mix-topology trick as STRIPES: the binary fac defeats a
         # 3-stop ColorRamp, so we build dedicated Mix nodes instead.
         # When use_proc_color3 is on, proc_color3_position controls how
         # much of the edge band is the inner "core" colour.
-        vor = node_tree.nodes.new("ShaderNodeTexVoronoi")
-        try:
-            vor.feature = 'DISTANCE_TO_EDGE'
-        except Exception:
-            pass
-        try:
-            vor.voronoi_dimensions = '3D'
-        except Exception:
-            pass
-        vor.inputs["Scale"].default_value      = layer.proc_scale
-        if "Randomness" in vor.inputs:
-            vor.inputs["Randomness"].default_value = layer.proc_randomness
-        _set_voronoi_fractal_inputs(vor, layer)
-        vor.name = f"{TLM_PREFIX}proc_tex_{_next_id()}"
-        vor.location = (x - 100, y)
-        _tag(vor, layer.name, "proc_tex")
-        node_tree.links.new(vec_out, vor.inputs["Vector"])
+        dist_out = _build_hex_grid_field(
+            node_tree, layer, vec_out, x, y,
+            lambda role: f"{TLM_PREFIX}proc_{role}_{_next_id()}")
 
         edge_w = layer.proc_hex_edge_width
         mr = node_tree.nodes.new("ShaderNodeMapRange")
@@ -1559,7 +1757,7 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y, coord_override=None,
         mr.location = (x + 50, y)
         mr.name = f"{TLM_PREFIX}proc_hex_mr_{_next_id()}"
         _tag(mr, layer.name, "proc_hex_mr")
-        node_tree.links.new(vor.outputs["Distance"], mr.inputs["Value"])
+        node_tree.links.new(dist_out, mr.inputs["Value"])
 
         if getattr(layer, 'use_proc_color3', False):
             core_frac = max(0.001, layer.proc_color3_position)
@@ -1575,7 +1773,7 @@ def _build_procedural_node(node_tree, layer, uv_map, x, y, coord_override=None,
             mr_inner.location = (x + 50, y - 100)
             mr_inner.name = f"{TLM_PREFIX}proc_hex_mri_{_next_id()}"
             _tag(mr_inner, layer.name, "proc_hex_mr_inner")
-            node_tree.links.new(vor.outputs["Distance"], mr_inner.inputs["Value"])
+            node_tree.links.new(dist_out, mr_inner.inputs["Value"])
 
             # mix_inner: A=color2 (halo), B=color3 (core), factor=inner_fac
             mix_inner = node_tree.nodes.new("ShaderNodeMix")
@@ -2422,24 +2620,11 @@ def _build_proc_fac_node(node_tree, layer, name_suffix, x, y, uv_map="UVMap"):
         return mr.outputs["Result"]
 
     elif pt == 'HEX_GRID':
-        # Mirror of the HEX_GRID path in _build_procedural_node.
-        vor = node_tree.nodes.new("ShaderNodeTexVoronoi")
-        try:
-            vor.feature = 'DISTANCE_TO_EDGE'
-        except Exception:
-            pass
-        try:
-            vor.voronoi_dimensions = '3D'
-        except Exception:
-            pass
-        vor.name = f"{TLM_PREFIX}pfac_hex_vor_{name_suffix}"
-        vor.location = (x - 100, y)
-        vor.inputs["Scale"].default_value = layer.proc_scale
-        if "Randomness" in vor.inputs:
-            vor.inputs["Randomness"].default_value = layer.proc_randomness
-        _set_voronoi_fractal_inputs(vor, layer)
-        _tag(vor, layer.name, "proc_tex")
-        node_tree.links.new(vec_out, vor.inputs["Vector"])
+        # Mirror of the HEX_GRID path in _build_procedural_node:
+        # true hexagons from the shared math dual-grid field.
+        dist_out = _build_hex_grid_field(
+            node_tree, layer, vec_out, x, y,
+            lambda role: f"{TLM_PREFIX}pfac_{role}_{name_suffix}")
 
         mr = node_tree.nodes.new("ShaderNodeMapRange")
         mr.interpolation_type = 'SMOOTHSTEP'
@@ -2452,7 +2637,7 @@ def _build_proc_fac_node(node_tree, layer, name_suffix, x, y, uv_map="UVMap"):
         mr.name = f"{TLM_PREFIX}pfac_hex_mr_{name_suffix}"
         mr.location = (x + 50, y)
         _tag(mr, layer.name, "proc_hex_mr")
-        node_tree.links.new(vor.outputs["Distance"], mr.inputs["Value"])
+        node_tree.links.new(dist_out, mr.inputs["Value"])
         return mr.outputs["Result"]
 
     elif pt == 'GRADIENT':

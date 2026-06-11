@@ -268,6 +268,18 @@ def _hot_proc_tex_input(node_tree, layer, prop_name):
         for mn in _find_all_tagged(node_tree, layer.name, "marble_noise"):
             if "Distortion" in mn.inputs:
                 mn.inputs["Distortion"].default_value = val * 0.5
+    # HEX_GRID: the math chain has no "Randomness"/"Detail" input on the
+    # proc_tex (Scale) node. Randomness drives the lattice-wobble
+    # MULTIPLY_ADD factor, detail the wobble noise (mirrors marble_noise).
+    if prop_name == "proc_randomness":
+        k = 0.45 * val
+        for wn in _find_all_tagged(node_tree, layer.name, "hex_wobble"):
+            if len(wn.inputs) > 1:
+                wn.inputs[1].default_value = (k, k, k)
+    if prop_name == "proc_detail":
+        for hn in _find_all_tagged(node_tree, layer.name, "hex_noise"):
+            if "Detail" in hn.inputs:
+                hn.inputs["Detail"].default_value = val
     return True
 
 

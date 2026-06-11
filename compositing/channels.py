@@ -72,6 +72,7 @@ __all__ = [
     '_build_height_stack',
     '_layer_contributes_to',
     '_channel_used',
+    'stack_has_transmission',
     # Lookup tables / constants that live at module level
     '_BASE_LAYER_WIDTH',
     '_PROC_LAYER_WIDTH',
@@ -112,7 +113,7 @@ _PROC_LAYER_WIDTH = {
     'CRACKS':      1120,
     'GABOR':       1120,
     'STRIPES':     1180,
-    'HEX_GRID':    1180,
+    'HEX_GRID':    3000,
     'RIDGED':      1260,
     'MARBLE':      1360,
 }
@@ -1782,5 +1783,20 @@ def _channel_used(layers, flag_attr):
         # Unknown flag — fall back to legacy direct attribute check.
         return any(getattr(l, flag_attr, False) for l in layers)
     return any(_layer_contributes_to(l, channel_id) for l in layers)
+
+
+def stack_has_transmission(layers):
+    """True when any VISIBLE layer drives the transmission channel —
+    via the use_transmission flag or output_channel routing.
+
+    Used to gate the material-level BSDF IOR (full build + hot-update
+    + panel hint): Principled's IOR also raises opaque dielectric
+    Fresnel (F0), so applying a high IOR to a stack with no actual
+    transmission washes the surface toward white. The IOR must stay
+    at the 1.45 default until the stack transmits.
+    """
+    return any(
+        getattr(l, 'visible', True) and _layer_contributes_to(l, 'transmission')
+        for l in layers)
 
 

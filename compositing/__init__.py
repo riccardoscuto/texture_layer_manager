@@ -1184,13 +1184,19 @@ def rebuild_node_tree(material):
         if mat_out:
             mat_out.location = (output_x, shader_y)
 
-        # Apply material-level BSDF IOR (default 1.45 glass; ice = 1.31,
-        # water = 1.33, diamond = 2.42). Only set when the IOR socket
-        # exists and isn't user-linked — preserve any manual wiring.
+        # Apply material-level BSDF IOR (ice = 1.31, water = 1.33,
+        # diamond = 2.42) — but only when the stack actually transmits.
+        # Principled's IOR also drives opaque dielectric Fresnel (F0),
+        # so a high IOR on an opaque stack washes the surface white;
+        # keep the BSDF at its 1.45 default until transmission exists.
+        # Only set when the socket exists and isn't user-linked.
         try:
             ior_in = bsdf.inputs.get("IOR")
             if ior_in is not None and not ior_in.is_linked:
-                ior_in.default_value = getattr(tlm, 'bsdf_ior', 1.45)
+                if stack_has_transmission(expanded):
+                    ior_in.default_value = getattr(tlm, 'bsdf_ior', 1.45)
+                else:
+                    ior_in.default_value = 1.45
         except (AttributeError, KeyError):
             pass
 

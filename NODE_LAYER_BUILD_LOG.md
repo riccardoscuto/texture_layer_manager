@@ -1123,38 +1123,54 @@ Uso ideale:
 
 ### 9.15 Hex Grid
 
+**Dal v0.5.10 genera VERI esagoni regolari** (prima era Voronoi DTE: a
+randomness 0 dava una griglia di quadrati, non honeycomb; a randomness
+alta celle organiche). Catena math dual-grid in `_build_hex_grid_field`
+(procedurals.py), nessuna texture Voronoi.
+
 Nodi:
 
 ```text
 Texture Coordinate
   -> Mapping
-  -> Voronoi Texture Distance To Edge
-  -> Map Range Smoothstep
+  -> VectorMath SCALE (proc_scale, tag proc_tex)
+  -> [wobble 3D] Noise (tag hex_noise, Scale 1.4) -0.5 -> MULTIPLY_ADD (tag hex_wobble)
+       uv' = uv + (noise - 0.5) * 0.45 * randomness
+  -> Separate XYZ -> proiezioni:
+       coords UV   -> 1 solo campo planare (X,Y)
+       coords 3D   -> TRIPLANAR: 3 campi (XY / XZ / YZ) blendati con
+                      peso |Normal|^4 (object space, TexCoord.Normal),
+                      blend dei campi DISTANZA prima del Map Range
+  -> dual grid:  a = fract(uv'/R)*R - H ;  b = fract((uv'-H)/R)*R - H
+       R = (1, sqrt3, 1) ;  H = (0.5, sqrt3/2, 0)
+  -> g = a se dot(a,a) < dot(b,b) altrimenti b   (LESS_THAN + lerp vettoriale)
+  -> dist = 0.5 - max(dot(|g|, (0.5, sqrt3/2)), |g|.x)
+       # 0 sul bordo cella, 0.5 al centro -> stessa semantica del vecchio DTE
+  -> Map Range Smoothstep (tag proc_hex_mr, finestra = Edge Width)
   -> Mix Color1/Color2
 ```
 
-Con Color 3 attivo:
-
-```text
-Distance to edge
-  -> Map Range edge
-  -> Map Range inner edge
-  -> Mix Color2/Color3
-  -> Mix Color1/inner result
-```
+Con Color 3 attivo: identico a prima (Map Range inner `proc_hex_mr_inner`
++ doppio Mix). Path maschera: stesso campo condiviso (prefisso `pfac_`).
 
 Input:
 
-- Scale
-- Randomness
-- Detail / Roughness / Lacunarity se supportati
-- Edge Width
+- Scale -> input "Scale" del VectorMath SCALE (hot-update generico via tag proc_tex)
+- Randomness -> ampiezza del wobble: 0 = esagoni perfetti, 1 = celle organiche
+  (hot-update dedicato sul MULTIPLY_ADD tag hex_wobble, k = 0.35*val)
+- Detail -> Detail del Noise di wobble (hot-update su tag hex_noise)
+- Edge Width -> finestra Map Range, invariata (campo 0..0.5 come il DTE)
 - Color3 Position come core della linea
 
-Nota:
+Note:
 
-- con Randomness 0 produce un look honeycomb piu' regolare;
-- con Randomness alta diventa piu' Voronoi/cellulare.
+- FRACTION (floor) e non MODULO (trunc): tiling corretto anche con coordinate negative.
+- Il tiling esagonale e' 2D per natura -> con coordinate 3D il builder fa
+  TRIPLANAR automatico (una proiezione fissa leggerebbe come griglia di
+  quadrati sulle superfici frontali/laterali, v0.5.10 bug). Con coords UV
+  un solo campo planare esatto. Cuciture morbide brevi ai bordi a 45 gradi.
+- Per il look "celle organiche irregolari" stile Voronoi restano i proc
+  VORONOI e CRACKS (il vecchio look di Hex Grid era quello).
 
 Uso ideale:
 

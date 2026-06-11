@@ -639,7 +639,19 @@ def _on_bsdf_ior_change(material_props, context):
     ior_in = bsdf.inputs.get("IOR")
     if ior_in is None or ior_in.is_linked:
         return
-    ior_in.default_value = material_props.bsdf_ior
+    # Gate on transmission: Principled's IOR also drives opaque dielectric
+    # Fresnel (F0), so without transmission in the stack a high IOR would
+    # wash the surface white. Keep the BSDF at default until it matters.
+    try:
+        from .compositing.channels import stack_has_transmission
+        has_trans = stack_has_transmission(material_props.layers)
+    except Exception:
+        has_trans = any(
+            getattr(l, 'visible', True) and (
+                getattr(l, 'use_transmission', False)
+                or getattr(l, 'output_channel', 'BASE_COLOR') == 'TRANSMISSION')
+            for l in material_props.layers)
+    ior_in.default_value = material_props.bsdf_ior if has_trans else 1.45
 
 
 def _on_proc_color_stop_change(stop, context):
@@ -1818,7 +1830,7 @@ class TLM_LayerItem(PropertyGroup):
             ('FRESNEL',     "Fresnel",     "View-angle gradient: fac=0 facing camera, fac=1 at grazing silhouette. IOR via proc_fresnel_ior. Pair Color1/Color2 with contrast+ramp_center for iridescent / oil-slick / bubble / hologram looks.", 16),
             ('GABOR',       "Gabor",       "Anisotropic Gabor noise — directional streaks for brushed metal, fibers, woven fabric, scratches", 12),
             ('GRADIENT',    "Gradient",    "Linear, radial, quadratic or spherical gradient",      3),
-            ('HEX_GRID',    "Hex Grid",    "Honeycomb / cell grid using Voronoi distance-to-edge", 11),
+            ('HEX_GRID',    "Hex Grid",    "True hexagonal honeycomb grid - raise Randomness to melt it into organic cells", 11),
             ('MAGIC',       "Magic",       "Kaleidoscopic colored swirl pattern",                  8),
             ('MARBLE',      "Marble",      "Wave bands distorted by noise — marble/veined stone", 6),
             ('MUSGRAVE',    "Musgrave",    "Fractal noise (Multifractal, Ridged, etc.)",           4),
