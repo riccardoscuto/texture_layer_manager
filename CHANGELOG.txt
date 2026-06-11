@@ -1,0 +1,20 @@
+TEXTURE LAYER MANAGER - CHANGELOG
+==================================
+
+1.0.0 (June 2026) - first public release
+- Six layer types: Paint, Fill, Procedural, Adjustment, Group,
+  Reference.
+- 24 procedural patterns, all parametric, generated in 3D space
+  (no UV unwrap required) with optional UV / triplanar projection.
+- Per-channel output routing: Base Color, Roughness, Metallic,
+  Emission, Transmission, Alpha - plus secondary PBR channels
+  (normal, bump) per layer.
+- Per-channel blend modes (19 colour modes; 41 math operations on
+  the Alpha channel).
+- Mask pipeline: 11 sources (geometry, light, patterns), two-source
+  combine, falloff refinement.
+- Material extras: IOR, volume absorption / scatter, real geometric
+  displacement, alpha pipeline, keyframable layer opacity.
+- Live hot updates: sliders edit the node graph in place, no rebuild.
+- 13 included preset materials (.tlm), loadable and fully editable.
+- Bake / export of composited channels.

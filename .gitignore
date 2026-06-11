@@ -26,22 +26,30 @@ Thumbs.db
 *.blend3
 *.blend@
 
-# ── Claude Code workspace ─────────────────────────────────────────────────
-# `.claude/worktrees/` is where Claude Code spins up scratch git
-# worktrees for parallel sessions; `settings.local.json` is per-user
-# local config. Neither belongs in the shared repo.
+# ── Local tool workspaces / per-user config ───────────────────────────────
 .claude/
 
-# ── User-local material presets ───────────────────────────────────────────
-# The shipped presets (Alien Crystal, Brushed Gold, Lava Rock, Rusted
-# Iron, Weathered Marble, copper test) are tracked. Anything else under
-# presets/ is treated as user scratch — uncomment and adjust the
-# negation list if you want to ship additional presets.
-# Currently: track ONLY the explicit allowlist below.
+# ── Release build output ───────────────────────────────────────────────────
+_launch/
+
+# ── Dev-only scratch kept out of version control ───────────────────────────
+_archived_presets/
+PROGRAM_FUNCTIONS_TECHNICAL_LOG.md
+
+# ── Material presets ────────────────────────────────────────────────────────
+# The 13 presets shipped with the product are tracked via the allowlist
+# below. Anything else under presets/ is user scratch.
 presets/*.tlm
-!presets/Alien\ Crystal.tlm
-!presets/Brushed\ Gold.tlm
-!presets/Lava\ Rock.tlm
-!presets/Rusted\ Iron.tlm
-!presets/Weathered\ Marble.tlm
-!presets/copper\ test.tlm
+!presets/Anime.tlm
+!presets/Bronze\ Verdigris\ Patina.tlm
+!presets/Burn\ Dissolve.tlm
+!presets/Coral\ Rock.tlm
+!presets/Galaxy\ Marble.tlm
+!presets/Holo\ Card.tlm
+!presets/Inverted\ Checker.tlm
+!presets/Mars.tlm
+!presets/Mirror.tlm
+!presets/Oil\ Slick.tlm
+!presets/Plasma\ Core.tlm
+!presets/Watercolor.tlm
+!presets/Wireframe.tlm

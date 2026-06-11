@@ -1,9 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(python -c \"import py_compile; py_compile.compile\\(''compositing.py'', doraise=True\\); py_compile.compile\\(''properties.py'', doraise=True\\); py_compile.compile\\(''operators.py'', doraise=True\\); py_compile.compile\\(''panels.py'', doraise=True\\); print\\(''All files compile OK''\\)\")",
-      "WebSearch",
-      "Bash(python -c \"import py_compile; py_compile.compile\\(''compositing.py'', doraise=True\\); py_compile.compile\\(''properties.py'', doraise=True\\); print\\(''OK''\\)\")"
-    ]
-  }
-}
